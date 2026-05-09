@@ -55,7 +55,7 @@ export const GameCanvas: React.FC = () => {
   const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
   const [isPlacing, setIsPlacing] = useState(false);
   // Placeholders referenced until Tasks 5–9 wire up interactions:
-  void armies; void setArmies; void setCurrentStrategicHex; void setIsPlacing;
+  void armies; void setArmies; void setCurrentStrategicHex;
 
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
@@ -283,7 +283,7 @@ export const GameCanvas: React.FC = () => {
 
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#02040a', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: isScanning ? 'crosshair' : 'default' }} />
+      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: (isScanning || isPlacing) ? 'crosshair' : 'default' }} />
       
       {/* HUD - Professional Glassmorphism */}
       <div style={{
@@ -306,14 +306,50 @@ export const GameCanvas: React.FC = () => {
           </div>
         </div>
 
-        <button 
-          onClick={() => setIsScanning(!isScanning)}
+        <button
+          onClick={() => {
+            setIsScanning(s => {
+              const next = !s;
+              if (next) setIsPlacing(false);
+              return next;
+            });
+          }}
           style={{ width: '100%', padding: '18px', background: isScanning ? '#ef4444' : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '13px', fontWeight: '900', cursor: 'pointer', marginBottom: '12px', transition: '0.2s', boxShadow: '0 8px 24px rgba(59, 130, 246, 0.3)' }}
         >
           {isScanning ? 'CANCEL SCAN' : '🎯 INITIATE TACTICAL DIVE'}
         </button>
 
-        <button 
+        <button
+          onClick={() => {
+            if (viewMode !== 'TACTICAL') return;
+            setIsPlacing(p => {
+              const next = !p;
+              if (next) setIsScanning(false);
+              return next;
+            });
+          }}
+          disabled={viewMode !== 'TACTICAL'}
+          title={viewMode !== 'TACTICAL' ? 'Dive into a tactical view first' : ''}
+          style={{
+            width: '100%',
+            padding: '14px',
+            background: viewMode !== 'TACTICAL'
+              ? 'rgba(255,255,255,0.04)'
+              : isPlacing ? '#ef4444' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+            color: viewMode !== 'TACTICAL' ? '#475569' : 'white',
+            border: 'none',
+            borderRadius: '12px',
+            fontSize: '12px',
+            fontWeight: 800,
+            cursor: viewMode !== 'TACTICAL' ? 'not-allowed' : 'pointer',
+            marginBottom: '12px',
+            transition: '0.2s',
+          }}
+        >
+          {isPlacing ? 'STOP PLACING' : 'PLACE UNIT'}
+        </button>
+
+        <button
           onClick={() => setShowGrid(!showGrid)}
           style={{ width: '100%', padding: '12px', background: showGrid ? 'rgba(59, 130, 246, 0.1)' : '#10b981', color: showGrid ? '#60a5fa' : 'white', border: showGrid ? '1px solid rgba(59, 130, 246, 0.5)' : 'none', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
         >
