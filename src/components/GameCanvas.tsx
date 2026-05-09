@@ -411,11 +411,22 @@ export const GameCanvas: React.FC = () => {
         </button>
 
         <button 
-          onClick={() => { setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: 40.0 })); setViewMode('STRATEGIC'); }}
+          onClick={() => {
+            setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: 40.0 }));
+            setViewMode('STRATEGIC');
+            setCurrentStrategicHex(null);
+            setIsPlacing(false);
+          }}
           style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '32px' }}
         >RETURN TO STRATEGIC OVERVIEW</button>
 
-        <button onClick={() => generateWorldData()} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
+        <button onClick={() => {
+          noiseRef.current = null;
+          setArmies(new Map());
+          setCurrentStrategicHex(null);
+          setIsPlacing(false);
+          generateWorldData();
+        }} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
           REGENERATE ECOSYSTEM
         </button>
       </div>
