@@ -39,7 +39,7 @@ export class HexUtils {
   static hexRound(fractional: Hex): Hex {
     let q = Math.round(fractional.q);
     let r = Math.round(fractional.r);
-    let s = Math.round(-fractional.q - fractional.r);
+    const s = Math.round(-fractional.q - fractional.r);
 
     const qDiff = Math.abs(q - fractional.q);
     const rDiff = Math.abs(r - fractional.r);

@@ -125,13 +125,13 @@ export const GameCanvas: React.FC = () => {
     // 3. Flowing River Pass
     const riverCount = viewMode === 'TACTICAL' ? 4 : 12;
     const starts = Array.from(smoothedMap.entries())
-      .filter(([_, t]) => t === 'MOUNTAIN' || t === 'SNOW' || t === 'HILL')
+      .filter(([, t]) => t === 'MOUNTAIN' || t === 'SNOW' || t === 'HILL')
       .map(([k]) => HexUtils.fromKey(k));
 
     for (let i = 0; i < riverCount; i++) {
       if (starts.length === 0) break;
       let curr = starts[Math.floor(Math.random() * starts.length)];
-      let visited = new Set<string>();
+      const visited = new Set<string>();
       
       for (let s = 0; s < 300; s++) {
         const k = HexUtils.key(curr);
@@ -299,6 +299,7 @@ export const GameCanvas: React.FC = () => {
         world.scale.set(newScale); world.x -= (mouseLocal.x * newScale - mouseLocal.x * oldScale); world.y -= (mouseLocal.y * newScale - mouseLocal.y * oldScale); zoom.current = newScale;
       }, { passive: false });
 
+      // eslint-disable-next-line react-hooks/immutability
       app.ticker.add(() => updateHighlights());
       generateWorldData();
     };
@@ -306,6 +307,8 @@ export const GameCanvas: React.FC = () => {
     return () => { isMounted = false; app.destroy(true, { children: true }); };
   }, []);
 
+  // Mirror state into refs so the long-lived PIXI handlers (registered once at mount) read current values without re-registration.
+  /* eslint-disable react-hooks/immutability */
   const isScanningRef = useRef(false);
   const noiseOffsetRef = useRef({ q: 0, r: 0 });
   useEffect(() => { isScanningRef.current = isScanning; }, [isScanning]);
@@ -314,6 +317,7 @@ export const GameCanvas: React.FC = () => {
   const currentStrategicHexRef = useRef<Hex | null>(null);
   useEffect(() => { isPlacingRef.current = isPlacing; }, [isPlacing]);
   useEffect(() => { currentStrategicHexRef.current = currentStrategicHex; }, [currentStrategicHex]);
+  /* eslint-enable react-hooks/immutability */
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
   useEffect(() => { generateWorldData(); }, [generateWorldData]);
