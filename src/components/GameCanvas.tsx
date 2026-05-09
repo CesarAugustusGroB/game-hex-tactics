@@ -31,6 +31,8 @@ export const GameCanvas: React.FC = () => {
   const terrainGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   
+  const noiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
+
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
   const zoom = useRef(0.5);
@@ -53,7 +55,8 @@ export const GameCanvas: React.FC = () => {
   // --- Smooth Tactical Generator ---
   const generateWorldData = useCallback(() => {
     const newMap = new Map<string, string>();
-    const noise = createNoise2D();
+    if (!noiseRef.current) noiseRef.current = createNoise2D();
+    const noise = noiseRef.current;
     const elevationCache = new Map<string, number>();
 
     // 1. Smooth Elevation Sampling
