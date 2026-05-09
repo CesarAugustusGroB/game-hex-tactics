@@ -103,8 +103,8 @@ export const GameCanvas: React.FC = () => {
       const neighborTypes = neighbors.map(n => newMap.get(HexUtils.key(n)));
       
       // If isolated, take majority neighbor type
-      const counts = neighborTypes.reduce((acc, t) => { acc[t!] = (acc[t!] || 0) + 1; return acc; }, {} as any);
-      const majority = Object.entries(counts).sort((a:any, b:any) => b[1] - a[1])[0];
+      const counts = neighborTypes.reduce<Record<string, number>>((acc, t) => { acc[t!] = (acc[t!] || 0) + 1; return acc; }, {});
+      const majority = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
       
       if (majority && majority[1] > 3) smoothedMap.set(key, majority[0] as string);
       else smoothedMap.set(key, type);
@@ -157,8 +157,8 @@ export const GameCanvas: React.FC = () => {
       const tDef = TERRAINS[item.type] || TERRAINS.SEA;
       const h = tDef.height;
       const s = HexUtils.size;
-      const top = [];
-      const base = [];
+      const top: { x: number; y: number }[] = [];
+      const base: { x: number; y: number }[] = [];
       for (let i = 0; i < 6; i++) {
         const r = Math.PI / 180 * (60 * i - 30);
         top.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) - h });
