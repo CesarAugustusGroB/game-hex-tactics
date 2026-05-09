@@ -198,7 +198,8 @@ export const GameCanvas: React.FC = () => {
     const c = unitsGfx.current;
     c.removeChildren();
     const armyTex = armyTextureRef.current;
-    if (!armyTex) return;
+    const unitTex = unitTextureRef.current;
+    if (!armyTex || !unitTex) return;
 
     if (viewMode === 'STRATEGIC') {
       armies.forEach((_units, key) => {
@@ -214,8 +215,25 @@ export const GameCanvas: React.FC = () => {
         sprite.height = 40;
         c.addChild(sprite);
       });
+      return;
     }
-  }, [armies, viewMode, gridData]);
+
+    // TACTICAL
+    if (!currentStrategicHex) return;
+    const units = armies.get(HexUtils.key(currentStrategicHex)) ?? [];
+    units.forEach(u => {
+      const tile = gridData.find(d => d.hex.q === u.tacticalHex.q && d.hex.r === u.tacticalHex.r);
+      if (!tile) return;
+      const pos = HexUtils.hexToPixel(u.tacticalHex);
+      const sprite = new PIXI.Sprite(unitTex);
+      sprite.anchor.set(0.5, 1);
+      sprite.x = pos.x;
+      sprite.y = pos.y - TERRAINS[tile.type].height - 4;
+      sprite.width = 32;
+      sprite.height = 32;
+      c.addChild(sprite);
+    });
+  }, [armies, viewMode, gridData, currentStrategicHex]);
 
   useEffect(() => {
     let isMounted = true;
