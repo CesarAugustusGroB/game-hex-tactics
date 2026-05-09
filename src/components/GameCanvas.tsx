@@ -11,6 +11,13 @@ interface TerrainDef {
   height: number;
 }
 
+interface Unit {
+  id: string;
+  tacticalHex: Hex;
+}
+
+type Armies = Map<string, Unit[]>;
+
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2 },
   SEA: { color: 0x2a3a4a, label: 'Shallows', height: 5 },
@@ -44,7 +51,12 @@ export const GameCanvas: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [viewMode, setViewMode] = useState<'STRATEGIC' | 'TACTICAL'>('STRATEGIC');
-  
+  const [armies, setArmies] = useState<Armies>(new Map());
+  const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
+  const [isPlacing, setIsPlacing] = useState(false);
+  // Placeholders referenced until Tasks 5–9 wire up interactions:
+  void armies; void setArmies; void setCurrentStrategicHex; void setIsPlacing;
+
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -245,6 +257,10 @@ export const GameCanvas: React.FC = () => {
   const noiseOffsetRef = useRef({ q: 0, r: 0 });
   useEffect(() => { isScanningRef.current = isScanning; }, [isScanning]);
   useEffect(() => { noiseOffsetRef.current = genSettings.noiseOffset; }, [genSettings.noiseOffset]);
+  const isPlacingRef = useRef(false);
+  const currentStrategicHexRef = useRef<Hex | null>(null);
+  useEffect(() => { isPlacingRef.current = isPlacing; }, [isPlacing]);
+  useEffect(() => { currentStrategicHexRef.current = currentStrategicHex; }, [currentStrategicHex]);
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { generateWorldData(); }, [generateWorldData]);
 
