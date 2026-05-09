@@ -32,6 +32,8 @@ export const GameCanvas: React.FC = () => {
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   
   const noiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
+  const armyTextureRef = useRef<PIXI.Texture | null>(null);
+  const unitTextureRef = useRef<PIXI.Texture | null>(null);
 
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
@@ -187,7 +189,14 @@ export const GameCanvas: React.FC = () => {
     const app = new PIXI.Application();
     const start = async () => {
       await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
-      if (!isMounted || !containerRef.current) return;
+      const textures = await PIXI.Assets.load<PIXI.Texture>([
+        '/units/army.svg',
+        '/units/unit.svg',
+      ]);
+      if (!isMounted) return;
+      armyTextureRef.current = textures['/units/army.svg'];
+      unitTextureRef.current = textures['/units/unit.svg'];
+      if (!containerRef.current) return;
       containerRef.current.appendChild(app.canvas);
       appRef.current = app;
       const world = worldRef.current;
