@@ -55,7 +55,7 @@ export const GameCanvas: React.FC = () => {
   const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
   const [isPlacing, setIsPlacing] = useState(false);
   // Placeholders referenced until Tasks 5–9 wire up interactions:
-  void armies; void setArmies; void setCurrentStrategicHex;
+  void armies;
 
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
@@ -235,8 +235,19 @@ export const GameCanvas: React.FC = () => {
             setSettings(s => ({ ...s, noiseOffset: { q: targetOffsetQ, r: targetOffsetR }, resolution: s.resolution * 4.5 }));
             setViewMode('TACTICAL');
             setIsScanning(false);
+            setCurrentStrategicHex(hex);
             gsap.fromTo(world.scale, { x: 0.2, y: 0.2 }, { x: 0.8, y: 0.8, duration: 0.8, ease: 'power2.out' });
           }});
+        }
+        else if (isPlacingRef.current && currentStrategicHexRef.current) {
+          const strategicKey = HexUtils.key(currentStrategicHexRef.current);
+          const newUnit: Unit = { id: crypto.randomUUID(), tacticalHex: hex };
+          setArmies(prev => {
+            const next = new Map(prev);
+            const existing = next.get(strategicKey) ?? [];
+            next.set(strategicKey, [...existing, newUnit]);
+            return next;
+          });
         }
       });
 
