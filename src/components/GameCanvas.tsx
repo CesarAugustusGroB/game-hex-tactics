@@ -37,6 +37,7 @@ export const GameCanvas: React.FC = () => {
   const worldRef = useRef<PIXI.Container>(new PIXI.Container());
   const terrainGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
+  const unitsGfx = useRef<PIXI.Container>(new PIXI.Container());
   
   const noiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
   const armyTextureRef = useRef<PIXI.Texture | null>(null);
@@ -54,9 +55,6 @@ export const GameCanvas: React.FC = () => {
   const [armies, setArmies] = useState<Armies>(new Map());
   const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
   const [isPlacing, setIsPlacing] = useState(false);
-  // Placeholders referenced until Tasks 5–9 wire up interactions:
-  void armies;
-
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -196,6 +194,29 @@ export const GameCanvas: React.FC = () => {
     });
   }, [gridData]);
 
+  const drawUnits = useCallback(() => {
+    const c = unitsGfx.current;
+    c.removeChildren();
+    const armyTex = armyTextureRef.current;
+    if (!armyTex) return;
+
+    if (viewMode === 'STRATEGIC') {
+      armies.forEach((_units, key) => {
+        const strategicHex = HexUtils.fromKey(key);
+        const tile = gridData.find(d => d.hex.q === strategicHex.q && d.hex.r === strategicHex.r);
+        if (!tile) return;
+        const pos = HexUtils.hexToPixel(strategicHex);
+        const sprite = new PIXI.Sprite(armyTex);
+        sprite.anchor.set(0.5, 1);
+        sprite.x = pos.x;
+        sprite.y = pos.y - TERRAINS[tile.type].height - 6;
+        sprite.width = 40;
+        sprite.height = 40;
+        c.addChild(sprite);
+      });
+    }
+  }, [armies, viewMode, gridData]);
+
   useEffect(() => {
     let isMounted = true;
     const app = new PIXI.Application();
@@ -213,7 +234,10 @@ export const GameCanvas: React.FC = () => {
       appRef.current = app;
       const world = worldRef.current;
       world.x = app.screen.width / 2; world.y = app.screen.height / 2; world.scale.set(zoom.current);
-      app.stage.addChild(world); world.addChild(terrainGfx.current); world.addChild(highlightGfx.current);
+      app.stage.addChild(world);
+      world.addChild(terrainGfx.current);
+      world.addChild(unitsGfx.current);
+      world.addChild(highlightGfx.current);
       
       app.stage.eventMode = 'static'; app.stage.hitArea = app.screen;
       app.stage.on('pointerdown', (e) => { isDragging.current = true; lastMousePos.current = { x: e.global.x, y: e.global.y }; });
@@ -273,6 +297,7 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { isPlacingRef.current = isPlacing; }, [isPlacing]);
   useEffect(() => { currentStrategicHexRef.current = currentStrategicHex; }, [currentStrategicHex]);
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
+  useEffect(() => { drawUnits(); }, [drawUnits]);
   useEffect(() => { generateWorldData(); }, [generateWorldData]);
 
   const updateHighlights = () => {
