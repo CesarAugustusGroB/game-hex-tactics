@@ -476,6 +476,9 @@ export const GameCanvas: React.FC = () => {
     return () => { isMounted = false; app.destroy(true, { children: true }); };
   }, []);
 
+  const lastTickHadBothTeamsRef = useRef(false);
+  const [winBanner, setWinBanner] = useState<Team | null>(null);
+
   useEffect(() => {
     if (!isBattleRunning) return;
     const id = window.setInterval(() => {
@@ -485,7 +488,19 @@ export const GameCanvas: React.FC = () => {
       setArmies(prev => {
         const units = prev.get(strategicKey) ?? [];
         if (units.length === 0) return prev;
+        const teamsBefore = new Set(units.map(u => u.team));
+        if (teamsBefore.size >= 2) lastTickHadBothTeamsRef.current = true;
         const next = simulateTick(units, groupOrdersRef.current, { damagePerTick: DAMAGE_PER_TICK });
+        const teamsAfter = new Set(next.map(u => u.team));
+        if (teamsAfter.size === 1 && lastTickHadBothTeamsRef.current) {
+          const winner = next[0]?.team ?? null;
+          if (winner) {
+            setWinBanner(winner);
+            setIsBattleRunning(false);
+            lastTickHadBothTeamsRef.current = false;
+            window.setTimeout(() => setWinBanner(null), 3000);
+          }
+        }
         const updated = new Map(prev);
         updated.set(strategicKey, next);
         return updated;
@@ -547,7 +562,29 @@ export const GameCanvas: React.FC = () => {
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#02040a', position: 'relative' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: (isScanning || inputMode !== null) ? 'crosshair' : 'default' }} />
-      
+
+      {winBanner && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          padding: '24px 48px',
+          fontSize: '28px',
+          fontWeight: 900,
+          letterSpacing: '4px',
+          color: 'white',
+          background: `linear-gradient(135deg, ${winBanner === 'red' ? '#ef4444' : '#3b82f6'} 0%, rgba(0,0,0,0.5) 100%)`,
+          border: `2px solid ${winBanner === 'red' ? '#ef4444' : '#3b82f6'}`,
+          borderRadius: '20px',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+          zIndex: 200,
+          pointerEvents: 'none',
+        }}>
+          {winBanner.toUpperCase()} VICTORY
+        </div>
+      )}
+
       {/* HUD - Professional Glassmorphism */}
       <div style={{
         position: 'absolute', top: 24, left: 24, color: '#f8fafc', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(24px)',
