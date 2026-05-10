@@ -52,7 +52,6 @@ const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${group
 
 // Used in upcoming tasks; intentionally referenced.
 void MAX_HP; void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
-void ([] as [GroupOrders?]);
 
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2 },
@@ -95,6 +94,11 @@ export const GameCanvas: React.FC = () => {
   const [inputMode, setInputMode] = useState<InputMode | null>(null);
   const isPlacing = inputMode === 'place'; // derived; keeps existing JSX expressions terse
   const [selectedTeam, setSelectedTeam] = useState<Team>('red');
+  const [selectedGroup, setSelectedGroup] = useState<GroupId>(1);
+  const [groupOrders, setGroupOrders] = useState<GroupOrders>(new Map());
+  const [isBattleRunning, setIsBattleRunning] = useState(false);
+  // Setters used in upcoming tasks; void-suppressed until then.
+  void setSelectedGroup; void setGroupOrders; void setIsBattleRunning;
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -401,9 +405,15 @@ export const GameCanvas: React.FC = () => {
   const inputModeRef = useRef<InputMode | null>(null);
   const currentStrategicHexRef = useRef<Hex | null>(null);
   const selectedTeamRef = useRef<Team>('red');
+  const selectedGroupRef = useRef<GroupId>(1);
+  const groupOrdersRef = useRef<GroupOrders>(new Map());
+  const isBattleRunningRef = useRef(false);
   useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
   useEffect(() => { currentStrategicHexRef.current = currentStrategicHex; }, [currentStrategicHex]);
   useEffect(() => { selectedTeamRef.current = selectedTeam; }, [selectedTeam]);
+  useEffect(() => { selectedGroupRef.current = selectedGroup; }, [selectedGroup]);
+  useEffect(() => { groupOrdersRef.current = groupOrders; }, [groupOrders]);
+  useEffect(() => { isBattleRunningRef.current = isBattleRunning; }, [isBattleRunning]);
   /* eslint-enable react-hooks/immutability */
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
