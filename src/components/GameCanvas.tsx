@@ -275,16 +275,62 @@ export const GameCanvas: React.FC = () => {
       const tile = gridData.find(d => d.hex.q === u.tacticalHex.q && d.hex.r === u.tacticalHex.r);
       if (!tile) return;
       const pos = HexUtils.hexToPixel(u.tacticalHex);
+      const topY = pos.y - TERRAINS[tile.type].height;
+
+      // Sprite
       const sprite = new PIXI.Sprite(unitTex);
       sprite.tint = TEAM_TINTS[u.team];
       sprite.anchor.set(0.5, 1);
       sprite.x = pos.x;
-      sprite.y = pos.y - TERRAINS[tile.type].height - 4;
+      sprite.y = topY - 4;
       sprite.width = 32;
       sprite.height = 32;
       c.addChild(sprite);
+
+      // HP bar (only when damaged)
+      if (u.hp < MAX_HP) {
+        const barW = 26;
+        const barH = 4;
+        const barX = pos.x - barW / 2;
+        const barY = topY - 40;
+        const ratio = Math.max(0, u.hp / MAX_HP);
+        const bg = new PIXI.Graphics();
+        bg.rect(barX, barY, barW, barH).fill({ color: 0x000000, alpha: 0.6 });
+        c.addChild(bg);
+        const fg = new PIXI.Graphics();
+        const r = Math.round(0xef * (1 - ratio) + 0x10 * ratio);
+        const g = Math.round(0x44 * (1 - ratio) + 0xb9 * ratio);
+        const b = Math.round(0x44 * (1 - ratio) + 0x81 * ratio);
+        const color = (r << 16) | (g << 8) | b;
+        fg.rect(barX, barY, barW * ratio, barH).fill({ color });
+        c.addChild(fg);
+      }
+
+      // Group badge
+      if (u.groupId !== null) {
+        const badge = new PIXI.Text({
+          text: String(u.groupId),
+          style: { fontSize: 10, fontWeight: '900', fill: 0xffffff, stroke: { color: 0x000000, width: 2 } },
+        });
+        badge.anchor.set(0.5);
+        badge.x = pos.x + 12;
+        badge.y = topY - 28;
+        c.addChild(badge);
+      }
     });
-  }, [armies, viewMode, gridData, currentStrategicHex]);
+
+    // Attack target indicators per group
+    groupOrders.forEach(order => {
+      if (!order.attackTarget) return;
+      const tile = gridData.find(d => d.hex.q === order.attackTarget!.q && d.hex.r === order.attackTarget!.r);
+      if (!tile) return;
+      const pos = HexUtils.hexToPixel(order.attackTarget);
+      const topY = pos.y - TERRAINS[tile.type].height;
+      const ring = new PIXI.Graphics();
+      ring.circle(pos.x, topY, 22).stroke({ width: 3, color: TEAM_TINTS[order.team], alpha: 0.85 });
+      c.addChild(ring);
+    });
+  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders]);
 
   useEffect(() => {
     let isMounted = true;
