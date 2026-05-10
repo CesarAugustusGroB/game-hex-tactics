@@ -256,11 +256,11 @@ export const GameCanvas: React.FC = () => {
       await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
       const textures = await PIXI.Assets.load<PIXI.Texture>([
         '/units/army.svg',
-        '/units/unit.svg',
+        '/units/mounted-knight.svg',
       ]);
       if (!isMounted) return;
       armyTextureRef.current = textures['/units/army.svg'];
-      unitTextureRef.current = textures['/units/unit.svg'];
+      unitTextureRef.current = textures['/units/mounted-knight.svg'];
       if (!containerRef.current) return;
       containerRef.current.appendChild(app.canvas);
       appRef.current = app;
