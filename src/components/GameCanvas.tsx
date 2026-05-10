@@ -98,7 +98,7 @@ export const GameCanvas: React.FC = () => {
   const [groupOrders, setGroupOrders] = useState<GroupOrders>(new Map());
   const [isBattleRunning, setIsBattleRunning] = useState(false);
   // Setters used in upcoming tasks; void-suppressed until then.
-  void setSelectedGroup; void setGroupOrders; void setIsBattleRunning;
+  void setGroupOrders;
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -436,6 +436,16 @@ export const GameCanvas: React.FC = () => {
 
   const curT = hoveredHex ? TERRAINS[gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r)?.type || 'SEA'] : null;
 
+  const groupCounts: Record<GroupId, number> = { 1: 0, 2: 0, 3: 0 };
+  if (currentStrategicHex) {
+    const units = armies.get(HexUtils.key(currentStrategicHex)) ?? [];
+    for (const u of units) {
+      if (u.team === selectedTeam && u.groupId !== null) {
+        groupCounts[u.groupId]++;
+      }
+    }
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#02040a', position: 'relative' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: (isScanning || inputMode !== null) ? 'crosshair' : 'default' }} />
@@ -539,7 +549,80 @@ export const GameCanvas: React.FC = () => {
           GRID SYSTEM: {showGrid ? 'ACTIVE' : 'DEACTIVATED'}
         </button>
 
-        <button 
+        {viewMode === 'TACTICAL' && (
+          <div style={{
+            background: 'rgba(0,0,0,0.4)',
+            padding: '14px',
+            borderRadius: '14px',
+            marginBottom: '12px',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
+              GROUPS
+            </div>
+            {([1, 2, 3] as const).map(gid => {
+              const count = groupCounts[gid];
+              const assignActive = inputMode === 'assign' && selectedGroup === gid;
+              const orderActive = inputMode === 'order' && selectedGroup === gid;
+              const teamColor = TEAM_TINTS[selectedTeam];
+              const teamColorHex = `#${teamColor.toString(16).padStart(6, '0')}`;
+              return (
+                <div key={gid} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <div style={{ flex: '0 0 56px', fontSize: '11px', fontWeight: 800, color: '#cbd5e1' }}>
+                    G{gid} <span style={{ color: '#64748b', fontWeight: 600 }}>×{count}</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedGroup(gid);
+                      setInputMode(prev => (prev === 'assign' && selectedGroup === gid) ? null : 'assign');
+                      setIsScanning(false);
+                    }}
+                    style={{
+                      flex: 1, padding: '6px', fontSize: '10px', fontWeight: 800,
+                      background: assignActive ? teamColorHex : 'rgba(255,255,255,0.04)',
+                      color: assignActive ? 'white' : '#94a3b8',
+                      border: assignActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px', cursor: 'pointer',
+                    }}
+                  >
+                    ASSIGN
+                  </button>
+                  <button
+                    disabled={count === 0}
+                    onClick={() => {
+                      setSelectedGroup(gid);
+                      setInputMode(prev => (prev === 'order' && selectedGroup === gid) ? null : 'order');
+                      setIsScanning(false);
+                    }}
+                    style={{
+                      flex: 1, padding: '6px', fontSize: '10px', fontWeight: 800,
+                      background: orderActive ? teamColorHex : 'rgba(255,255,255,0.04)',
+                      color: count === 0 ? '#475569' : orderActive ? 'white' : '#94a3b8',
+                      border: orderActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      cursor: count === 0 ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    ATTACK
+                  </button>
+                </div>
+              );
+            })}
+            <button
+              onClick={() => setIsBattleRunning(b => !b)}
+              style={{
+                width: '100%', padding: '12px', marginTop: '6px',
+                background: isBattleRunning ? '#ef4444' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: 'white', border: 'none', borderRadius: '10px',
+                fontSize: '11px', fontWeight: 900, cursor: 'pointer',
+              }}
+            >
+              {isBattleRunning ? '⏸ PAUSE BATTLE' : '▶ START BATTLE'}
+            </button>
+          </div>
+        )}
+
+        <button
           onClick={() => {
             setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
             setViewMode('STRATEGIC');
