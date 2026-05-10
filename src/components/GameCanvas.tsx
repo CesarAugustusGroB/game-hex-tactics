@@ -52,7 +52,7 @@ const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${group
 
 // Used in upcoming tasks; intentionally referenced.
 void MAX_HP; void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
-void ([] as [InputMode?, GroupOrders?]);
+void ([] as [GroupOrders?]);
 
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2 },
@@ -92,7 +92,8 @@ export const GameCanvas: React.FC = () => {
   const [viewMode, setViewMode] = useState<'STRATEGIC' | 'TACTICAL'>('STRATEGIC');
   const [armies, setArmies] = useState<Armies>(new Map());
   const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
-  const [isPlacing, setIsPlacing] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode | null>(null);
+  const isPlacing = inputMode === 'place'; // derived; keeps existing JSX expressions terse
   const [selectedTeam, setSelectedTeam] = useState<Team>('red');
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
@@ -333,7 +334,7 @@ export const GameCanvas: React.FC = () => {
 
       app.stage.on('pointerdown', (e) => {
         // Brush mode: in placing mode, paint instead of dragging.
-        if (isPlacingRef.current && currentStrategicHexRef.current) {
+        if (inputModeRef.current === 'place' && currentStrategicHexRef.current) {
           isPaintingRef.current = true;
           lastPaintedKeyRef.current = null;
           const local = world.toLocal(e.global);
@@ -397,10 +398,10 @@ export const GameCanvas: React.FC = () => {
   const noiseOffsetRef = useRef({ q: 0, r: 0 });
   useEffect(() => { isScanningRef.current = isScanning; }, [isScanning]);
   useEffect(() => { noiseOffsetRef.current = genSettings.noiseOffset; }, [genSettings.noiseOffset]);
-  const isPlacingRef = useRef(false);
+  const inputModeRef = useRef<InputMode | null>(null);
   const currentStrategicHexRef = useRef<Hex | null>(null);
   const selectedTeamRef = useRef<Team>('red');
-  useEffect(() => { isPlacingRef.current = isPlacing; }, [isPlacing]);
+  useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
   useEffect(() => { currentStrategicHexRef.current = currentStrategicHex; }, [currentStrategicHex]);
   useEffect(() => { selectedTeamRef.current = selectedTeam; }, [selectedTeam]);
   /* eslint-enable react-hooks/immutability */
@@ -427,7 +428,7 @@ export const GameCanvas: React.FC = () => {
 
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#02040a', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: (isScanning || isPlacing) ? 'crosshair' : 'default' }} />
+      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: (isScanning || inputMode !== null) ? 'crosshair' : 'default' }} />
       
       {/* HUD - Professional Glassmorphism */}
       <div style={{
@@ -454,7 +455,7 @@ export const GameCanvas: React.FC = () => {
           onClick={() => {
             setIsScanning(s => {
               const next = !s;
-              if (next) setIsPlacing(false);
+              if (next) setInputMode(null);
               return next;
             });
           }}
@@ -466,8 +467,8 @@ export const GameCanvas: React.FC = () => {
         <button
           onClick={() => {
             if (viewMode !== 'TACTICAL') return;
-            setIsPlacing(p => {
-              const next = !p;
+            setInputMode(prev => {
+              const next = prev === 'place' ? null : 'place';
               if (next) setIsScanning(false);
               return next;
             });
@@ -533,7 +534,7 @@ export const GameCanvas: React.FC = () => {
             setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
             setViewMode('STRATEGIC');
             setCurrentStrategicHex(null);
-            setIsPlacing(false);
+            setInputMode(null);
           }}
           style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '32px' }}
         >RETURN TO STRATEGIC OVERVIEW</button>
@@ -542,7 +543,7 @@ export const GameCanvas: React.FC = () => {
           noiseRef.current = null;
           setArmies(new Map());
           setCurrentStrategicHex(null);
-          setIsPlacing(false);
+          setInputMode(null);
           generateWorldData();
         }} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
           REGENERATE ECOSYSTEM
