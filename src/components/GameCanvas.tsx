@@ -16,19 +16,43 @@ interface TerrainDef {
 }
 
 type Team = 'red' | 'blue';
+type GroupId = 1 | 2 | 3;
+type UnitState = 'idle' | 'moving' | 'fighting';
+type InputMode = 'place' | 'assign' | 'order';
 
 interface Unit {
   id: string;
-  tacticalHex: Hex;
   team: Team;
+  tacticalHex: Hex;
+  homeHex: Hex;
+  groupId: GroupId | null;
+  hp: number;
+  state: UnitState;
+}
+
+interface GroupOrder {
+  team: Team;
+  groupId: GroupId;
+  attackTarget: Hex | null;
 }
 
 type Armies = Map<string, Unit[]>;
+type GroupOrders = Map<string, GroupOrder>;
 
 const TEAM_TINTS: Record<Team, number> = {
   red: 0xef4444,
   blue: 0x3b82f6,
 };
+
+const MAX_HP = 100;
+const DAMAGE_PER_TICK = 10;
+const TICK_MS = 500;
+
+const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
+
+// Used in upcoming tasks; intentionally referenced.
+void MAX_HP; void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
+void ([] as [InputMode?, GroupOrders?]);
 
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2 },
@@ -290,7 +314,15 @@ export const GameCanvas: React.FC = () => {
         if (lastPaintedKeyRef.current === hexKey) return;
         lastPaintedKeyRef.current = hexKey;
         const strategicKey = HexUtils.key(strategicHex);
-        const newUnit: Unit = { id: crypto.randomUUID(), tacticalHex: hex, team: selectedTeamRef.current };
+        const newUnit: Unit = {
+          id: crypto.randomUUID(),
+          team: selectedTeamRef.current,
+          tacticalHex: hex,
+          homeHex: hex,
+          groupId: null,
+          hp: MAX_HP,
+          state: 'idle',
+        };
         setArmies(prev => {
           const next = new Map(prev);
           const existing = next.get(strategicKey) ?? [];
