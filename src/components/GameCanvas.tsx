@@ -3,6 +3,8 @@ import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import gsap from 'gsap';
 import { createNoise2D } from 'simplex-noise';
+import { simulateTick } from '../battle/simulate';
+import type { Unit, GroupOrder, Team, GroupId } from '../battle/simulate';
 
 // --- Constants ---
 const STRATEGIC_RESOLUTION = 40;
@@ -15,26 +17,7 @@ interface TerrainDef {
   height: number;
 }
 
-type Team = 'red' | 'blue';
-type GroupId = 1 | 2 | 3;
-type UnitState = 'idle' | 'moving' | 'fighting';
 type InputMode = 'place' | 'assign' | 'order';
-
-interface Unit {
-  id: string;
-  team: Team;
-  tacticalHex: Hex;
-  homeHex: Hex;
-  groupId: GroupId | null;
-  hp: number;
-  state: UnitState;
-}
-
-interface GroupOrder {
-  team: Team;
-  groupId: GroupId;
-  attackTarget: Hex | null;
-}
 
 type Armies = Map<string, Unit[]>;
 type GroupOrders = Map<string, GroupOrder>;
@@ -492,6 +475,24 @@ export const GameCanvas: React.FC = () => {
     start();
     return () => { isMounted = false; app.destroy(true, { children: true }); };
   }, []);
+
+  useEffect(() => {
+    if (!isBattleRunning) return;
+    const id = window.setInterval(() => {
+      const strategic = currentStrategicHexRef.current;
+      if (!strategic) return;
+      const strategicKey = HexUtils.key(strategic);
+      setArmies(prev => {
+        const units = prev.get(strategicKey) ?? [];
+        if (units.length === 0) return prev;
+        const next = simulateTick(units, groupOrdersRef.current, { damagePerTick: DAMAGE_PER_TICK });
+        const updated = new Map(prev);
+        updated.set(strategicKey, next);
+        return updated;
+      });
+    }, TICK_MS);
+    return () => window.clearInterval(id);
+  }, [isBattleRunning]);
 
   // Mirror state into refs so the long-lived PIXI handlers (registered once at mount) read current values without re-registration.
   /* eslint-disable react-hooks/immutability */
