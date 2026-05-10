@@ -97,8 +97,6 @@ export const GameCanvas: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<GroupId>(1);
   const [groupOrders, setGroupOrders] = useState<GroupOrders>(new Map());
   const [isBattleRunning, setIsBattleRunning] = useState(false);
-  // Setters used in upcoming tasks; void-suppressed until then.
-  void setGroupOrders;
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -399,6 +397,18 @@ export const GameCanvas: React.FC = () => {
       app.stage.on('pointertap', (e) => {
         if (isDragging.current) return;
         const local = world.toLocal(e.global); const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
+        // Order mode: single-click sets attack target for selected group
+        if (inputModeRef.current === 'order') {
+          const team = selectedTeamRef.current;
+          const groupId = selectedGroupRef.current;
+          setGroupOrders(prev => {
+            const next = new Map(prev);
+            next.set(groupOrderKey(team, groupId), { team, groupId, attackTarget: hex });
+            return next;
+          });
+          setInputMode(null); // auto-exit order mode after one click
+          return;
+        }
         if (isScanningRef.current) {
           // CAPTURE GLOBAL NOISE COORDS
           // Tactical center hex (0,0) must sample the same noise point as the clicked strategic hex.
@@ -423,6 +433,11 @@ export const GameCanvas: React.FC = () => {
         const newScale = Math.min(Math.max(oldScale * delta, 0.05), 6); const mouseLocal = world.toLocal(new PIXI.Point(e.clientX, e.clientY));
         world.scale.set(newScale); world.x -= (mouseLocal.x * newScale - mouseLocal.x * oldScale); world.y -= (mouseLocal.y * newScale - mouseLocal.y * oldScale); zoom.current = newScale;
       }, { passive: false });
+
+      containerRef.current?.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        setInputMode(null);
+      });
 
       // eslint-disable-next-line react-hooks/immutability
       app.ticker.add(() => updateHighlights());
