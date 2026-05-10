@@ -312,33 +312,69 @@ export const GameCanvas: React.FC = () => {
       
       app.stage.eventMode = 'static'; app.stage.hitArea = app.screen;
 
-      const paintAt = (hex: Hex) => {
+      const paintPlace = (hex: Hex) => {
         const strategicHex = currentStrategicHexRef.current;
         if (!strategicHex) return;
         const hexKey = HexUtils.key(hex);
         if (lastPaintedKeyRef.current === hexKey) return;
         lastPaintedKeyRef.current = hexKey;
         const strategicKey = HexUtils.key(strategicHex);
-        const newUnit: Unit = {
-          id: crypto.randomUUID(),
-          team: selectedTeamRef.current,
-          tacticalHex: hex,
-          homeHex: hex,
-          groupId: null,
-          hp: MAX_HP,
-          state: 'idle',
-        };
         setArmies(prev => {
           const next = new Map(prev);
           const existing = next.get(strategicKey) ?? [];
+          // One unit per hex — skip if occupied (any team).
+          if (existing.some(u => u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r)) {
+            return prev;
+          }
+          const newUnit: Unit = {
+            id: crypto.randomUUID(),
+            team: selectedTeamRef.current,
+            tacticalHex: hex,
+            homeHex: hex,
+            groupId: null,
+            hp: MAX_HP,
+            state: 'idle',
+          };
           next.set(strategicKey, [...existing, newUnit]);
           return next;
         });
       };
 
+      const paintAssign = (hex: Hex) => {
+        const strategicHex = currentStrategicHexRef.current;
+        if (!strategicHex) return;
+        const hexKey = HexUtils.key(hex);
+        if (lastPaintedKeyRef.current === hexKey) return;
+        lastPaintedKeyRef.current = hexKey;
+        const strategicKey = HexUtils.key(strategicHex);
+        const team = selectedTeamRef.current;
+        const groupId = selectedGroupRef.current;
+        setArmies(prev => {
+          const existing = prev.get(strategicKey) ?? [];
+          let mutated = false;
+          const updated = existing.map(u => {
+            if (u.team === team && u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r && u.groupId !== groupId) {
+              mutated = true;
+              return { ...u, groupId };
+            }
+            return u;
+          });
+          if (!mutated) return prev;
+          const next = new Map(prev);
+          next.set(strategicKey, updated);
+          return next;
+        });
+      };
+
+      const paintAt = (hex: Hex) => {
+        if (inputModeRef.current === 'place') paintPlace(hex);
+        else if (inputModeRef.current === 'assign') paintAssign(hex);
+      };
+
       app.stage.on('pointerdown', (e) => {
         // Brush mode: in placing mode, paint instead of dragging.
-        if (inputModeRef.current === 'place' && currentStrategicHexRef.current) {
+        const mode = inputModeRef.current;
+        if ((mode === 'place' || mode === 'assign') && currentStrategicHexRef.current) {
           isPaintingRef.current = true;
           lastPaintedKeyRef.current = null;
           const local = world.toLocal(e.global);
