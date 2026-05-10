@@ -15,12 +15,20 @@ interface TerrainDef {
   height: number;
 }
 
+type Team = 'red' | 'blue';
+
 interface Unit {
   id: string;
   tacticalHex: Hex;
+  team: Team;
 }
 
 type Armies = Map<string, Unit[]>;
+
+const TEAM_TINTS: Record<Team, number> = {
+  red: 0xef4444,
+  blue: 0x3b82f6,
+};
 
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2 },
@@ -61,6 +69,7 @@ export const GameCanvas: React.FC = () => {
   const [armies, setArmies] = useState<Armies>(new Map());
   const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
   const [isPlacing, setIsPlacing] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<Team>('red');
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -240,6 +249,7 @@ export const GameCanvas: React.FC = () => {
       if (!tile) return;
       const pos = HexUtils.hexToPixel(u.tacticalHex);
       const sprite = new PIXI.Sprite(unitTex);
+      sprite.tint = TEAM_TINTS[u.team];
       sprite.anchor.set(0.5, 1);
       sprite.x = pos.x;
       sprite.y = pos.y - TERRAINS[tile.type].height - 4;
@@ -280,7 +290,7 @@ export const GameCanvas: React.FC = () => {
         if (lastPaintedKeyRef.current === hexKey) return;
         lastPaintedKeyRef.current = hexKey;
         const strategicKey = HexUtils.key(strategicHex);
-        const newUnit: Unit = { id: crypto.randomUUID(), tacticalHex: hex };
+        const newUnit: Unit = { id: crypto.randomUUID(), tacticalHex: hex, team: selectedTeamRef.current };
         setArmies(prev => {
           const next = new Map(prev);
           const existing = next.get(strategicKey) ?? [];
@@ -357,8 +367,10 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { noiseOffsetRef.current = genSettings.noiseOffset; }, [genSettings.noiseOffset]);
   const isPlacingRef = useRef(false);
   const currentStrategicHexRef = useRef<Hex | null>(null);
+  const selectedTeamRef = useRef<Team>('red');
   useEffect(() => { isPlacingRef.current = isPlacing; }, [isPlacing]);
   useEffect(() => { currentStrategicHexRef.current = currentStrategicHex; }, [currentStrategicHex]);
+  useEffect(() => { selectedTeamRef.current = selectedTeam; }, [selectedTeam]);
   /* eslint-enable react-hooks/immutability */
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
@@ -448,6 +460,34 @@ export const GameCanvas: React.FC = () => {
         >
           {isPlacing ? 'STOP PLACING' : 'PLACE UNIT'}
         </button>
+
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          {(['red', 'blue'] as const).map(team => {
+            const active = selectedTeam === team;
+            const bg = team === 'red' ? '#ef4444' : '#3b82f6';
+            return (
+              <button
+                key={team}
+                onClick={() => setSelectedTeam(team)}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: active ? bg : 'rgba(255,255,255,0.04)',
+                  color: active ? 'white' : '#94a3b8',
+                  border: active ? `1px solid ${bg}` : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  letterSpacing: '1px',
+                  cursor: 'pointer',
+                  transition: '0.2s',
+                }}
+              >
+                {team.toUpperCase()}
+              </button>
+            );
+          })}
+        </div>
 
         <button
           onClick={() => setShowGrid(!showGrid)}
