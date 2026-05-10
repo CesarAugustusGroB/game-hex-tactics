@@ -763,6 +763,10 @@ export const GameCanvas: React.FC = () => {
             setViewMode('STRATEGIC');
             setCurrentStrategicHex(null);
             setInputMode(null);
+            setIsBattleRunning(false);
+            setGroupOrders(new Map());
+            setWinBanner(null);
+            lastTickHadBothTeamsRef.current = false;
           }}
           style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '32px' }}
         >RETURN TO STRATEGIC OVERVIEW</button>
@@ -772,6 +776,10 @@ export const GameCanvas: React.FC = () => {
           setArmies(new Map());
           setCurrentStrategicHex(null);
           setInputMode(null);
+          setIsBattleRunning(false);
+          setGroupOrders(new Map());
+          setWinBanner(null);
+          lastTickHadBothTeamsRef.current = false;
           generateWorldData();
         }} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
           REGENERATE ECOSYSTEM
