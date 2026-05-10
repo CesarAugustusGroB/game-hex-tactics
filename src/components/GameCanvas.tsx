@@ -50,6 +50,8 @@ export const GameCanvas: React.FC = () => {
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
   const zoom = useRef(0.5);
+  const isPaintingRef = useRef(false);
+  const lastPaintedKeyRef = useRef<string | null>(null);
 
   const [gridData, setGridData] = useState<{ hex: Hex; type: string }[]>([]);
   const [hoveredHex, setHoveredHex] = useState<Hex | null>(null);
@@ -270,12 +272,47 @@ export const GameCanvas: React.FC = () => {
       world.addChild(highlightGfx.current);
       
       app.stage.eventMode = 'static'; app.stage.hitArea = app.screen;
-      app.stage.on('pointerdown', (e) => { isDragging.current = true; lastMousePos.current = { x: e.global.x, y: e.global.y }; });
+
+      const paintAt = (hex: Hex) => {
+        const strategicHex = currentStrategicHexRef.current;
+        if (!strategicHex) return;
+        const hexKey = HexUtils.key(hex);
+        if (lastPaintedKeyRef.current === hexKey) return;
+        lastPaintedKeyRef.current = hexKey;
+        const strategicKey = HexUtils.key(strategicHex);
+        const newUnit: Unit = { id: crypto.randomUUID(), tacticalHex: hex };
+        setArmies(prev => {
+          const next = new Map(prev);
+          const existing = next.get(strategicKey) ?? [];
+          next.set(strategicKey, [...existing, newUnit]);
+          return next;
+        });
+      };
+
+      app.stage.on('pointerdown', (e) => {
+        // Brush mode: in placing mode, paint instead of dragging.
+        if (isPlacingRef.current && currentStrategicHexRef.current) {
+          isPaintingRef.current = true;
+          lastPaintedKeyRef.current = null;
+          const local = world.toLocal(e.global);
+          paintAt(HexUtils.pixelToHex({ x: local.x, y: local.y }));
+          return;
+        }
+        isDragging.current = true;
+        lastMousePos.current = { x: e.global.x, y: e.global.y };
+      });
       app.stage.on('globalpointermove', (e) => {
         if (isDragging.current) { world.x += e.global.x - lastMousePos.current.x; world.y += e.global.y - lastMousePos.current.y; lastMousePos.current = { x: e.global.x, y: e.global.y }; }
-        const local = world.toLocal(e.global); setHoveredHex(HexUtils.pixelToHex({ x: local.x, y: local.y }));
+        const local = world.toLocal(e.global);
+        const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
+        setHoveredHex(hex);
+        if (isPaintingRef.current) paintAt(hex);
       });
-      app.stage.on('pointerup', () => isDragging.current = false);
+      app.stage.on('pointerup', () => {
+        isDragging.current = false;
+        isPaintingRef.current = false;
+        lastPaintedKeyRef.current = null;
+      });
       app.stage.on('pointertap', (e) => {
         if (isDragging.current) return;
         const local = world.toLocal(e.global); const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
@@ -295,16 +332,6 @@ export const GameCanvas: React.FC = () => {
             setCurrentStrategicHex(hex);
             gsap.fromTo(world.scale, { x: 0.2, y: 0.2 }, { x: 0.8, y: 0.8, duration: 0.8, ease: 'power2.out' });
           }});
-        }
-        else if (isPlacingRef.current && currentStrategicHexRef.current) {
-          const strategicKey = HexUtils.key(currentStrategicHexRef.current);
-          const newUnit: Unit = { id: crypto.randomUUID(), tacticalHex: hex };
-          setArmies(prev => {
-            const next = new Map(prev);
-            const existing = next.get(strategicKey) ?? [];
-            next.set(strategicKey, [...existing, newUnit]);
-            return next;
-          });
         }
       });
 
