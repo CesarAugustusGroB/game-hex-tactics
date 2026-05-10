@@ -4,6 +4,10 @@ import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import gsap from 'gsap';
 import { createNoise2D } from 'simplex-noise';
 
+// --- Constants ---
+const STRATEGIC_RESOLUTION = 40;
+const DIVE_ZOOM = 4.5;
+
 // --- Professional Tactical Palette ---
 interface TerrainDef {
   color: number;
@@ -59,7 +63,7 @@ export const GameCanvas: React.FC = () => {
     waterLevel: 0.4,
     mountainLevel: 0.85,
     noiseOffset: { q: 0, r: 0 },
-    resolution: 40.0 // Much higher base resolution for smoothness
+    resolution: STRATEGIC_RESOLUTION // Much higher base resolution for smoothness
   });
 
   const gridRadius = 35;
@@ -82,10 +86,18 @@ export const GameCanvas: React.FC = () => {
         let e = (noise(nx, ny) + 0.4 * noise(nx * 2.2, ny * 2.2)) / 1.4;
         e = (e + 1) / 2;
 
-        // Radial falloff for islands (only in Strategic view)
+        // Radial falloff: strong island shape in STRATEGIC, soft falloff in TACTICAL.
+        // For TACTICAL we use the strategic-equivalent position so the dived hex anchors
+        // to its strategic boost level (mountain stays mountain-ish at center).
         if (viewMode === 'STRATEGIC') {
           const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
           e *= Math.max(0, 1.1 - Math.pow(d, 2.5));
+        } else {
+          const scaleBack = STRATEGIC_RESOLUTION / genSettings.resolution;
+          const qe = (q + genSettings.noiseOffset.q) * scaleBack;
+          const re = (r + genSettings.noiseOffset.r) * scaleBack;
+          const d = Math.sqrt(qe*qe + re*re + qe*re) / gridRadius;
+          e *= Math.max(0, 1.1 - Math.pow(d, 4));
         }
 
         let type = 'SEA';
@@ -269,12 +281,15 @@ export const GameCanvas: React.FC = () => {
         const local = world.toLocal(e.global); const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
         if (isScanningRef.current) {
           // CAPTURE GLOBAL NOISE COORDS
-          const targetOffsetQ = (hex.q + noiseOffsetRef.current.q);
-          const targetOffsetR = (hex.r + noiseOffsetRef.current.r);
-          
+          // Tactical center hex (0,0) must sample the same noise point as the clicked strategic hex.
+          // Since (newOffset / newRes) = (clickedHex + currentOffset) / currentRes and newRes = currentRes * DIVE_ZOOM,
+          // the offset must be scaled by DIVE_ZOOM.
+          const targetOffsetQ = (hex.q + noiseOffsetRef.current.q) * DIVE_ZOOM;
+          const targetOffsetR = (hex.r + noiseOffsetRef.current.r) * DIVE_ZOOM;
+
           gsap.to(world.scale, { x: 3, y: 3, duration: 0.6, ease: 'power2.in' });
           gsap.to(world, { x: app.screen.width/2 - (hex.q * 20), y: app.screen.height/2 - (hex.r * 20), duration: 0.6, ease: 'power2.in', onComplete: () => {
-            setSettings(s => ({ ...s, noiseOffset: { q: targetOffsetQ, r: targetOffsetR }, resolution: s.resolution * 4.5 }));
+            setSettings(s => ({ ...s, noiseOffset: { q: targetOffsetQ, r: targetOffsetR }, resolution: s.resolution * DIVE_ZOOM }));
             setViewMode('TACTICAL');
             setIsScanning(false);
             setCurrentStrategicHex(hex);
@@ -416,7 +431,7 @@ export const GameCanvas: React.FC = () => {
 
         <button 
           onClick={() => {
-            setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: 40.0 }));
+            setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
             setViewMode('STRATEGIC');
             setCurrentStrategicHex(null);
             setIsPlacing(false);
