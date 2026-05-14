@@ -18,6 +18,9 @@ dist-ssr
 # Playwright MCP artifacts
 .playwright-mcp/
 
+# Development screenshots in repo root (leave public/ and src/ assets alone)
+/*.png
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
