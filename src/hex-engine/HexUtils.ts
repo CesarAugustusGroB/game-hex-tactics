@@ -89,4 +89,23 @@ export class HexUtils {
     const [q, r] = key.split(',').map(Number);
     return { q, r };
   }
+
+  /**
+   * Hexes along a straight line from `a` to `b`, in order. Linear interpolation in axial
+   * coords, each step rounded with `hexRound`. Returns `distance(a, b) + 1` hexes, with
+   * `result[0] === a` (rounded) and `result[result.length - 1] === b` (rounded).
+   */
+  static hexLine(a: Hex, b: Hex): Hex[] {
+    const n = this.distance(a, b);
+    if (n === 0) return [a];
+    const result: Hex[] = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      result.push(this.hexRound({
+        q: a.q * (1 - t) + b.q * t,
+        r: a.r * (1 - t) + b.r * t,
+      }));
+    }
+    return result;
+  }
 }
