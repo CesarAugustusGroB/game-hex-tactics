@@ -132,7 +132,7 @@ interface Scenario {
   defendAnchor?: Hex;
 }
 
-const seedUnit = (s: ScenarioUnit): Unit => ({
+const seedUnit = (s: ScenarioUnit, terrainAt?: Map<string, string>): Unit => ({
   id: s.id,
   team: s.team,
   tacticalHex: s.hex,
@@ -141,7 +141,10 @@ const seedUnit = (s: ScenarioUnit): Unit => ({
   hp: s.hp ?? 100,
   state: 'idle',
   nextMoveTick: 0,
-  visionRadius: 4,
+  // Derive starting visionRadius from the unit's placement terrain (falling through
+  // to DEFAULT_TERRAIN_MODS when no terrain info is provided). Same contract as the
+  // in-UI placement path so scenarios can read realistic tick-0 vision.
+  visionRadius: getTerrainMods(terrainAt?.get(HexUtils.key(s.hex))).visionRadius,
 });
 
 // Heights for terrains the harness uses. Mirrors `TERRAINS[type].height` in
@@ -632,7 +635,7 @@ const runScenario = (s: Scenario): ScenarioResult => {
   console.log(`  formation=${s.formation}  depth=${s.depth}  N=${s.units.length}  target=(${s.attackTarget.q},${s.attackTarget.r})`);
   console.log(`${'='.repeat(72)}`);
 
-  let units: Unit[] = s.units.map(seedUnit);
+  let units: Unit[] = s.units.map(u => seedUnit(u, s.terrainAt));
   const orderedUnits = units.filter(u => u.team === s.team && u.groupId === s.groupId);
   const heading = s.forceHeading ?? groupHeading(orderedUnits, s.attackTarget);
   console.log(`heading: ${heading} (${headingName(heading)})  mode: ${s.mode ?? 'march'}`);

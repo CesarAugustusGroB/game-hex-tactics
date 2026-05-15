@@ -421,23 +421,28 @@ export const GameCanvas: React.FC = () => {
       if (!tile) return;
       const pos = HexUtils.hexToPixel(u.tacticalHex);
       const topY = pos.y - TERRAINS[tile.type].height;
-      const targetKey = HexUtils.key(u.tacticalHex);
+      const hexKey = HexUtils.key(u.tacticalHex);
+      // Animation cache key includes Y elevation so world-regen (same hex, different
+      // terrain type at that hex → different topY) re-targets the container even when
+      // the unit didn't logically move. Without this, a unit standing on a hex whose
+      // terrain type changes would render at the old elevation until it moved.
+      const targetKey = `${hexKey}|${Math.round(topY)}`;
 
       // Get-or-create persistent container per unit. Existing containers tween to
-      // the new hex (smooth motion); first-appearance containers snap. We compare
-      // against the LAST TARGET hex (not container.position, which is mid-tween)
-      // so re-renders from non-movement causes (fog toggle, hover, etc.) don't
-      // retrigger animation.
+      // the new position (smooth motion); first-appearance containers snap. We
+      // compare against the LAST TARGET key (not container.position, which is
+      // mid-tween) so re-renders from non-movement causes (fog toggle, hover, etc.)
+      // don't retrigger animation.
       let container = unitContainersRef.current.get(u.id);
       if (!container) {
         container = new PIXI.Container();
         container.label = 'unit-container';
         container.position.set(pos.x, topY);
-        (container as unknown as { _targetHexKey: string })._targetHexKey = targetKey;
+        (container as unknown as { _targetKey: string })._targetKey = targetKey;
         unitContainersRef.current.set(u.id, container);
         c.addChild(container);
-      } else if ((container as unknown as { _targetHexKey?: string })._targetHexKey !== targetKey) {
-        (container as unknown as { _targetHexKey: string })._targetHexKey = targetKey;
+      } else if ((container as unknown as { _targetKey?: string })._targetKey !== targetKey) {
+        (container as unknown as { _targetKey: string })._targetKey = targetKey;
         gsap.to(container.position, {
           x: pos.x,
           y: topY,
@@ -450,9 +455,10 @@ export const GameCanvas: React.FC = () => {
       // Fog of war: hide enemy units outside any friendly's vision. Position keeps
       // tweening even while hidden, so when fog reveals the unit it's at the
       // correct current location instead of teleporting from its last-seen hex.
-      const isHidden = fogOfWar && u.team !== selectedTeam && !visibleHexes.has(targetKey);
+      // Children are still rebuilt below — keeps HP bar / lieutenant marker fresh
+      // so a fog reveal shows the unit's current state, not the last seen one.
+      const isHidden = fogOfWar && u.team !== selectedTeam && !visibleHexes.has(hexKey);
       container.visible = !isHidden;
-      if (isHidden) return;
 
       // Rebuild children inside the container. Children use RELATIVE offsets from
       // container origin (= unit's hex top-center in world space). The container's
@@ -554,8 +560,11 @@ export const GameCanvas: React.FC = () => {
     });
 
     // Attack target indicators per group. Tagged 'unit-detail' for LOD hiding.
+    // Fog of war: skip rings owned by the OTHER team — they would otherwise leak
+    // enemy intent through fog (you'd see where they're charging without seeing them).
     groupOrders.forEach(order => {
       if (!order.attackTarget) return;
+      if (fogOfWar && order.team !== selectedTeam) return;
       const tile = gridData.find(d => d.hex.q === order.attackTarget!.q && d.hex.r === order.attackTarget!.r);
       if (!tile) return;
       const pos = HexUtils.hexToPixel(order.attackTarget);
@@ -1207,10 +1216,23 @@ export const GameCanvas: React.FC = () => {
       });
       generateWorldData();
     };
+    // Capture the unit-containers map for the unmount cleanup. The ref's `.current`
+    // object is created once and never reassigned — only mutated by drawUnits via
+    // `.set`/`.delete` — so this reference stays valid through the lifetime of the
+    // component and points to the same Map at unmount.
+    const containers = unitContainersRef.current;
     start();
     return () => {
       isMounted = false;
       if (dblClickHandler) app.canvas.removeEventListener('dblclick', dblClickHandler);
+      // Kill any in-flight GSAP tweens targeting unit-container positions before
+      // PIXI destroys them — otherwise GSAP keeps updating freed objects for up
+      // to TICK_MS after unmount.
+      containers.forEach(cont => {
+        gsap.killTweensOf(cont);
+        gsap.killTweensOf(cont.position);
+      });
+      containers.clear();
       app.destroy(true, { children: true });
     };
   }, []);
@@ -1488,6 +1510,15 @@ export const GameCanvas: React.FC = () => {
           if (survivors.length === cur.length) return prev;
           const next = new Map(prev);
           next.set(key, survivors);
+          return next;
+        });
+        // Also drop the group's order so no phantom attack-target ring or
+        // lieutenant marker lingers for the now-empty group.
+        setGroupOrders(prev => {
+          const k = groupOrderKey(team, gid);
+          if (!prev.has(k)) return prev;
+          const next = new Map(prev);
+          next.delete(k);
           return next;
         });
         return;
