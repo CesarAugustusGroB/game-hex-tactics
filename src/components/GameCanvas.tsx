@@ -5,6 +5,7 @@ import gsap from 'gsap';
 import { createNoise2D } from 'simplex-noise';
 import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeDefendFormation, CHARGE_DURATION_TICKS } from '../battle/simulate';
 import type { Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, MapApi } from '../battle/simulate';
+import { TERRAIN_MODS, getTerrainMods } from '../battle/terrain';
 
 const DRAG_THRESHOLD_PX = 24;
 
@@ -41,6 +42,14 @@ interface TerrainDef {
   height: number;
   /** Whether units can stand on this terrain. Used by the rigid-block march for validation. */
   walkable: boolean;
+  /** Defense rating; HIGHER = better cover. Damage divides by this. Default 1.0. */
+  defenseMult?: number;
+  /** Extra ticks of movement cooldown on entry. Default 0. */
+  moveCost?: number;
+  /** HP drained per tick while standing on this hex. Default 0. */
+  attritionPerTick?: number;
+  /** Sight radius (hexes) for a unit on this terrain. Default 4. */
+  visionRadius?: number;
 }
 
 type InputMode = 'place' | 'assign' | 'order' | 'defend';
@@ -81,17 +90,22 @@ const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${group
 // Used in upcoming tasks; intentionally referenced.
 void MAX_HP; void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
 
+// Mod fields are sourced from `TERRAIN_MODS` in `src/battle/terrain.ts` (single source of
+// truth — `terrain.ts` owns the mechanical values so it stays React/PIXI-free for the
+// headless harness). Spreading them here surfaces the same fields on `TerrainDef` for
+// HUD/tooltips and keeps the table self-documenting. Render-side fields (color/label/
+// height/walkable) stay native to this file.
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2, walkable: false },
   SEA: { color: 0x2a3a4a, label: 'Shallows', height: 5, walkable: false },
-  SAND: { color: 0xbdaa8a, label: 'Shoreline', height: 8, walkable: true },
-  PLAIN: { color: 0x5a7a4a, label: 'Lowlands', height: 12, walkable: true },
-  GRASS: { color: 0x3a5a3a, label: 'Thicket', height: 18, walkable: true },
-  HILL: { color: 0x6b5d44, label: 'Ridgeline', height: 35, walkable: true },
-  ROCKY: { color: 0x4a4a4a, label: 'Plateau', height: 55, walkable: true },
-  MOUNTAIN: { color: 0x2d2d2d, label: 'Summit', height: 85, walkable: false },
+  SAND: { color: 0xbdaa8a, label: 'Shoreline', height: 8, walkable: true, ...TERRAIN_MODS.SAND },
+  GRASSLAND: { color: 0x5a7a4a, label: 'Lowlands', height: 12, walkable: true, ...TERRAIN_MODS.GRASSLAND },
+  FOREST: { color: 0x3a5a3a, label: 'Thicket', height: 18, walkable: true, ...TERRAIN_MODS.FOREST },
+  HILL: { color: 0x6b5d44, label: 'Ridgeline', height: 35, walkable: true, ...TERRAIN_MODS.HILL },
+  ROCKY: { color: 0x4a4a4a, label: 'Plateau', height: 55, walkable: true, ...TERRAIN_MODS.ROCKY },
+  MOUNTAIN: { color: 0x2d2d2d, label: 'Summit', height: 85, walkable: true, ...TERRAIN_MODS.MOUNTAIN },
   SNOW: { color: 0xf0f0f0, label: 'Glacier', height: 110, walkable: false },
-  RIVER: { color: 0x3a8fb7, label: 'Waterway', height: 10, walkable: true },
+  RIVER: { color: 0x3a8fb7, label: 'Waterway', height: 10, walkable: true, ...TERRAIN_MODS.RIVER },
 };
 
 export const GameCanvas: React.FC = () => {
@@ -101,6 +115,11 @@ export const GameCanvas: React.FC = () => {
   const terrainGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const unitsGfx = useRef<PIXI.Container>(new PIXI.Container());
+  // Per-unit containers keyed by unit.id. Persist across drawUnits calls so we can
+  // GSAP-tween their position between hexes (smooth movement between ticks instead
+  // of teleporting). Children inside each container use offsets relative to the
+  // container origin (= unit's hex top-center pixel), so children move with the tween.
+  const unitContainersRef = useRef<Map<string, PIXI.Container>>(new Map());
   const previewGfx = useRef<PIXI.Container>(new PIXI.Container());
   
   const noiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
@@ -129,6 +148,7 @@ export const GameCanvas: React.FC = () => {
   const [groupFormations, setGroupFormations] = useState<GroupFormations>(new Map());
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
   const [isBattleRunning, setIsBattleRunning] = useState(false);
+  const [fogOfWar, setFogOfWar] = useState(false);
   const [genSettings, setSettings] = useState({
     waterLevel: 0.4,
     mountainLevel: 0.85,
@@ -177,8 +197,8 @@ export const GameCanvas: React.FC = () => {
         if (e < w * 0.7) type = 'DEEP_SEA';
         else if (e < w) type = 'SEA';
         else if (e < w + 0.03) type = 'SAND';
-        else if (e < m * 0.7) type = 'PLAIN';
-        else if (e < m * 0.9) type = 'GRASS';
+        else if (e < m * 0.7) type = 'GRASSLAND';
+        else if (e < m * 0.9) type = 'FOREST';
         else if (e < m) type = 'HILL';
         else if (e < m + 0.1) type = 'MOUNTAIN';
         else type = 'SNOW';
@@ -278,13 +298,26 @@ export const GameCanvas: React.FC = () => {
 
   const drawUnits = useCallback(() => {
     const c = unitsGfx.current;
-    c.removeChildren();
     const armyTex = armyTextureRef.current;
     const unitTex = unitTextureRef.current;
     const unitTexBlue = unitTextureBlueRef.current;
     if (!armyTex || !unitTex || !unitTexBlue) return;
 
+    // Tear down all per-unit containers (kill any in-flight tweens first so GSAP
+    // doesn't touch a destroyed object). Used when leaving tactical view or when
+    // there's no active battle to render.
+    const destroyAllUnitContainers = () => {
+      unitContainersRef.current.forEach(cont => {
+        gsap.killTweensOf(cont);
+        gsap.killTweensOf(cont.position);
+        cont.destroy({ children: true });
+      });
+      unitContainersRef.current.clear();
+    };
+
     if (viewMode === 'STRATEGIC') {
+      destroyAllUnitContainers();
+      c.removeChildren();
       armies.forEach((_units, key) => {
         const strategicHex = HexUtils.fromKey(key);
         const tile = gridData.find(d => d.hex.q === strategicHex.q && d.hex.r === strategicHex.r);
@@ -302,8 +335,29 @@ export const GameCanvas: React.FC = () => {
     }
 
     // TACTICAL
-    if (!currentStrategicHex) return;
+    if (!currentStrategicHex) {
+      destroyAllUnitContainers();
+      c.removeChildren();
+      return;
+    }
     const units = armies.get(HexUtils.key(currentStrategicHex)) ?? [];
+
+    // Reconciliation: destroy containers for units that no longer exist (dead,
+    // removed, or the army emptied) so GSAP can't tween into ghosts. Then sweep
+    // any non-container leftovers (e.g., strategic sprites that hadn't been
+    // cleared when we transitioned views).
+    const wantedIds = new Set(units.map(u => u.id));
+    unitContainersRef.current.forEach((cont, id) => {
+      if (!wantedIds.has(id)) {
+        gsap.killTweensOf(cont);
+        gsap.killTweensOf(cont.position);
+        cont.destroy({ children: true });
+        unitContainersRef.current.delete(id);
+      }
+    });
+    for (let i = c.children.length - 1; i >= 0; i--) {
+      if (c.children[i].label !== 'unit-container') c.removeChildAt(i);
+    }
 
     // Lieutenant per (team, groupId): if the group has an active order, the lieutenant is
     // the unit currently at the attack target hex (i.e., the unit that snapped to slots[0]
@@ -343,35 +397,85 @@ export const GameCanvas: React.FC = () => {
     // so the per-unit overlays AND the per-order attack-target ring share one value.
     const isFar = worldRef.current.scale.x < LOD_THRESHOLD;
 
+    // Fog of war: precompute the set of hex keys any friendly unit can currently see.
+    // Bounding-box scan with axial-distance prune (HexUtils.distance is ground truth).
+    // Friendlies are always rendered below; only enemy units check against this set.
+    const visibleHexes = new Set<string>();
+    if (fogOfWar) {
+      for (const u of units) {
+        if (u.team !== selectedTeam) continue;
+        const r = u.visionRadius;
+        for (let dq = -r; dq <= r; dq++) {
+          for (let dr = -r; dr <= r; dr++) {
+            const h = { q: u.tacticalHex.q + dq, r: u.tacticalHex.r + dr };
+            if (HexUtils.distance(u.tacticalHex, h) <= r) {
+              visibleHexes.add(HexUtils.key(h));
+            }
+          }
+        }
+      }
+    }
+
     units.forEach(u => {
       const tile = gridData.find(d => d.hex.q === u.tacticalHex.q && d.hex.r === u.tacticalHex.r);
       if (!tile) return;
       const pos = HexUtils.hexToPixel(u.tacticalHex);
       const topY = pos.y - TERRAINS[tile.type].height;
+      const targetKey = HexUtils.key(u.tacticalHex);
 
-      // Team indicator: outline the unit's hex top in the team color, but ONLY the
-      // edges that aren't shared with a same-team neighbor — so a cluster of allied
-      // units shows a single perimeter instead of overlapping hex outlines inside.
-      // Edge k connects vertex k → (k+1)%6 and faces the neighbor at
-      // HexUtils.directions[(6 - k) % 6] (see comment near teamByKey above).
+      // Get-or-create persistent container per unit. Existing containers tween to
+      // the new hex (smooth motion); first-appearance containers snap. We compare
+      // against the LAST TARGET hex (not container.position, which is mid-tween)
+      // so re-renders from non-movement causes (fog toggle, hover, etc.) don't
+      // retrigger animation.
+      let container = unitContainersRef.current.get(u.id);
+      if (!container) {
+        container = new PIXI.Container();
+        container.label = 'unit-container';
+        container.position.set(pos.x, topY);
+        (container as unknown as { _targetHexKey: string })._targetHexKey = targetKey;
+        unitContainersRef.current.set(u.id, container);
+        c.addChild(container);
+      } else if ((container as unknown as { _targetHexKey?: string })._targetHexKey !== targetKey) {
+        (container as unknown as { _targetHexKey: string })._targetHexKey = targetKey;
+        gsap.to(container.position, {
+          x: pos.x,
+          y: topY,
+          duration: TICK_MS / 1000,
+          ease: 'linear',
+          overwrite: true,
+        });
+      }
+
+      // Fog of war: hide enemy units outside any friendly's vision. Position keeps
+      // tweening even while hidden, so when fog reveals the unit it's at the
+      // correct current location instead of teleporting from its last-seen hex.
+      const isHidden = fogOfWar && u.team !== selectedTeam && !visibleHexes.has(targetKey);
+      container.visible = !isHidden;
+      if (isHidden) return;
+
+      // Rebuild children inside the container. Children use RELATIVE offsets from
+      // container origin (= unit's hex top-center in world space). The container's
+      // GSAP tween carries them all along.
+      container.removeChildren();
+
       const teamColor = TEAM_TINTS[u.team];
       const s = HexUtils.size;
       const verts: { x: number; y: number }[] = [];
       for (let k = 0; k < 6; k++) {
         const ang = Math.PI / 180 * (60 * k - 30);
-        verts.push({ x: pos.x + s * Math.cos(ang), y: topY + s * Math.sin(ang) });
+        verts.push({ x: s * Math.cos(ang), y: s * Math.sin(ang) });
       }
 
-      // Strategic marker — team-tinted hex top. Added BEFORE the outline so the
-      // outline strokes render on top of the fill (preserving the clean perimeter).
-      // A cluster of allied units at far zoom reads as a solid colored blob bounded
-      // by the team-color outline — an army-position token, not 145 mini-sprites.
+      // Strategic marker — team-tinted hex top. Drawn before the outline so the
+      // outline strokes render on top of the fill.
       const marker = new PIXI.Graphics();
       marker.poly(verts.flatMap(v => [v.x, v.y])).fill({ color: teamColor, alpha: 0.7 });
       marker.label = 'unit-marker';
       marker.visible = isFar;
-      c.addChild(marker);
+      container.addChild(marker);
 
+      // Outline — only the edges not shared with a same-team neighbor.
       const outline = new PIXI.Graphics();
       for (let k = 0; k < 6; k++) {
         const dir = HexUtils.directions[(6 - k) % 6];
@@ -382,36 +486,33 @@ export const GameCanvas: React.FC = () => {
         outline.moveTo(a.x, a.y).lineTo(b.x, b.y);
       }
       outline.stroke({ color: teamColor, width: 3, alpha: 0.95 });
-      c.addChild(outline);
+      container.addChild(outline);
 
-      // Sprite — team-specific texture (Roman legionary for red, Greek hoplite for blue),
-      // no tint. Sized to fill the hex (HexUtils.size = 40 → flat-to-flat ≈ 69px).
-      // 72×72 fills the inscribed circle with feet near the bottom of the hex face.
+      // Sprite — team-specific unit illustration. y=32 = below container origin
+      // (origin is at hex TOP; sprite anchors at its bottom-center).
       const tex = u.team === 'red' ? unitTex : unitTexBlue;
       const sprite = new PIXI.Sprite(tex);
       sprite.anchor.set(0.5, 1);
-      sprite.x = pos.x;
-      sprite.y = topY + 32;
+      sprite.x = 0;
+      sprite.y = 32;
       sprite.width = 72;
       sprite.height = 72;
       sprite.label = 'unit-sprite';
       sprite.visible = !isFar;
-      c.addChild(sprite);
+      container.addChild(sprite);
 
-      // HP bar (only when damaged). Tagged 'unit-detail' so the LOD ticker hides it
-      // at far zoom along with the sprite — at strategic scale a floating HP bar
-      // above the team-marker blob reads as visual noise.
+      // HP bar (only when damaged).
       if (u.hp < MAX_HP) {
         const barW = 26;
         const barH = 4;
-        const barX = pos.x - barW / 2;
-        const barY = topY - 40;
+        const barX = -barW / 2;
+        const barY = -40;
         const ratio = Math.max(0, u.hp / MAX_HP);
         const bg = new PIXI.Graphics();
         bg.rect(barX, barY, barW, barH).fill({ color: 0x000000, alpha: 0.6 });
         bg.label = 'unit-detail';
         bg.visible = !isFar;
-        c.addChild(bg);
+        container.addChild(bg);
         const fg = new PIXI.Graphics();
         const r = Math.round(0xef * (1 - ratio) + 0x10 * ratio);
         const g = Math.round(0x44 * (1 - ratio) + 0xb9 * ratio);
@@ -420,23 +521,21 @@ export const GameCanvas: React.FC = () => {
         fg.rect(barX, barY, barW * ratio, barH).fill({ color });
         fg.label = 'unit-detail';
         fg.visible = !isFar;
-        c.addChild(fg);
+        container.addChild(fg);
       }
 
-      // Lieutenant marker (★) — the formation is anchored on this unit at the attack target.
-      // Plus a directional arrow showing the order's captured facing (when an order exists).
-      // Tagged 'unit-detail' for the same reason as the HP bar.
+      // Lieutenant ★ + heading arrow.
       if (lieutenantIds.has(u.id)) {
         const star = new PIXI.Text({
           text: '★',
           style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
         });
         star.anchor.set(0.5);
-        star.x = pos.x;
-        star.y = topY - 44;
+        star.x = 0;
+        star.y = -44;
         star.label = 'unit-detail';
         star.visible = !isFar;
-        c.addChild(star);
+        container.addChild(star);
 
         const order = groupOrders.get(`${u.team}:${u.groupId}`);
         if (order?.attackTarget) {
@@ -445,11 +544,11 @@ export const GameCanvas: React.FC = () => {
             style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
           });
           arrow.anchor.set(0.5);
-          arrow.x = pos.x + 14;
-          arrow.y = topY - 44;
+          arrow.x = 14;
+          arrow.y = -44;
           arrow.label = 'unit-detail';
           arrow.visible = !isFar;
-          c.addChild(arrow);
+          container.addChild(arrow);
         }
       }
     });
@@ -467,7 +566,7 @@ export const GameCanvas: React.FC = () => {
       ring.visible = !isFar;
       c.addChild(ring);
     });
-  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders]);
+  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam]);
 
   useEffect(() => {
     let isMounted = true;
@@ -538,6 +637,7 @@ export const GameCanvas: React.FC = () => {
           if (existing.some(u => u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r)) {
             return prev;
           }
+          const placementType = gridDataRef.current.find(d => d.hex.q === hex.q && d.hex.r === hex.r)?.type;
           const newUnit: Unit = {
             id: crypto.randomUUID(),
             team: selectedTeamRef.current,
@@ -546,6 +646,8 @@ export const GameCanvas: React.FC = () => {
             groupId: selectedGroupRef.current,
             hp: MAX_HP,
             state: 'idle',
+            nextMoveTick: 0,
+            visionRadius: getTerrainMods(placementType).visionRadius,
           };
           next.set(strategicKey, [...existing, newUnit]);
           return next;
@@ -823,6 +925,11 @@ export const GameCanvas: React.FC = () => {
             return t ? TERRAINS[t].walkable : false;
           },
           getTerrainType: (h: Hex) => terrainAt.get(HexUtils.key(h)),
+          getTerrainMods: (h: Hex) => getTerrainMods(terrainAt.get(HexUtils.key(h))),
+          getTerrainHeight: (h: Hex) => {
+            const t = terrainAt.get(HexUtils.key(h));
+            return t ? TERRAINS[t].height : 0;
+          },
           isBarrier: (h: Hex) => terrainAt.get(HexUtils.key(h)) === 'RIVER',
         };
         const tentativeOrder: GroupOrder = {
@@ -832,6 +939,8 @@ export const GameCanvas: React.FC = () => {
         const formation = computeDefendFormation(groupUnits, tentativeOrder, {
           damagePerTick: DAMAGE_PER_TICK,
           mapApi,
+          // Pre-pairing helper; doesn't advance time. Pass 0; the helper doesn't read it.
+          currentTick: 0,
         });
         const defendAssignments: Record<string, Hex> | undefined = formation
           ? Object.fromEntries(formation.assignment)
@@ -1080,10 +1189,20 @@ export const GameCanvas: React.FC = () => {
         const isFar = world.scale.x < LOD_THRESHOLD;
         if (isFar === lastLodFar) return;
         lastLodFar = isFar;
-        for (const child of unitsGfx.current.children) {
+        // Top-level children may be per-unit containers (tactical) or flat sprites
+        // (strategic / attack-target indicators). Descend one level into containers
+        // labeled 'unit-container'; apply LOD directly to top-level labeled children.
+        const applyLod = (child: PIXI.Container) => {
           if (child.label === 'unit-sprite') child.visible = !isFar;
           else if (child.label === 'unit-marker') child.visible = isFar;
           else if (child.label === 'unit-detail') child.visible = !isFar;
+        };
+        for (const child of unitsGfx.current.children) {
+          if (child.label === 'unit-container') {
+            for (const inner of (child as PIXI.Container).children) applyLod(inner as PIXI.Container);
+          } else {
+            applyLod(child as PIXI.Container);
+          }
         }
       });
       generateWorldData();
@@ -1098,9 +1217,14 @@ export const GameCanvas: React.FC = () => {
 
   const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
+  // Monotonic tick counter passed into simulateTick so unit movement cooldowns
+  // (`unit.nextMoveTick`) compare against a real time axis. Reset on each setInterval
+  // start so a battle restart begins from tick 0.
+  const tickCounterRef = useRef(0);
 
   useEffect(() => {
     if (!isBattleRunning) return;
+    tickCounterRef.current = 0;
     const id = window.setInterval(() => {
       const strategic = currentStrategicHexRef.current;
       if (!strategic) return;
@@ -1117,8 +1241,10 @@ export const GameCanvas: React.FC = () => {
       const grid = gridDataRef.current;
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
+      tickCounterRef.current += 1;
       const result = simulateTick(units, groupOrdersRef.current, {
         damagePerTick: DAMAGE_PER_TICK,
+        currentTick: tickCounterRef.current,
         mapApi: {
           isInside: (h: Hex) => gridSet.has(HexUtils.key(h)),
           isWalkable: (h: Hex) => {
@@ -1126,6 +1252,11 @@ export const GameCanvas: React.FC = () => {
             return t ? TERRAINS[t].walkable : false;
           },
           getTerrainType: (h: Hex) => terrainAt.get(HexUtils.key(h)),
+          getTerrainMods: (h: Hex) => getTerrainMods(terrainAt.get(HexUtils.key(h))),
+          getTerrainHeight: (h: Hex) => {
+            const t = terrainAt.get(HexUtils.key(h));
+            return t ? TERRAINS[t].height : 0;
+          },
           isBarrier: (h: Hex) => terrainAt.get(HexUtils.key(h)) === 'RIVER',
         },
       });
@@ -1168,6 +1299,7 @@ export const GameCanvas: React.FC = () => {
   const defendDragRef = useRef<DefendDrag | null>(null);
   const gridDataRef = useRef<{ hex: Hex; type: string }[]>([]);
   const isBattleRunningRef = useRef(false);
+  const fogOfWarRef = useRef(false);
   useEffect(() => {
     inputModeRef.current = inputMode;
     if (inputMode !== 'order') {
@@ -1189,6 +1321,7 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { armiesRef.current = armies; }, [armies]);
   useEffect(() => { gridDataRef.current = gridData; }, [gridData]);
   useEffect(() => { isBattleRunningRef.current = isBattleRunning; }, [isBattleRunning]);
+  useEffect(() => { fogOfWarRef.current = fogOfWar; }, [fogOfWar]);
   /* eslint-enable react-hooks/immutability */
 
   // 'A' keyboard shortcut: toggle attack/order mode for the currently selected group
@@ -1341,6 +1474,22 @@ export const GameCanvas: React.FC = () => {
       }
       if (e.key === '1' || e.key === '2' || e.key === '3') {
         setSelectedGroup(Number(e.key) as GroupId);
+        return;
+      }
+      if (e.key === 'x' || e.key === 'X') {
+        const strategic = currentStrategicHexRef.current;
+        if (!strategic) return;
+        const team = selectedTeamRef.current;
+        const gid = selectedGroupRef.current;
+        const key = HexUtils.key(strategic);
+        setArmies(prev => {
+          const cur = prev.get(key) ?? [];
+          const survivors = cur.filter(u => !(u.team === team && u.groupId === gid));
+          if (survivors.length === cur.length) return prev;
+          const next = new Map(prev);
+          next.set(key, survivors);
+          return next;
+        });
         return;
       }
     };
@@ -1503,6 +1652,15 @@ export const GameCanvas: React.FC = () => {
         >
           GRID SYSTEM: {showGrid ? 'ACTIVE' : 'DEACTIVATED'}
         </button>
+
+        {viewMode === 'TACTICAL' && (
+          <button
+            onClick={() => setFogOfWar(f => !f)}
+            style={{ width: '100%', padding: '12px', background: fogOfWar ? '#10b981' : 'rgba(59, 130, 246, 0.1)', color: fogOfWar ? 'white' : '#60a5fa', border: fogOfWar ? 'none' : '1px solid rgba(59, 130, 246, 0.5)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
+          >
+            FOG OF WAR: {fogOfWar ? 'ACTIVE' : 'DEACTIVATED'}
+          </button>
+        )}
 
         {viewMode === 'TACTICAL' && (
           <div style={{

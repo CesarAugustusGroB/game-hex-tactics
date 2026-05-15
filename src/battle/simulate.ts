@@ -1,4 +1,5 @@
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
+import { heightDamageBonus, type TerrainMods } from './terrain';
 
 export type Team = 'red' | 'blue';
 export type GroupId = 1 | 2 | 3;
@@ -18,6 +19,15 @@ export interface Unit {
    *  that side-stepped tick N doesn't immediately step back to its previous hex tick
    *  N+1, which would oscillate). Optional — undefined for units that have never moved. */
   prevTacticalHex?: Hex;
+  /** Absolute tick number at which the unit is next allowed to move. Set when the unit
+   *  enters a hex: `currentTick + 1 + terrainMoveCost`. Movement steps skip any unit
+   *  with `currentTick < nextMoveTick`. Defaults to 0 on newly-placed units (immediately
+   *  movable). Charge mode halves the entry penalty (floor). */
+  nextMoveTick: number;
+  /** Sight radius (hexes) for the unit. Refreshed each tick from the terrain it stands
+   *  on. Data-only this pass: nothing reads it yet. Defaults to 4 on newly-placed units
+   *  (matches `DEFAULT_TERRAIN_MODS.visionRadius`). */
+  visionRadius: number;
 }
 
 /**
@@ -80,9 +90,17 @@ export interface MapApi {
   isInside(hex: Hex): boolean;
   /** Whether terrain at the hex permits unit occupation. */
   isWalkable(hex: Hex): boolean;
-  /** Terrain key at the given hex (e.g. 'HILL', 'PLAIN'), or undefined if off-map.
+  /** Terrain key at the given hex (e.g. 'HILL', 'GRASSLAND'), or undefined if off-map.
    *  Used by 'defendHeight' to identify the perimeter to defend. */
   getTerrainType(hex: Hex): string | undefined;
+  /** Mechanical mods (defenseMult / moveCost / attritionPerTick / visionRadius) for the
+   *  terrain at this hex. Off-map / unknown terrain returns neutral defaults. Sim reads
+   *  through this method so the same code path works in-engine and in the harness. */
+  getTerrainMods(hex: Hex): TerrainMods;
+  /** Terrain elevation at the given hex, in the same height units as `TerrainDef.height`.
+   *  Used by the damage step to compute the downhill attack bonus. Off-map hexes return
+   *  0 (no bonus, no penalty). */
+  getTerrainHeight(hex: Hex): number;
   /** Whether this hex is a "natural barrier" — walkable but cuts the defense line.
    *  Today: RIVER hexes. A perimeter border that touches a barrier hex is a segment
    *  terminator; the defendHeight BFS does not expand past it. */
@@ -92,6 +110,10 @@ export interface MapApi {
 export interface SimulationConfig {
   damagePerTick: number;
   mapApi: MapApi;
+  /** Monotonic tick counter supplied by the caller (the GameCanvas setInterval / the
+   *  harness loop). Used by movement to compare against each unit's `nextMoveTick`
+   *  cooldown. Callers must increment this each tick; the sim itself is stateless. */
+  currentTick: number;
 }
 
 export interface SimulationResult {
@@ -838,6 +860,9 @@ export const simulateTick = (
   const byId = new Map<string, Unit>(working.map(u => [u.id, u]));
 
   // Combat phase: each unit with adjacent enemies deals damage to the weakest one.
+  // Per-pair damage = damagePerTick * (1 + heightBonus) / defenderDefenseMult. Attacker
+  // terrain contributes ONLY via the height bonus (offensive lever); defender terrain
+  // contributes the cover divisor (defenseMult > 1 = better cover, < 1 = worse cover).
   const damage = new Map<string, number>();
   for (const u of working) {
     const adjacentEnemies = HexUtils.getNeighbors(u.tacticalHex)
@@ -849,7 +874,11 @@ export const simulateTick = (
         const e = adjacentEnemies[i];
         if (e.hp < target.hp || (e.hp === target.hp && e.id < target.id)) target = e;
       }
-      damage.set(target.id, (damage.get(target.id) ?? 0) + config.damagePerTick);
+      const hAtt = config.mapApi.getTerrainHeight(u.tacticalHex);
+      const hDef = config.mapApi.getTerrainHeight(target.tacticalHex);
+      const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
+      const dmg = (config.damagePerTick * (1 + heightDamageBonus(hAtt, hDef))) / defenseMult;
+      damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
       u.state = 'fighting';
     }
   }
@@ -882,9 +911,26 @@ export const simulateTick = (
     ordersOut.set(key, next);
   };
 
+  // Cooldown helpers. Cooldown is checked ONCE per tick at the start of each unit's
+  // movement attempt — not between charge sub-steps — so charge can still cover
+  // CHARGE_SPEED_HEXES hexes within a single tick even after writing its own cooldown.
+  const isOnCooldown = (u: Unit): boolean => config.currentTick < u.nextMoveTick;
+  // Penalty in extra ticks when entering `hex`. Charge halves the entry moveCost (floor)
+  // so momentum partially overrides terrain.
+  const entryPenalty = (hex: Hex, isCharge: boolean): number => {
+    const cost = config.mapApi.getTerrainMods(hex).moveCost;
+    return isCharge ? Math.floor(cost / 2) : cost;
+  };
+  // Write the cooldown that will block the unit's NEXT tick movement attempt.
+  const applyEntryCooldown = (u: Unit, hex: Hex, isCharge: boolean): void => {
+    u.nextMoveTick = config.currentTick + 1 + entryPenalty(hex, isCharge);
+  };
+
   // Rigid-block helper: validate every unit's projected position; commit all-or-nothing.
   // Used by 'march' and 'retreat'. Returns true on commit, false if blocked.
+  // Blocks when ANY unit is still on cooldown — the block moves as one or not at all.
   const tryRigidBlockStep = (groupUnits: Unit[], delta: Hex): boolean => {
+    if (groupUnits.some(isOnCooldown)) return false;
     const groupIds = new Set(groupUnits.map(u => u.id));
     const projected: { unit: Unit; next: Hex }[] = [];
     for (const u of groupUnits) {
@@ -898,6 +944,7 @@ export const simulateTick = (
     for (const p of projected) {
       p.unit.tacticalHex = p.next;
       p.unit.state = 'moving';
+      applyEntryCooldown(p.unit, p.next, false);
       occupancy.set(HexUtils.key(p.next), p.unit);
     }
     return true;
@@ -941,6 +988,7 @@ export const simulateTick = (
 
       for (const u of groupUnits) {
         if (u.hp <= 0) continue;
+        if (isOnCooldown(u)) continue;
 
         // First pass: pick the closest enemy whose engagement (baseline + already-
         // claimed-this-tick) is still below the cap. Spreads new attackers across
@@ -1010,6 +1058,7 @@ export const simulateTick = (
           u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
           u.tacticalHex = bestNext;
           u.state = 'moving';
+          applyEntryCooldown(u, bestNext, false);
           occupancy.set(HexUtils.key(bestNext), u);
         }
       }
@@ -1019,6 +1068,13 @@ export const simulateTick = (
       // cycle. Without this, the lance re-fires every sub-step and stacks damage on an
       // enemy as the unit closes in (effectively eternal damage).
       const damaged = new Set(order.chargeDamagedIds ?? []);
+      // Snapshot which units are cooldown-blocked AT START of this tick. Cooldown is a
+      // next-tick gate, not a within-tick gate — so once a charging unit starts moving
+      // this tick, its own freshly-written cooldown does NOT prevent later sub-steps
+      // within the same tick. A unit cooldown-blocked at start sits out the whole charge
+      // tick (it can still apply impact damage from its current position, mirroring how
+      // a non-charging straggler still threatens its arc).
+      const chargeBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
       for (let step = 0; step < CHARGE_SPEED_HEXES; step++) {
         // Step forward-most unit first, so a rear unit's check of occupancy.get(next)
         // happens AFTER any ally ahead of it has attempted its own step (and either
@@ -1033,6 +1089,7 @@ export const simulateTick = (
         );
         for (const u of stepOrder) {
           if (u.hp <= 0) continue;
+          if (chargeBlocked.has(u.id)) continue;
           const next: Hex = { q: u.tacticalHex.q + delta.q, r: u.tacticalHex.r + delta.r };
           if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
           const occupant = occupancy.get(HexUtils.key(next));
@@ -1043,6 +1100,9 @@ export const simulateTick = (
           occupancy.delete(HexUtils.key(u.tacticalHex));
           u.tacticalHex = next;
           u.state = 'moving';
+          // Overwrite each substep so the cooldown carried to the next tick reflects the
+          // unit's FINAL hex this tick — the terrain it's standing on after the charge.
+          applyEntryCooldown(u, next, true);
           occupancy.set(HexUtils.key(next), u);
         }
         // Impact damage: each charging unit lances CHARGE_IMPACT_RANGE hexes ahead, but
@@ -1118,6 +1178,7 @@ export const simulateTick = (
         const target = assignment.get(u.id);
         if (!target) continue;
         if (target.q === u.tacticalHex.q && target.r === u.tacticalHex.r) continue;
+        if (isOnCooldown(u)) continue;
 
         // "Formation footprint" = blob + back-rank extension (both live in `rank`).
         // If currently inside the footprint, only step within it — preserves tight
@@ -1163,11 +1224,33 @@ export const simulateTick = (
           u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
           u.tacticalHex = bestNext;
           u.state = 'moving';
+          applyEntryCooldown(u, bestNext, false);
           occupancy.set(HexUtils.key(bestNext), u);
         }
       }
     }
   }
+
+  // End-of-tick phase. Two effects, run after damage + movement resolve:
+  //   1. Attrition: hostile terrain (RIVER, ROCKY, HILL) drains HP. Routed through the
+  //      same accumulator + apply pattern as combat damage so the death path is shared
+  //      (groups can dissolve from attrition alone if they sit on bad ground).
+  //   2. Vision refresh: each living unit's `visionRadius` is set from its current hex's
+  //      terrain. Data-only this pass — no consumer reads it yet.
+  // Units that die during attrition are filtered out of the returned `units` below.
+  const attritionDamage = new Map<string, number>();
+  for (const u of working) {
+    if (u.hp <= 0) continue;
+    const mods = config.mapApi.getTerrainMods(u.tacticalHex);
+    if (mods.attritionPerTick > 0) {
+      attritionDamage.set(u.id, (attritionDamage.get(u.id) ?? 0) + mods.attritionPerTick);
+    }
+    u.visionRadius = mods.visionRadius;
+  }
+  attritionDamage.forEach((dmg, id) => {
+    const t = byId.get(id);
+    if (t) t.hp -= dmg;
+  });
 
   return { units: working.filter(u => u.hp > 0), orders: ordersOut };
 };

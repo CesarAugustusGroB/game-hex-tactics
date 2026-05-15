@@ -13,12 +13,13 @@ import {
 import type {
   Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, SimulationConfig, MapApi,
 } from '../src/battle/simulate';
+import { getTerrainMods } from '../src/battle/terrain';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
 
 const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
 const id = (n: number): string => `u${String(n).padStart(2, '0')}`;
 
-/** 7-hex HILL blob: center (0,0) plus its 6 axial neighbors. Everything else = PLAIN. */
+/** 7-hex HILL blob: center (0,0) plus its 6 axial neighbors. Everything else = GRASSLAND. */
 const HILL_BLOB: Hex[] = [{ q: 0, r: 0 }, ...HexUtils.getNeighbors({ q: 0, r: 0 })];
 const HILL_TERRAIN = new Map(HILL_BLOB.map(h => [HexUtils.key(h), 'HILL']));
 
@@ -79,17 +80,17 @@ RIDGELINE_WITH_RIVERS.set(HexUtils.key({ q: 3, r: 0 }), 'RIVER');
 RIDGELINE_WITH_RIVERS.set(HexUtils.key({ q: -3, r: 2 }), 'RIVER');
 
 /**
- * Same HILL blob, but with GRASS on the east side and SAND on the west side. Used to
- * verify the directional `defendFrom` filter — defendFrom='GRASS' should pull units to
+ * Same HILL blob, but with FOREST on the east side and SAND on the west side. Used to
+ * verify the directional `defendFrom` filter — defendFrom='FOREST' should pull units to
  * the east-facing borders only.
  *
- * East GRASS hexes (neighbors of E/NE/SE HILL borders):  (2,0), (2,-1), (1,1)
+ * East FOREST hexes (neighbors of E/NE/SE HILL borders):  (2,0), (2,-1), (1,1)
  * West SAND hexes (neighbors of W/SW/NW HILL borders):  (-2,0), (-2,1), (-1,-1)
  */
 const HILL_DIRECTIONAL_TERRAIN = new Map<string, string>(HILL_TERRAIN);
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 2, r: 0 }), 'GRASS');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 2, r: -1 }), 'GRASS');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 1, r: 1 }), 'GRASS');
+HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 2, r: 0 }), 'FOREST');
+HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 2, r: -1 }), 'FOREST');
+HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 1, r: 1 }), 'FOREST');
 HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: -2, r: 0 }), 'SAND');
 HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: -2, r: 1 }), 'SAND');
 HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: -1, r: -1 }), 'SAND');
@@ -118,7 +119,7 @@ interface Scenario {
   /** Override the heading auto-derived from group centroid → target. */
   forceHeading?: number;
   /** Terrain key per hex for the 'defendHeight' mode. Hexes not listed are treated as
-   *  'PLAIN' (a walkable default). All terrains here are also walkable. */
+   *  'GRASSLAND' (a walkable default). All terrains here are also walkable. */
   terrainAt?: Map<string, string>;
   /** Sticky 'defendTerrain' for 'defendHeight' — captured at toggle time in the live
    *  game; supplied directly here. */
@@ -139,7 +140,24 @@ const seedUnit = (s: ScenarioUnit): Unit => ({
   groupId: s.groupId,
   hp: s.hp ?? 100,
   state: 'idle',
+  nextMoveTick: 0,
+  visionRadius: 4,
 });
+
+// Heights for terrains the harness uses. Mirrors `TERRAINS[type].height` in
+// GameCanvas.tsx for shared keys; THICKET and RIDGELINE are harness-only fictions
+// (used only by the defendHeight scenarios) and need plausible elevations so the
+// damage step's `getTerrainHeight` returns something sane on those hexes.
+const HARNESS_HEIGHTS: Record<string, number> = {
+  SAND: 8,
+  GRASSLAND: 12,
+  FOREST: 18,
+  HILL: 35,
+  ROCKY: 55,
+  RIVER: 10,
+  THICKET: 18,    // sim-only, treated like FOREST
+  RIDGELINE: 35,  // sim-only, treated like HILL
+};
 
 const rowAt = (n: number, westQ: number, r: number, team: Team, groupId: GroupId): ScenarioUnit[] =>
   Array.from({ length: n }, (_, i) => ({
@@ -341,7 +359,7 @@ const scenarios: Scenario[] = [
   },
   {
     // DEFEND HEIGHT (no bunching): 7-hex HILL blob, no rivers. 6 reds ALL start clustered
-    // in the SW corner of PLAIN (not adjacent to most borders). Anchor (0,0). With the
+    // in the SW corner of GRASSLAND (not adjacent to most borders). Anchor (0,0). With the
     // global slot-assignment algorithm, each unit's projected index along the perimeter
     // determines which slot it gets — units don't all flock to the nearby western borders.
     // After enough ticks, the 6 units should occupy 6 DIFFERENT perimeter hexes, spread
@@ -364,7 +382,7 @@ const scenarios: Scenario[] = [
   },
   {
     // DEFEND HEIGHT (multi-rank fill): 7-hex HILL blob, no rivers. 6 reds start on
-    // PLAIN adjacent to each of the 6 borders. Rank 0 = 6 perimeter; rank 1 = center.
+    // GRASSLAND adjacent to each of the 6 borders. Rank 0 = 6 perimeter; rank 1 = center.
     // Expected: every unit reaches a border in ~1-2 ticks. Demonstrates that rank-0
     // fills cleanly when each unit has an unblocked entry hex.
     name: 'defend-multi-rank-fills-front',
@@ -443,7 +461,7 @@ const scenarios: Scenario[] = [
   },
   {
     // DEFEND HEIGHT (directional): same 7-hex HILL blob, but east-side neighbors are
-    // GRASS and west-side are SAND. With defendFrom='GRASS', the border list narrows to
+    // FOREST and west-side are SAND. With defendFrom='FOREST', the border list narrows to
     // the 3 east-facing HILL borders: (1,0), (1,-1), (0,1). 1 red unit at the center
     // should step to one of those 3, never to the west side.
     name: 'defend-directional',
@@ -454,27 +472,91 @@ const scenarios: Scenario[] = [
     team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 3,
     mode: 'defendHeight',
     defendTerrain: 'HILL',
-    defendFrom: 'GRASS',
+    defendFrom: 'FOREST',
     terrainAt: HILL_DIRECTIONAL_TERRAIN,
   },
   {
-    // DEFEND HEIGHT: 7-hex HILL blob (center + 6 neighbors), the rest PLAIN. 4 reds:
+    // DEFEND HEIGHT: 7-hex HILL blob (center + 6 neighbors), the rest GRASSLAND. 4 reds:
     //   - u01 on the center (NOT a border, surrounded by HILL) → steps to a free border
     //   - u02/u03 on E/NE borders → already on a border, hold position
-    //   - u04 OFF the blob on PLAIN, one hex from a free SW border → routes onto blob
+    //   - u04 OFF the blob on GRASSLAND, one hex from a free SW border → routes onto blob
     // After ~2 ticks all 4 should be on border hexes.
     name: 'defend-spread-to-border',
     units: [
       { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },    // center HILL (not border)
       { id: id(2), team: 'red', groupId: 1, hex: { q: 1, r: 0 } },    // E HILL border
       { id: id(3), team: 'red', groupId: 1, hex: { q: 1, r: -1 } },   // NE HILL border
-      { id: id(4), team: 'red', groupId: 1, hex: { q: -2, r: 1 } },   // off-blob PLAIN, adj to SW border
+      { id: id(4), team: 'red', groupId: 1, hex: { q: -2, r: 1 } },   // off-blob GRASSLAND, adj to SW border
     ],
     attackTarget: { q: 10, r: 0 },
     team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 4,
     mode: 'defendHeight',
     defendTerrain: 'HILL',
     terrainAt: HILL_TERRAIN,
+  },
+  {
+    // TERRAIN MODS: equal-size infantry groups, one on HILL (h=35) facing one on
+    // GRASSLAND (h=12), already in melee contact. Verifies the per-pair damage
+    // formula end-to-end:
+    //   Hill → Grassland: 10 * (1 + 0.23) / 1.00 = 12.3/tick (down-hill bonus, no cover)
+    //   Grassland → Hill: 10 * (1 + 0)    / 1.25 =  8.0/tick (uphill no-bonus, hill cover)
+    //   Ratio ~1.54x throughput advantage to the hill side.
+    // Order is on red (HILL), but the rigid-block march freezes on combat (combat begins
+    // tick 1), so neither side moves — what we're measuring is the damage asymmetry
+    // during static melee. Expected: blues die first (total blue HP drains in ~8 ticks
+    // vs ~12 ticks for reds at the start-of-fight rates), leaving the hill side intact.
+    name: 'hill_vs_grassland',
+    units: [
+      // Reds on the HILL column at q=0.
+      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: -1 } },
+      { id: id(2), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },
+      { id: id(3), team: 'red', groupId: 1, hex: { q: 0, r: 1 } },
+      // Blues on the GRASSLAND column at q=1 (each one E-adjacent to its red mirror).
+      { id: 'b1', team: 'blue', groupId: 1, hex: { q: 1, r: -1 } },
+      { id: 'b2', team: 'blue', groupId: 1, hex: { q: 1, r: 0 } },
+      { id: 'b3', team: 'blue', groupId: 1, hex: { q: 1, r: 1 } },
+    ],
+    attackTarget: { q: 10, r: 0 },
+    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 14,
+    forceHeading: 0, // east; immaterial since combat freezes march on tick 1
+    terrainAt: new Map<string, string>([
+      // HILL column (where reds stand).
+      [HexUtils.key({ q: 0, r: -1 }), 'HILL'],
+      [HexUtils.key({ q: 0, r:  0 }), 'HILL'],
+      [HexUtils.key({ q: 0, r:  1 }), 'HILL'],
+      // GRASSLAND column (where blues stand). Listed explicitly so the
+      // terrainAt-map renderer shows the boundary clearly.
+      [HexUtils.key({ q: 1, r: -1 }), 'GRASSLAND'],
+      [HexUtils.key({ q: 1, r:  0 }), 'GRASSLAND'],
+      [HexUtils.key({ q: 1, r:  1 }), 'GRASSLAND'],
+    ]),
+  },
+  {
+    // TERRAIN MODS: HILL (h=35, def 1.25) attacker vs FOREST (h=18, def 1.30) defender.
+    // Forest's 1.30 cover almost cancels hill's +17% downhill bonus:
+    //   Hill → Forest: 10 * (1 + 0.17) / 1.30 ≈ 9.0/tick
+    //   Forest → Hill: 10 * (1 + 0)    / 1.25  = 8.0/tick
+    //   Ratio ~1.125x throughput advantage — much tighter than hill_vs_grassland's 1.54x.
+    name: 'hill_vs_forest',
+    units: [
+      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: -1 } },
+      { id: id(2), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },
+      { id: id(3), team: 'red', groupId: 1, hex: { q: 0, r: 1 } },
+      { id: 'b1', team: 'blue', groupId: 1, hex: { q: 1, r: -1 } },
+      { id: 'b2', team: 'blue', groupId: 1, hex: { q: 1, r: 0 } },
+      { id: 'b3', team: 'blue', groupId: 1, hex: { q: 1, r: 1 } },
+    ],
+    attackTarget: { q: 10, r: 0 },
+    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 20,
+    forceHeading: 0,
+    terrainAt: new Map<string, string>([
+      [HexUtils.key({ q: 0, r: -1 }), 'HILL'],
+      [HexUtils.key({ q: 0, r:  0 }), 'HILL'],
+      [HexUtils.key({ q: 0, r:  1 }), 'HILL'],
+      [HexUtils.key({ q: 1, r: -1 }), 'FOREST'],
+      [HexUtils.key({ q: 1, r:  0 }), 'FOREST'],
+      [HexUtils.key({ q: 1, r:  1 }), 'FOREST'],
+    ]),
   },
 ];
 
@@ -510,11 +592,11 @@ const renderGrid = (units: Unit[], target: Hex, unwalkable: Set<string>, terrain
         const tt = terrainAt.get(k);
         if (tt === 'HILL') ch = '^';
         else if (tt === 'RIDGELINE') ch = '^';
-        else if (tt === 'GRASS') ch = 'g';
+        else if (tt === 'FOREST') ch = 'f';
         else if (tt === 'SAND') ch = 's';
         else if (tt === 'RIVER') ch = '~';
         else if (tt === 'THICKET') ch = 't';
-        else if (tt === 'PLAIN') ch = ' ';
+        else if (tt === 'GRASSLAND') ch = ' ';
         else ch = '?';
       }
       else ch = ' ';
@@ -527,10 +609,13 @@ const renderGrid = (units: Unit[], target: Hex, unwalkable: Set<string>, terrain
 
 const buildMapApi = (unwalkable: Hex[] | undefined, terrainAt?: Map<string, string>): MapApi => {
   const blocked = new Set((unwalkable ?? []).map(h => HexUtils.key(h)));
+  const typeAt = (h: Hex) => terrainAt?.get(HexUtils.key(h)) ?? 'GRASSLAND';
   return {
     isInside: () => true, // harness has no bounded map
     isWalkable: (h: Hex) => !blocked.has(HexUtils.key(h)),
-    getTerrainType: (h: Hex) => terrainAt?.get(HexUtils.key(h)) ?? 'PLAIN',
+    getTerrainType: typeAt,
+    getTerrainMods: (h: Hex) => getTerrainMods(typeAt(h)),
+    getTerrainHeight: (h: Hex) => HARNESS_HEIGHTS[typeAt(h)] ?? 0,
     isBarrier: (h: Hex) => terrainAt?.get(HexUtils.key(h)) === 'RIVER',
   };
 };
@@ -582,6 +667,7 @@ const runScenario = (s: Scenario): ScenarioResult => {
   const config: SimulationConfig = {
     damagePerTick: 10,
     mapApi: buildMapApi(s.unwalkable, s.terrainAt),
+    currentTick: 0, // overridden per-tick in the loop below
   };
 
   // Initial centroid (after snap, if applicable) for "marched N hexes" metric.
@@ -593,7 +679,7 @@ const runScenario = (s: Scenario): ScenarioResult => {
 
   let fightingTicks = 0;
   for (let tick = 1; tick <= s.maxTicks; tick++) {
-    const result = simulateTick(units, orders, config);
+    const result = simulateTick(units, orders, { ...config, currentTick: tick });
     units = result.units;
     orders = result.orders;
 
