@@ -11,7 +11,7 @@ import {
   CHARGE_DURATION_TICKS,
 } from '../src/battle/simulate';
 import type {
-  Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, SimulationConfig, MapApi,
+  Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, SimulationConfig, MapApi, UnitType,
 } from '../src/battle/simulate';
 import { getTerrainMods } from '../src/battle/terrain';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
@@ -101,6 +101,9 @@ interface ScenarioUnit {
   groupId: GroupId;
   hex: Hex;
   hp?: number;
+  /** Default 'infantry' (matches pre-feature behavior). Set to 'cavalry' to opt a
+   *  scenario unit into the faster / harder-charging / lower-HP profile. */
+  unitType?: UnitType;
 }
 
 interface Scenario {
@@ -135,6 +138,7 @@ interface Scenario {
 const seedUnit = (s: ScenarioUnit, terrainAt?: Map<string, string>): Unit => ({
   id: s.id,
   team: s.team,
+  unitType: s.unitType ?? 'infantry',
   tacticalHex: s.hex,
   homeHex: s.hex,
   groupId: s.groupId,

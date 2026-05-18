@@ -5,10 +5,24 @@ export type Team = 'red' | 'blue';
 export type GroupId = 1 | 2 | 3;
 export type UnitState = 'idle' | 'moving' | 'fighting';
 export type FormationType = 'hex' | 'line' | 'wedge' | 'column';
+/** Distinguishes the unit roles. Per-type tunables (speed, max HP, charge damage, missile
+ *  range) live in the *_BY_TYPE records below.
+ *  - infantry:    baseline foot. 1 hex/tick, 100 HP.
+ *  - cavalry:     2 hex/tick on march, 3 on charge. 60 HP. 2× lance impact.
+ *  - skirmisher:  1.5 hex/tick (alternates 1/2 per tick). 40 HP. Throws a javelin at the
+ *                 closest enemy within 3 hexes if NOT in melee — see ranged phase. Weak
+ *                 in melee and on charge.
+ *  Mixed groups take the slowest unit's speed for free (the rigid-block step waits on
+ *  every unit; the multi-step loop bound is `Math.min` over the group). */
+export type UnitType = 'infantry' | 'cavalry' | 'skirmisher';
 
 export interface Unit {
   id: string;
   team: Team;
+  /** Infantry (default) or cavalry. Optional in the type for forgiving deserialization
+   *  during hot-reload of pre-feature state; every consumer falls back to 'infantry' via
+   *  `u.unitType ?? 'infantry'`. */
+  unitType?: UnitType;
   tacticalHex: Hex;
   homeHex: Hex;
   groupId: GroupId;
@@ -116,18 +130,77 @@ export interface SimulationConfig {
   currentTick: number;
 }
 
+/** A projectile thrown during this tick, surfaced to the renderer for animation. The sim
+ *  itself only records the event — damage was already applied in the combat phase. The
+ *  canvas spawns a sprite that tweens fromHex → toHex over a sub-tick duration. */
+export interface Projectile {
+  fromHex: Hex;
+  toHex: Hex;
+  attackerId: string;
+  targetId: string;
+}
+
 export interface SimulationResult {
   units: Unit[];
   /** Reference-equal to the input orders Map when no order needed mutation this tick,
    *  so React `setGroupOrders(result.orders)` is a cheap no-op when nothing changed. */
   orders: Map<string, GroupOrder>;
+  /** Ranged attacks fired this tick. Empty when no skirmisher threw. The renderer reads
+   *  this each tick; consumers that don't draw projectiles (the sim harness) ignore it. */
+  projectiles: Projectile[];
 }
 
 /** CHARGE tuning. Duration in ticks; at TICK_MS=500 this is 1.5s real-time. */
 export const CHARGE_DURATION_TICKS = 3;
-export const CHARGE_SPEED_HEXES = 2;
 export const CHARGE_IMPACT_RANGE = 2;
-export const CHARGE_IMPACT_DAMAGE = 10;
+
+/** Per-unit-type hexes advanced per tick on march/retreat/unleash. Mixed groups march at
+ *  the GROUP MIN — `Math.min(...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType]))`.
+ *  Fractional values (skirmisher 1.5) resolve to alternating integer steps per tick via
+ *  `stepsForTick(speed, currentTick)` so the rigid-block step stays integer-axial. */
+export const MARCH_HEXES_PER_TICK: Record<UnitType, number> = {
+  infantry: 1,
+  cavalry: 2,
+  skirmisher: 1.5,
+};
+
+/** Per-unit-type hexes advanced per tick during a CHARGE. Same group-min rule as
+ *  `MARCH_HEXES_PER_TICK`: mixed cavalry+infantry charge runs at infantry speed (2).
+ *  Skirmisher charges at infantry pace — "no shock bonus." */
+export const CHARGE_HEXES_PER_TICK: Record<UnitType, number> = {
+  infantry: 2,
+  cavalry: 3,
+  skirmisher: 2,
+};
+
+/** Lance impact damage on a single enemy per CHARGE pass, keyed by the ATTACKER's type.
+ *  Each enemy is hit at most once per charge cycle (`chargeDamagedIds` tracks that). */
+export const CHARGE_IMPACT_DAMAGE_BY_TYPE: Record<UnitType, number> = {
+  infantry: 10,
+  cavalry: 20,
+  skirmisher: 5,
+};
+
+/** Per-unit-type spawn HP. Cavalry is glass-fragile; skirmisher even more so. Used by
+ *  `paintPlace` in the engine and by the HP-bar denominator in `drawUnits`. */
+export const MAX_HP_BY_TYPE: Record<UnitType, number> = {
+  infantry: 100,
+  cavalry: 60,
+  skirmisher: 40,
+};
+
+/** Max axial distance a skirmisher can throw a javelin. Pure radius — no line-of-sight
+ *  blocking by terrain, consistent with the vision model. */
+export const SKIRMISHER_MISSILE_RANGE = 3;
+/** Damage of one javelin hit. Defender's `defenseMult` still applies (terrain cover
+ *  works against missiles). One throw per skirmisher per tick, ONLY when not in melee. */
+export const SKIRMISHER_MISSILE_DAMAGE = 5;
+
+/** Resolve a fractional per-tick speed (e.g. 1.5) to integer hexes for THIS tick using a
+ *  difference-of-floors. Guarantees the long-run average equals `speed` while staying
+ *  integer per tick: 1.5 → 1, 2, 1, 2, ... ; 1.0 → 1, 1, 1, ... ; 2.0 → 2, 2, 2, ... */
+export const stepsForTick = (speed: number, tick: number): number =>
+  Math.floor((tick + 1) * speed) - Math.floor(tick * speed);
 
 /** UNLEASH engagement cap: max allies attacking a single enemy at once. Above the cap,
  *  new units pick a less-crowded enemy instead of dogpiling. 3 covers a clean half-arc
@@ -348,8 +421,8 @@ export const computeLineDragSlots = (
   count: number,
   startHex: Hex,
   endHex: Hex,
-): { slots: Hex[]; headingForward: number } => {
-  if (count <= 0) return { slots: [], headingForward: 0 };
+): { slots: Hex[]; headingForward: number; frontWidth: number } => {
+  if (count <= 0) return { slots: [], headingForward: 0, frontWidth: 0 };
   const fullLine = HexUtils.hexLine(startHex, endHex);
   // Cap front-rank width at count (no point making a line longer than the army).
   const w = Math.min(fullLine.length, count);
@@ -377,7 +450,7 @@ export const computeLineDragSlots = (
       slots.push(addHex(front[i], back, r));
     }
   }
-  return { slots, headingForward };
+  return { slots, headingForward, frontWidth: w };
 };
 
 /**
@@ -517,20 +590,13 @@ export const computeHexDragSlots = (
 };
 
 /**
- * Pair units to slots by projection onto the march direction (group centroid → target),
- * with lateral position as a tiebreak. Sorted descending so the frontmost unit (closest
- * to target along march) gets slots[0] — which by convention across all slot generators
- * is the lieutenant slot at/near the attack target. Used exclusively at deploy time to
- * choose which unit teleports to which slot; the rigid-block march itself doesn't need
- * any pairing since every unit moves by the same delta.
+ * March-projection ranking shared by all deploy-time pairing functions. Projects each
+ * unit onto the march axis (group centroid → target) and returns unit indices sorted
+ * descending — the frontmost unit (closest to target along the march vector) comes first.
+ * Lateral position is the tiebreak, unit id is the final deterministic tiebreak. Pure.
  */
-export const computeOrderedSlotAssignments = (
-  units: Unit[],
-  slots: Hex[],
-  target: Hex,
-): Map<string, Hex> => {
-  const result = new Map<string, Hex>();
-  if (units.length === 0 || slots.length === 0) return result;
+const projectedRanking = (units: Unit[], target: Hex): number[] => {
+  if (units.length === 0) return [];
   const targetPx = HexUtils.hexToPixel(target);
   let cx = 0, cy = 0;
   for (const u of units) {
@@ -556,9 +622,122 @@ export const computeOrderedSlotAssignments = (
     const idb = units[b.ui].id;
     return ida < idb ? -1 : ida > idb ? 1 : 0;
   });
+  return ranked.map(r => r.ui);
+};
+
+/**
+ * Pair units to slots by projection onto the march direction (group centroid → target),
+ * with lateral position as a tiebreak. Sorted descending so the frontmost unit (closest
+ * to target along march) gets slots[0] — which by convention across all slot generators
+ * is the lieutenant slot at/near the attack target. Used exclusively at deploy time to
+ * choose which unit teleports to which slot; the rigid-block march itself doesn't need
+ * any pairing since every unit moves by the same delta.
+ */
+export const computeOrderedSlotAssignments = (
+  units: Unit[],
+  slots: Hex[],
+  target: Hex,
+): Map<string, Hex> => {
+  const result = new Map<string, Hex>();
+  if (units.length === 0 || slots.length === 0) return result;
+  const ranked = projectedRanking(units, target);
   for (let i = 0; i < ranked.length && i < slots.length; i++) {
-    result.set(units[ranked[i].ui].id, slots[i]);
+    result.set(units[ranked[i]].id, slots[i]);
   }
+  return result;
+};
+
+/**
+ * LINE-formation pairing that respects unit role. Used at deploy time when the formation
+ * is `line`. Slot index 0..frontWidth-1 is the front rank; frontWidth..2·frontWidth-1 is
+ * the second rank; etc. Per-type preferences:
+ *   - cavalry    → front-rank flanks first (outside-in), then flanks of subsequent ranks
+ *   - skirmisher → front-rank center first (center-out), then center of subsequent ranks
+ *   - infantry   → rank 1, rank 2, ..., last rank (left-to-right per rank), then rank 0
+ * Within a type, units are taken in projection order (frontmost-first) so a type's
+ * "leader" lands on its highest-priority slot. Overflow inside a type spills into any
+ * remaining unused slot, in slot-index order. Processing order is fixed: cavalry, then
+ * skirmishers, then infantry — so infantry overflow can't displace skirmishers from the
+ * front-rank center.
+ */
+export const computeLineSlotAssignmentsByType = (
+  units: Unit[],
+  slots: Hex[],
+  target: Hex,
+  frontWidth: number,
+): Map<string, Hex> => {
+  const result = new Map<string, Hex>();
+  if (units.length === 0 || slots.length === 0 || frontWidth <= 0) return result;
+
+  const rankedUis = projectedRanking(units, target);
+  const buckets: Record<UnitType, string[]> = { infantry: [], cavalry: [], skirmisher: [] };
+  for (const ui of rankedUis) {
+    const t = units[ui].unitType ?? 'infantry';
+    buckets[t].push(units[ui].id);
+  }
+
+  const totalRanks = Math.ceil(slots.length / frontWidth);
+  const flanksOutsideIn = (w: number): number[] => {
+    const out: number[] = [];
+    let l = 0, r = w - 1;
+    while (l <= r) { out.push(l); if (r !== l) out.push(r); l++; r--; }
+    return out;
+  };
+  const centerOut = (w: number): number[] => {
+    const mid = Math.floor((w - 1) / 2);
+    const out: number[] = [mid];
+    for (let d = 1; d <= w; d++) {
+      if (mid - d >= 0) out.push(mid - d);
+      if (mid + d <= w - 1) out.push(mid + d);
+    }
+    return out;
+  };
+  const rankRange = (r: number, w: number): number[] => {
+    const start = r * frontWidth;
+    const end = Math.min(start + w, slots.length);
+    const out: number[] = [];
+    for (let i = start; i < end; i++) out.push(i);
+    return out;
+  };
+
+  const cavPrefs: number[] = [];
+  const skirPrefs: number[] = [];
+  const infPrefs: number[] = [];
+  for (let r = 0; r < totalRanks; r++) {
+    const rankStart = r * frontWidth;
+    const w = Math.min(frontWidth, slots.length - rankStart);
+    cavPrefs.push(...flanksOutsideIn(w).map(i => rankStart + i));
+    skirPrefs.push(...centerOut(w).map(i => rankStart + i));
+  }
+  for (let r = 1; r < totalRanks; r++) {
+    const rankStart = r * frontWidth;
+    const w = Math.min(frontWidth, slots.length - rankStart);
+    infPrefs.push(...rankRange(r, w));
+  }
+  infPrefs.push(...rankRange(0, Math.min(frontWidth, slots.length)));
+
+  const used = new Set<number>();
+  const assignFromPrefs = (ids: string[], prefs: number[]) => {
+    let unitIdx = 0;
+    for (const slotIdx of prefs) {
+      if (unitIdx >= ids.length) return;
+      if (used.has(slotIdx)) continue;
+      used.add(slotIdx);
+      result.set(ids[unitIdx++], slots[slotIdx]);
+    }
+    // Fallback: drop any remaining units of this type into the first available slots in
+    // index order. Triggers only when a type has more units than its preferred ranks hold.
+    for (let i = 0; i < slots.length && unitIdx < ids.length; i++) {
+      if (used.has(i)) continue;
+      used.add(i);
+      result.set(ids[unitIdx++], slots[i]);
+    }
+  };
+
+  assignFromPrefs(buckets.cavalry, cavPrefs);
+  assignFromPrefs(buckets.skirmisher, skirPrefs);
+  assignFromPrefs(buckets.infantry, infPrefs);
+
   return result;
 };
 
@@ -859,11 +1038,17 @@ export const simulateTick = (
   const working: Unit[] = units.map(u => ({ ...u, state: 'idle' as UnitState }));
   const byId = new Map<string, Unit>(working.map(u => [u.id, u]));
 
-  // Combat phase: each unit with adjacent enemies deals damage to the weakest one.
-  // Per-pair damage = damagePerTick * (1 + heightBonus) / defenderDefenseMult. Attacker
-  // terrain contributes ONLY via the height bonus (offensive lever); defender terrain
-  // contributes the cover divisor (defenseMult > 1 = better cover, < 1 = worse cover).
+  // Combat phase: each unit attacks. MELEE for anyone with adjacent enemies; RANGED for
+  // skirmishers with NO adjacent enemy and at least one enemy within
+  // SKIRMISHER_MISSILE_RANGE. A skirmisher engaged in melee drops their javelins and
+  // fights hand-to-hand — they don't get to both attack at melee range AND throw.
+  // Per-pair melee damage = damagePerTick * (1 + heightBonus) / defenderDefenseMult.
+  // Attacker terrain contributes ONLY via the height bonus (offensive lever); defender
+  // terrain contributes the cover divisor (defenseMult > 1 = better cover, < 1 = worse).
+  // Missile damage = SKIRMISHER_MISSILE_DAMAGE / defenderDefenseMult (no height bonus —
+  // throwing parabolic javelins, cover still works).
   const damage = new Map<string, number>();
+  const projectiles: Projectile[] = [];
   for (const u of working) {
     const adjacentEnemies = HexUtils.getNeighbors(u.tacticalHex)
       .map(h => occupiedByHex.get(HexUtils.key(h)))
@@ -880,6 +1065,33 @@ export const simulateTick = (
       const dmg = (config.damagePerTick * (1 + heightDamageBonus(hAtt, hDef))) / defenseMult;
       damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
       u.state = 'fighting';
+    } else if ((u.unitType ?? 'infantry') === 'skirmisher') {
+      // RANGED: find closest enemy within SKIRMISHER_MISSILE_RANGE. Distance>=2 because
+      // distance<=0 is self and distance==1 would have shown up as an adjacent enemy above.
+      let target: Unit | null = null;
+      let bestD = Infinity;
+      for (const e of working) {
+        if (e.hp <= 0 || e.team === u.team) continue;
+        const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
+        if (d > SKIRMISHER_MISSILE_RANGE) continue;
+        if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
+          target = e;
+          bestD = d;
+        }
+      }
+      if (target) {
+        const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
+        const dmg = SKIRMISHER_MISSILE_DAMAGE / defenseMult;
+        damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
+        projectiles.push({
+          fromHex: u.tacticalHex,
+          toHex: target.tacticalHex,
+          attackerId: u.id,
+          targetId: target.id,
+        });
+        // Skirmisher state stays 'idle' — ranged is not melee, march mode still moves
+        // them next phase. (Per-tick semantics: throw THEN reposition.)
+      }
     }
   }
   damage.forEach((dmg, id) => {
@@ -929,8 +1141,18 @@ export const simulateTick = (
   // Rigid-block helper: validate every unit's projected position; commit all-or-nothing.
   // Used by 'march' and 'retreat'. Returns true on commit, false if blocked.
   // Blocks when ANY unit is still on cooldown — the block moves as one or not at all.
-  const tryRigidBlockStep = (groupUnits: Unit[], delta: Hex): boolean => {
-    if (groupUnits.some(isOnCooldown)) return false;
+  // `blockedSnapshot`: when provided, the cooldown gate uses the START-OF-TICK set instead
+  // of the live `isOnCooldown` predicate. Required for multi-step ticks (cavalry march /
+  // unleash) because step-1 writes a cooldown that would otherwise block step-2.
+  const tryRigidBlockStep = (
+    groupUnits: Unit[],
+    delta: Hex,
+    blockedSnapshot?: Set<string>,
+  ): boolean => {
+    const blocked = blockedSnapshot
+      ? groupUnits.some(u => blockedSnapshot.has(u.id))
+      : groupUnits.some(isOnCooldown);
+    if (blocked) return false;
     const groupIds = new Set(groupUnits.map(u => u.id));
     const projected: { unit: Unit; next: Hex }[] = [];
     for (const u of groupUnits) {
@@ -960,10 +1182,29 @@ export const simulateTick = (
 
     if (mode === 'march') {
       if (groupUnits.some(u => u.state === 'fighting')) continue;
-      tryRigidBlockStep(groupUnits, HexUtils.directions[order.heading]);
+      // Group march speed = MIN over the group, so mixed cavalry+infantry advances at
+      // infantry pace and mixed skirmisher+infantry at infantry pace. `stepsForTick`
+      // resolves fractional speed (1.5) to alternating 1/2 hexes per tick. Cooldown is
+      // snapshotted at start-of-tick so sub-step 2 isn't blocked by sub-step 1's
+      // freshly-written nextMoveTick.
+      const groupSpeed = Math.min(
+        ...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry']),
+      );
+      const steps = stepsForTick(groupSpeed, config.currentTick);
+      const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
+      for (let step = 0; step < steps; step++) {
+        if (!tryRigidBlockStep(groupUnits, HexUtils.directions[order.heading], startBlocked)) break;
+      }
     } else if (mode === 'retreat') {
       // Disengage allowed: do NOT skip on 'fighting'. Opposite of heading.
-      tryRigidBlockStep(groupUnits, HexUtils.directions[(order.heading + 3) % 6]);
+      const groupSpeed = Math.min(
+        ...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry']),
+      );
+      const steps = stepsForTick(groupSpeed, config.currentTick);
+      const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
+      for (let step = 0; step < steps; step++) {
+        if (!tryRigidBlockStep(groupUnits, HexUtils.directions[(order.heading + 3) % 6], startBlocked)) break;
+      }
     } else if (mode === 'unleash') {
       // Per-unit greedy step toward an enemy, with engagement spreading and a lateral
       // fallback that breaks ally jams. Combat phase already handled adjacency damage;
@@ -985,75 +1226,89 @@ export const simulateTick = (
         baseEngagement.set(e.id, count);
       }
       const claimsThisTick = new Map<string, number>();
+      // Cooldown snapshot at start-of-tick. Within a tick a cavalry unit takes multiple
+      // sub-steps; without the snapshot, sub-step 1's freshly-written nextMoveTick would
+      // block sub-step 2. A unit cooldown-blocked at start sits out the WHOLE tick
+      // (mirrors charge mode's `chargeBlocked`).
+      const unleashStartBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
 
       for (const u of groupUnits) {
         if (u.hp <= 0) continue;
-        if (isOnCooldown(u)) continue;
+        if (unleashStartBlocked.has(u.id)) continue;
 
-        // First pass: pick the closest enemy whose engagement (baseline + already-
-        // claimed-this-tick) is still below the cap. Spreads new attackers across
-        // less-crowded enemies instead of piling on the nearest one.
-        let target: Unit | null = null;
-        let bestD = Infinity;
-        for (const e of enemies) {
-          const total = (baseEngagement.get(e.id) ?? 0) + (claimsThisTick.get(e.id) ?? 0);
-          if (total >= UNLEASH_MAX_ENGAGERS) continue;
-          const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
-          if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
-            target = e;
-            bestD = d;
-          }
-        }
-        // Fallback: every enemy is at the cap → take absolute closest. The unit still
-        // engages and helps absorb attention; better than freezing.
-        if (!target) {
+        // Per-unit sub-step count: resolved via `stepsForTick` so cavalry's 2/tick,
+        // skirmisher's 1.5/tick (alternating), and infantry's 1/tick all work the same
+        // way. Each sub-step re-evaluates the best target.
+        const unitSpeed = MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry'];
+        const unitSteps = stepsForTick(unitSpeed, config.currentTick);
+        for (let step = 0; step < unitSteps; step++) {
+          // First pass: pick the closest enemy whose engagement (baseline + already-
+          // claimed-this-tick) is still below the cap. Spreads new attackers across
+          // less-crowded enemies instead of piling on the nearest one.
+          let target: Unit | null = null;
+          let bestD = Infinity;
           for (const e of enemies) {
+            const total = (baseEngagement.get(e.id) ?? 0) + (claimsThisTick.get(e.id) ?? 0);
+            if (total >= UNLEASH_MAX_ENGAGERS) continue;
             const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
             if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
               target = e;
               bestD = d;
             }
           }
-        }
-        if (!target) continue;
-        claimsThisTick.set(target.id, (claimsThisTick.get(target.id) ?? 0) + 1);
-
-        // Best neighbor minimizing distance to target.
-        let bestNext: Hex | null = null;
-        let bestNextD = bestD;
-        for (const dir of HexUtils.directions) {
-          const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
-          const d = HexUtils.distance(next, target.tacticalHex);
-          if (d >= bestNextD) continue;
-          if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
-          const occupant = occupancy.get(HexUtils.key(next));
-          if (occupant) continue;
-          bestNext = next;
-          bestNextD = d;
-        }
-        // Lateral fallback: if no strict-decrease neighbor (blocked by allies, usually),
-        // try equal-distance neighbors that aren't the unit's previous hex (anti-
-        // backtrack). Lowest-key tiebreak for determinism.
-        if (!bestNext) {
-          const prev = u.prevTacticalHex;
-          let bestLat: Hex | null = null;
-          let bestLatKey: string | null = null;
-          for (const dir of HexUtils.directions) {
-            const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
-            if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
-            if (occupancy.get(HexUtils.key(next))) continue;
-            if (prev && next.q === prev.q && next.r === prev.r) continue;
-            const d = HexUtils.distance(next, target.tacticalHex);
-            if (d !== bestD) continue;
-            const nk = HexUtils.key(next);
-            if (bestLatKey === null || nk < bestLatKey) {
-              bestLat = next;
-              bestLatKey = nk;
+          // Fallback: every enemy is at the cap → take absolute closest. The unit still
+          // engages and helps absorb attention; better than freezing.
+          if (!target) {
+            for (const e of enemies) {
+              const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
+              if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
+                target = e;
+                bestD = d;
+              }
             }
           }
-          bestNext = bestLat;
-        }
-        if (bestNext) {
+          if (!target) break;
+          // Only the FIRST sub-step counts as a new attacker (the unit's "intent" for
+          // this tick). Subsequent sub-steps may re-target but don't double-claim — keeps
+          // engagement-cap accounting consistent with infantry's one-step behavior.
+          if (step === 0) claimsThisTick.set(target.id, (claimsThisTick.get(target.id) ?? 0) + 1);
+
+          // Best neighbor minimizing distance to target.
+          let bestNext: Hex | null = null;
+          let bestNextD = bestD;
+          for (const dir of HexUtils.directions) {
+            const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+            const d = HexUtils.distance(next, target.tacticalHex);
+            if (d >= bestNextD) continue;
+            if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+            const occupant = occupancy.get(HexUtils.key(next));
+            if (occupant) continue;
+            bestNext = next;
+            bestNextD = d;
+          }
+          // Lateral fallback: if no strict-decrease neighbor (blocked by allies, usually),
+          // try equal-distance neighbors that aren't the unit's previous hex (anti-
+          // backtrack). Lowest-key tiebreak for determinism.
+          if (!bestNext) {
+            const prev = u.prevTacticalHex;
+            let bestLat: Hex | null = null;
+            let bestLatKey: string | null = null;
+            for (const dir of HexUtils.directions) {
+              const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+              if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+              if (occupancy.get(HexUtils.key(next))) continue;
+              if (prev && next.q === prev.q && next.r === prev.r) continue;
+              const d = HexUtils.distance(next, target.tacticalHex);
+              if (d !== bestD) continue;
+              const nk = HexUtils.key(next);
+              if (bestLatKey === null || nk < bestLatKey) {
+                bestLat = next;
+                bestLatKey = nk;
+              }
+            }
+            bestNext = bestLat;
+          }
+          if (!bestNext) break;
           occupancy.delete(HexUtils.key(u.tacticalHex));
           u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
           u.tacticalHex = bestNext;
@@ -1075,7 +1330,16 @@ export const simulateTick = (
       // tick (it can still apply impact damage from its current position, mirroring how
       // a non-charging straggler still threatens its arc).
       const chargeBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
-      for (let step = 0; step < CHARGE_SPEED_HEXES; step++) {
+      // Group charge speed = MIN over the group. Mixed cavalry+infantry charges at
+      // infantry speed (2); pure cavalry sprints at 3. Using MIN (not MAX) keeps
+      // infantry's lance from firing phantom hits from a final hex while cavalry races
+      // on ahead. `stepsForTick` here is a no-op (all charge speeds are integers) but
+      // kept for symmetry with march/unleash.
+      const groupChargeSpeed = Math.min(
+        ...groupUnits.map(u => CHARGE_HEXES_PER_TICK[u.unitType ?? 'infantry']),
+      );
+      const chargeSteps = stepsForTick(groupChargeSpeed, config.currentTick);
+      for (let step = 0; step < chargeSteps; step++) {
         // Step forward-most unit first, so a rear unit's check of occupancy.get(next)
         // happens AFTER any ally ahead of it has attempted its own step (and either
         // moved, freeing the hex, or stayed put as a genuine spatial blocker). Without
@@ -1114,7 +1378,9 @@ export const simulateTick = (
             const target = occupancy.get(HexUtils.key(hex));
             if (!target || target.team === u.team) continue;
             if (damaged.has(target.id)) continue;
-            target.hp -= CHARGE_IMPACT_DAMAGE;
+            // Lance damage is keyed by the ATTACKER's type — cavalry's lance hits twice
+            // as hard regardless of who it spears.
+            target.hp -= CHARGE_IMPACT_DAMAGE_BY_TYPE[u.unitType ?? 'infantry'];
             damaged.add(target.id);
             if (target.hp <= 0) occupancy.delete(HexUtils.key(hex));
           }
@@ -1252,5 +1518,5 @@ export const simulateTick = (
     if (t) t.hp -= dmg;
   });
 
-  return { units: working.filter(u => u.hp > 0), orders: ordersOut };
+  return { units: working.filter(u => u.hp > 0), orders: ordersOut, projectiles };
 };

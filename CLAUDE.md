@@ -8,17 +8,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run build` — `tsc -b` (project references) then `vite build`. Type errors fail the build.
 - `npm run lint` — ESLint over the repo (config: `eslint.config.js`, flat config).
 - `npm run preview` — serve the production build.
+- `npx tsx scripts/sim-formations.ts` — headless battle harness: runs ~21 scenarios against the pure sim and prints per-scenario results. Run after any change to `src/battle/*.ts` to catch behavior drift.
 
 There is no test runner configured.
 
 ## Architecture
 
-Single-canvas PIXI.js application with a thin React HUD. Three files hold essentially all logic:
+Single-canvas PIXI.js application with a thin React HUD. Logic lives in:
 
 - `src/main.tsx` — React root.
 - `src/App.tsx` — renders only `<GameCanvas />`.
 - `src/components/GameCanvas.tsx` — the entire app: world generation, rendering, input, HUD.
 - `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (pointy-top, `size = 40`).
+- `src/battle/simulate.ts` — pure battle simulator (no React/PIXI). Exports `simulateTick`, unit/order types, and per-type tunables (`MARCH_HEXES_PER_TICK`, `MAX_HP_BY_TYPE`, etc.).
+- `src/battle/terrain.ts` — pure terrain modifier table (defense/moveCost/attrition/vision) and downhill damage bonus. Sole owner of mechanical terrain values.
+- `scripts/sim-formations.ts` — Node harness that drives `simulateTick` against scripted scenarios. Mirrors map state via a fake `MapApi`. Treat as a regression check.
 
 ### Two coordinate systems
 
@@ -51,6 +55,20 @@ The same procedural function produces both views. Clicking a hex while `isScanni
 
 `isScanningRef` and `noiseOffsetRef` are kept in sync via `useEffect` because the `pointertap` handler is registered once at mount and would otherwise close over stale state. **When you add new state that is read inside the long-lived PIXI handlers, mirror it the same way** — don't re-register handlers per render.
 
+### Battle simulator
+
+`simulateTick(units, orders, config) → { units, orders }` is a **pure** function — no I/O, no React, no PIXI — so the harness can drive it without the rendering stack. It receives a monotonic `config.currentTick` and compares each unit's `nextMoveTick` against it for movement cooldown. The sim itself is stateless; the caller owns the tick counter.
+
+Three unit types (`infantry` / `cavalry` / `skirmisher`) with per-type records for HP, march/charge speed, charge impact, and (skirmisher) missile range. Fractional speed (1.5/tick) is resolved per tick via `stepsForTick(speed, tick)` so the rigid block stays integer-axial.
+
+Five order modes (`march` / `charge` / `retreat` / `unleash` / `defendHeight`). March, charge, retreat are rigid-block — every unit waits on the slowest cooldown. Unleash is per-unit greedy. DefendHeight spreads to the perimeter of a sticky home-terrain blob. Multi-step modes snapshot `startBlocked` at tick start so step N doesn't re-block step N+1 via `applyEntryCooldown` writes from step N.
+
+**Critical invariant:** `tickCounterRef.current` in `GameCanvas.tsx` is monotonic. Reset it ONLY on regenerate-world and return-to-strategic. **Never** reset it when a battle starts — every unit's `nextMoveTick` is an absolute tick number, so a reset puts the whole army on a multi-hundred-tick cooldown.
+
+### Terrain mods
+
+`src/battle/terrain.ts` owns the mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) — kept React/PIXI-free so the harness can import it. `GameCanvas.tsx` spreads `TERRAIN_MODS[KEY]` into its own `TerrainDef` for HUD/tooltips; do **not** define a parallel mod table inside the component file.
+
 ## Worktree note
 
-This is a `git worktree` at `.worktrees/feature-units` on branch `feature/units`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+This is a `git worktree` at `.worktrees/feature-terrain-modifiers` on branch `feature/terrain-modifiers`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
