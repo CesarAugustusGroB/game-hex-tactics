@@ -11,16 +11,18 @@ export interface Point {
 export class HexUtils {
   static size = 40; // Pixels from center to corner
 
-  // Pointy-top hex constants
+  // Flat-top hex constants. Hexes are rotated 30° from the "pointy-top" convention:
+  // flat edges face north/south, vertices point east/west. Axial neighbour offsets
+  // remain the standard 6 (`directions` below); only the q/r→pixel mapping changes.
   private static readonly SQRT3 = Math.sqrt(3);
 
   /**
    * Converts axial coordinates (q, r) to pixel coordinates (x, y)
-   * for a pointy-top hexagonal grid.
+   * for a flat-top hexagonal grid.
    */
   static hexToPixel(hex: Hex): Point {
-    const x = this.size * (this.SQRT3 * hex.q + (this.SQRT3 / 2) * hex.r);
-    const y = this.size * (1.5 * hex.r);
+    const x = this.size * (1.5 * hex.q);
+    const y = this.size * ((this.SQRT3 / 2) * hex.q + this.SQRT3 * hex.r);
     return { x, y };
   }
 
@@ -28,8 +30,8 @@ export class HexUtils {
    * Converts pixel coordinates (x, y) to fractional axial coordinates (q, r)
    */
   static pixelToHex(point: Point): Hex {
-    const q = ((this.SQRT3 / 3) * point.x - (1 / 3) * point.y) / this.size;
-    const r = ((2 / 3) * point.y) / this.size;
+    const q = ((2 / 3) * point.x) / this.size;
+    const r = ((-1 / 3) * point.x + (this.SQRT3 / 3) * point.y) / this.size;
     return this.hexRound({ q, r });
   }
 

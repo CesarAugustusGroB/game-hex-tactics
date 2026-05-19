@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Style
+
+**Less is more.** Applies to both replies and code:
+
+- **Replies:** concise. No preamble, no trailing summaries, no recap of what you just did. Answer the question, state the result, stop. A one-line answer beats a paragraph.
+- **Code:** minimal. No comments that restate the code. No defensive checks for impossible states. No abstractions for hypothetical reuse. No backwards-compat shims. Delete unused code instead of commenting it out. If three lines do the job, don't write ten.
+- **Only add comments when the WHY is non-obvious:** a library gotcha, a load-bearing invariant, a workaround for a specific bug. If removing the comment wouldn't confuse a future reader, don't write it.
+
 ## Commands
 
 - `npm run dev` — Vite dev server (default http://localhost:5173). The parent worktree may already be using this port; pass `-- --port 5174` if needed.

@@ -27,8 +27,11 @@ interface DefendDrag {
   currentEndHex: Hex;
 }
 
+// Flat-top axial→visual mapping:
+//   dir 0 (1, 0) = SE, dir 1 (1,-1) = NE, dir 2 (0,-1) = N,
+//   dir 3 (-1, 0) = NW, dir 4 (-1, 1) = SW, dir 5 (0, 1) = S.
 const HEADING_ARROWS: Record<number, string> = {
-  0: '→', 1: '↗', 2: '↖', 3: '←', 4: '↙', 5: '↘',
+  0: '↘', 1: '↗', 2: '↑', 3: '↖', 4: '↙', 5: '↓',
 };
 
 // --- Constants ---
@@ -89,11 +92,129 @@ const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${group
 // Used in upcoming tasks; intentionally referenced.
 void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
 
-// Mod fields are sourced from `TERRAIN_MODS` in `src/battle/terrain.ts` (single source of
-// truth — `terrain.ts` owns the mechanical values so it stays React/PIXI-free for the
-// headless harness). Spreading them here surfaces the same fields on `TerrainDef` for
-// HUD/tooltips and keeps the table self-documenting. Render-side fields (color/label/
-// height/walkable) stay native to this file.
+// --- Terrain detail sprites (grass tufts / flowers / rocks) ---
+// Cutout PNGs sit in public/details/{grass,flower,rock}/. Each category has 4 variants.
+// Old higher-volume catalogue lives in public/details/_archive for reference.
+const numKeys = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => `${prefix}_${String(i + 1).padStart(2, '0')}`);
+const GRASS_KEYS = numKeys('grass', 4);
+const FLOWER_KEYS = numKeys('flower', 4);
+const ROCK_KEYS = numKeys('rock', 4);
+const ALL_DETAIL_KEYS = [...GRASS_KEYS, ...FLOWER_KEYS, ...ROCK_KEYS];
+const detailAssetPath = (key: string): string => {
+  if (key.startsWith('grass_')) return `/details/grass/${key}.png`;
+  if (key.startsWith('flower_')) return `/details/flower/${key}.png`;
+  return `/details/rock/${key}.png`;
+};
+
+interface WeightedSprite { key: string; weight: number }
+
+interface DetailLayerConfig {
+  /** Base spawn chance per hex BEFORE the density-noise multiplier is applied. */
+  density: number;
+  /** Max sprite instances per spawn-eligible hex. */
+  maxPerHex: number;
+  /** Source-PNG scale range. The sprite's `scale.set` is sampled from this. */
+  scaleRange: [number, number];
+  /** Sprite alpha range. */
+  alphaRange: [number, number];
+  /** Pool the per-hex sprite is drawn from, by weight (higher = more likely). */
+  sprites: WeightedSprite[];
+}
+
+interface CategoryStyle {
+  /** Multiplicative tint applied to every sprite of this category. Pulls saturated
+   *  source-PNG colour into the terrain palette so details feel embedded. */
+  tint: number;
+}
+
+interface TerrainDetailRules {
+  embedded?: DetailLayerConfig;
+  small?: DetailLayerConfig;
+  landmark?: DetailLayerConfig;
+  /** Per-sprite-category tint, looked up by sprite-key prefix. Alpha/scale belong to
+   *  the layer; only tint varies by category to keep this table small. */
+  categoryStyle: Record<'grass' | 'flower' | 'rock', CategoryStyle>;
+}
+
+// Per-terrain scatter rules. New asset set (4 grass + 4 flower + 4 rock variants) used
+// at full opacity. Sizes deliberately tiny across all three layers — the user asked for
+// "muy pequeños y opacidad normal", so we lean on shrinking the sprite footprint rather
+// than fading them. Tints set to white so the artwork's own colours come through.
+const DETAIL_RULES: Record<string, TerrainDetailRules> = {
+  GRASSLAND: {
+    embedded: {
+      density: 0.55,
+      maxPerHex: 2,
+      scaleRange: [0.04, 0.07],
+      alphaRange: [1.0, 1.0],
+      sprites: [
+        ...GRASS_KEYS.map(k => ({ key: k, weight: 5 })),
+        ...FLOWER_KEYS.map(k => ({ key: k, weight: 1 })),
+      ],
+    },
+    small: {
+      density: 0.18,
+      maxPerHex: 1,
+      scaleRange: [0.07, 0.11],
+      alphaRange: [1.0, 1.0],
+      sprites: [
+        ...GRASS_KEYS.map(k => ({ key: k, weight: 6 })),
+        ...FLOWER_KEYS.map(k => ({ key: k, weight: 2 })),
+        ...ROCK_KEYS.slice(0, 2).map(k => ({ key: k, weight: 1 })),
+      ],
+    },
+    landmark: {
+      density: 0.03,
+      maxPerHex: 1,
+      scaleRange: [0.10, 0.15],
+      alphaRange: [1.0, 1.0],
+      sprites: ROCK_KEYS.map(k => ({ key: k, weight: 1 })),
+    },
+    categoryStyle: {
+      grass:  { tint: 0xFFFFFF },
+      flower: { tint: 0xFFFFFF },
+      rock:   { tint: 0xFFFFFF },
+    },
+  },
+};
+
+const spriteCategory = (key: string): 'grass' | 'flower' | 'rock' =>
+  key.startsWith('flower_') ? 'flower' : key.startsWith('rock_') ? 'rock' : 'grass';
+
+const pickWeighted = (pool: WeightedSprite[], rng: number): string => {
+  let total = 0;
+  for (const s of pool) total += s.weight;
+  let acc = rng * total;
+  for (const s of pool) {
+    acc -= s.weight;
+    if (acc <= 0) return s.key;
+  }
+  return pool[pool.length - 1].key;
+};
+
+const seededRandom = (seed: number): number => {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+};
+const getHexSeed = (q: number, r: number, worldSeed: number): number =>
+  (q * 73856093) ^ (r * 19349663) ^ worldSeed;
+
+const GRASS_CHUNK_SIZE = 6;
+type GrassPatch = 'NONE' | 'DRY' | 'DENSE' | 'FLOWERY';
+const grassChunkPatch = (q: number, r: number, worldSeed: number): GrassPatch => {
+  const chunkQ = Math.floor(q / GRASS_CHUNK_SIZE);
+  const chunkR = Math.floor(r / GRASS_CHUNK_SIZE);
+  const seed = (chunkQ * 73856093) ^ (chunkR * 19349663) ^ (worldSeed + 7);
+  const rng = seededRandom(seed);
+  if (rng < 0.50) return 'NONE';
+  if (rng < 0.67) return 'DRY';
+  if (rng < 0.84) return 'DENSE';
+  return 'FLOWERY';
+};
+
+// Mechanical fields (defenseMult, moveCost, attritionPerTick, visionRadius) live in
+// `src/battle/terrain.ts` so the headless sim harness can import them without React/PIXI.
 const TERRAINS: Record<string, TerrainDef> = {
   DEEP_SEA: { color: 0x1a2a3a, label: 'Deep Water', height: 2, walkable: false },
   SEA: { color: 0x2a3a4a, label: 'Shallows', height: 5, walkable: false },
@@ -102,7 +223,7 @@ const TERRAINS: Record<string, TerrainDef> = {
   FOREST: { color: 0x3a5a3a, label: 'Thicket', height: 18, walkable: true, ...TERRAIN_MODS.FOREST },
   HILL: { color: 0x6b5d44, label: 'Ridgeline', height: 35, walkable: true, ...TERRAIN_MODS.HILL },
   ROCKY: { color: 0x4a4a4a, label: 'Plateau', height: 55, walkable: true, ...TERRAIN_MODS.ROCKY },
-  MOUNTAIN: { color: 0x2d2d2d, label: 'Summit', height: 85, walkable: true, ...TERRAIN_MODS.MOUNTAIN },
+  MOUNTAIN: { color: 0x6a6a72, label: 'Summit', height: 85, walkable: true, ...TERRAIN_MODS.MOUNTAIN },
   SNOW: { color: 0xf0f0f0, label: 'Glacier', height: 110, walkable: false },
   RIVER: { color: 0x3a8fb7, label: 'Waterway', height: 10, walkable: true, ...TERRAIN_MODS.RIVER },
 };
@@ -112,6 +233,10 @@ export const GameCanvas: React.FC = () => {
   const appRef = useRef<PIXI.Application | null>(null);
   const worldRef = useRef<PIXI.Container>(new PIXI.Container());
   const terrainGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
+  // Hex-grid lines extracted into their own Graphics so the ticker can dim them on
+  // zoom-out without re-running the (expensive) drawMap. Strokes are baked at alpha 1.0;
+  // the layer's `alpha` property is set by the ticker each frame from world.scale.x.
+  const gridGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const unitsGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Per-unit containers keyed by unit.id. Persist across drawUnits calls so we can
@@ -122,24 +247,23 @@ export const GameCanvas: React.FC = () => {
   const previewGfx = useRef<PIXI.Container>(new PIXI.Container());
   
   const noiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
+  // Separate noise instance for scatter-detail density so its zones don't align with
+  // terrain features.
+  const detailDensityNoiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
   const armyTextureRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRedCavalryRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueCavalryRef = useRef<PIXI.Texture | null>(null);
-  // Per-team skirmisher sprites: red uses the roman wolf-helm javelineer; blue uses the
-  // generic painted skirmisher illustration. Team-tint outline on the unit container
-  // remains the unambiguous side indicator regardless of sprite.
   const unitTextureRedSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueSkirmisherRef = useRef<PIXI.Texture | null>(null);
-  // Javelin sprite used for in-flight projectiles thrown by skirmishers. One shared
-  // texture across both teams (no team-tint — javelins look the same regardless of who
-  // threw them).
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
-  // Tiled background textures for terrain hex tops. Wrap mode is set to 'repeat' on
-  // load so adjacent same-type hexes share the same world-space UV grid and the texture
-  // looks continuous (no per-hex seam).
   const grassTextureRef = useRef<PIXI.Texture | null>(null);
+  const grassNoiseTextureRef = useRef<PIXI.Texture | null>(null);
+  const grassMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
+  const grassPatchDryTextureRef = useRef<PIXI.Texture | null>(null);
+  const grassPatchDenseTextureRef = useRef<PIXI.Texture | null>(null);
+  const grassFlowerSpeckTextureRef = useRef<PIXI.Texture | null>(null);
   const forestTextureRef = useRef<PIXI.Texture | null>(null);
   const riverTextureRef = useRef<PIXI.Texture | null>(null);
   const hillTextureRef = useRef<PIXI.Texture | null>(null);
@@ -148,17 +272,13 @@ export const GameCanvas: React.FC = () => {
   const sandTextureRef = useRef<PIXI.Texture | null>(null);
   const seaTextureRef = useRef<PIXI.Texture | null>(null);
   const deepSeaTextureRef = useRef<PIXI.Texture | null>(null);
-  // Container for in-flight projectile sprites. Lives in world space (so it pans/zooms
-  // with the camera) and is rebuilt-per-tick: each sim result pushes new sprites onto it,
-  // GSAP tweens them to the target, and onComplete destroys them.
   const projectilesGfx = useRef<PIXI.Container>(new PIXI.Container());
-  // Overlay for textured terrain types that need GLOBAL-UV tiling (e.g. HILL). The
-  // standard `tGfx.poly().fill({ texture, matrix })` path on `terrainGfx` normalises UVs
-  // to each polygon's bbox, so every hex sees the same texture patch — visible as obvious
-  // repetition. This overlay sidesteps that by using one big TilingSprite per textured
-  // terrain biome, masked to the union of that biome's hex tops. Inside a contiguous
-  // biome the texture genuinely tiles in world space.
+  // Tiled-texture overlay container. Uses world-space UV tiling (TilingSprite + hex mask)
+  // because PIXI's Graphics fill normalises UVs per polygon bbox, which produces visible
+  // per-hex repetition.
   const terrainOverlayRef = useRef<PIXI.Container>(new PIXI.Container());
+  const detailsGfx = useRef<PIXI.Container>(new PIXI.Container());
+  const detailTexturesRef = useRef<Map<string, PIXI.Texture>>(new Map());
 
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
@@ -199,23 +319,21 @@ export const GameCanvas: React.FC = () => {
   const generateWorldData = useCallback(() => {
     const newMap = new Map<string, string>();
     if (!noiseRef.current) noiseRef.current = createNoise2D();
+    if (!detailDensityNoiseRef.current) detailDensityNoiseRef.current = createNoise2D();
     const noise = noiseRef.current;
     const elevationCache = new Map<string, number>();
 
     // 1. Smooth Elevation Sampling
     for (let q = -gridRadius; q <= gridRadius; q++) {
       for (let r = Math.max(-gridRadius, -q - gridRadius); r <= Math.min(gridRadius, -q + gridRadius); r++) {
-        // COORDINATE TRANSFORM: To zoom IN, we divide by a LARGER number
         const nx = (q + genSettings.noiseOffset.q) / genSettings.resolution;
         const ny = (r + genSettings.noiseOffset.r) / genSettings.resolution;
         
-        // Large scale features
         let e = (noise(nx, ny) + 0.4 * noise(nx * 2.2, ny * 2.2)) / 1.4;
         e = (e + 1) / 2;
 
-        // Radial falloff: strong island shape in STRATEGIC, soft falloff in TACTICAL.
-        // For TACTICAL we use the strategic-equivalent position so the dived hex anchors
-        // to its strategic boost level (mountain stays mountain-ish at center).
+        // Strong island falloff in STRATEGIC; in TACTICAL the dive anchors to the
+        // strategic position so mountain stays mountain-ish at the centre.
         if (viewMode === 'STRATEGIC') {
           const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
           e *= Math.max(0, 1.1 - Math.pow(d, 2.5));
@@ -253,7 +371,6 @@ export const GameCanvas: React.FC = () => {
       const neighbors = HexUtils.getNeighbors(hex).filter(n => newMap.has(HexUtils.key(n)));
       const neighborTypes = neighbors.map(n => newMap.get(HexUtils.key(n)));
       
-      // If isolated, take majority neighbor type
       const counts = neighborTypes.reduce<Record<string, number>>((acc, t) => { acc[t!] = (acc[t!] || 0) + 1; return acc; }, {});
       const majority = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
       
@@ -282,7 +399,7 @@ export const GameCanvas: React.FC = () => {
         
         smoothedMap.set(k, 'RIVER');
         
-        // Tactical Rivers are THICK
+        // Rivers thicken in TACTICAL view so they're walkable but visually substantial.
         if (viewMode === 'TACTICAL') {
           HexUtils.getNeighbors(curr).forEach(n => {
             if (smoothedMap.has(HexUtils.key(n)) && Math.random() > 0.3) smoothedMap.set(HexUtils.key(n), 'RIVER');
@@ -299,21 +416,21 @@ export const GameCanvas: React.FC = () => {
     setGridData(Array.from(smoothedMap.entries()).map(([k, t]) => ({ hex: HexUtils.fromKey(k), type: t })).sort((a, b) => a.hex.r - b.hex.r));
   }, [genSettings, gridRadius, viewMode]);
 
-  // --- Clean 3D Renderer ---
   const drawMap = useCallback(() => {
     const tGfx = terrainGfx.current;
+    const gGfx = gridGfx.current;
     tGfx.clear();
-    // World→UV matrix for terrain texture fills. The source tiles are large (~1200+ px)
-    // relative to a hex (~80 px), so at identity each hex shows only a tiny near-uniform
-    // patch. Scaling by 14 shrinks the visible tile to ~88 world px (≈ 1.1 hex widths),
-    // giving each hex its own near-unique slice of the texture so adjacent hexes never
-    // sample matching patches — kills the per-hex "same shape" repetition perception.
+    gGfx.clear();
     const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
-    // Quick neighbor lookup, used below by the HILL "continuous-plain" rendering path to
-    // suppress per-hex 3D walls and grid strokes between two HILL hexes (so the biome
-    // reads as one painted landscape rather than 6+ fenced bumps).
     const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
-    gridData.forEach((item) => {
+    // Shorter terrain first so taller hexes draw on top of their shorter neighbours.
+    const renderOrder = [...gridData].sort((a, b) => {
+      const ha = TERRAINS[a.type]?.height ?? 0;
+      const hb = TERRAINS[b.type]?.height ?? 0;
+      if (ha !== hb) return ha - hb;
+      return a.hex.r - b.hex.r;
+    });
+    renderOrder.forEach((item) => {
       const pos = HexUtils.hexToPixel(item.hex);
       const tDef = TERRAINS[item.type] || TERRAINS.SEA;
       const h = tDef.height;
@@ -321,114 +438,136 @@ export const GameCanvas: React.FC = () => {
       const top: { x: number; y: number }[] = [];
       const base: { x: number; y: number }[] = [];
       for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i - 30);
+        const r = Math.PI / 180 * (60 * i);
         top.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) - h });
         base.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) });
       }
-      const drawSide = (v1: number, v2: number, shade: number) => {
-        tGfx.beginFill(PIXI.Color.shared.setValue(tDef.color).multiply(shade).toNumber());
-        tGfx.moveTo(top[v1].x, top[v1].y).lineTo(top[v2].x, top[v2].y).lineTo(base[v2].x, base[v2].y).lineTo(base[v1].x, base[v1].y).closePath().endFill();
+      // `neighborH` clips the wall bottom up to the neighbour's top y (defaults to 0 =
+      // wall reaches absolute base). PIXI v8 gotcha: `Color.multiply(number)` treats the
+      // number as a hex int via bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
+      const drawSide = (v1: number, v2: number, shade: number, neighborH: number = 0) => {
+        tGfx.beginFill(PIXI.Color.shared.setValue(tDef.color).multiply([shade, shade, shade, 1]).toNumber());
+        tGfx.moveTo(top[v1].x, top[v1].y)
+            .lineTo(top[v2].x, top[v2].y)
+            .lineTo(base[v2].x, base[v2].y - neighborH)
+            .lineTo(base[v1].x, base[v1].y - neighborH)
+            .closePath().endFill();
       };
-      // Global-UV terrains (HILL, MOUNTAIN) suppress the two visible side walls when the
-      // neighbour on that face is the SAME type. Inside a contiguous biome this removes
-      // the per-hex 3D bump, so the textured top (rendered by the TilingSprite overlay
-      // below with world-space UVs) reads as one continuous painted plain. At a biome
-      // boundary the wall stays, preserving the elevation drop as a terrain cue. Other
-      // terrains keep the original behaviour.
-      // Vertex→neighbour mapping: edge (1,2) faces SE (dir 5), edge (0,1) faces E (dir 0).
-      const isGlobalUv = item.type === 'HILL' || item.type === 'MOUNTAIN' || item.type === 'SNOW';
-      const seType = isGlobalUv ? terrainAt.get(HexUtils.key({ q: item.hex.q, r: item.hex.r + 1 })) : undefined;
-      const eType  = isGlobalUv ? terrainAt.get(HexUtils.key({ q: item.hex.q + 1, r: item.hex.r })) : undefined;
-      if (!isGlobalUv || seType !== item.type) drawSide(2, 1, 0.6);
-      if (!isGlobalUv || eType !== item.type) drawSide(1, 0, 0.4);
-      // Top hexagon. Grass uses a tiled painted texture; all other terrains keep flat
-      // colour. wrap='repeat' (set at load) lets adjacent grass hexes sample one global
-      // UV grid so the field reads continuous. PIXI v8 fluent API: poly(points).fill(...).
-      const grassTex = grassTextureRef.current;
-      const forestTex = forestTextureRef.current;
+      // Only S / SE / SW walls are drawn — N / NE / NW would render inside the top
+      // polygon and get hidden. Skipped when the neighbour is the same continuous biome
+      // (so the textured surface reads continuous) or taller than us (no step from here).
+      const isContinuousBiome = item.type === 'HILL' || item.type === 'MOUNTAIN' || item.type === 'SNOW' || item.type === 'GRASSLAND' || item.type === 'FOREST';
+      const sType  = terrainAt.get(HexUtils.key({ q: item.hex.q,     r: item.hex.r + 1 }));
+      const seType = terrainAt.get(HexUtils.key({ q: item.hex.q + 1, r: item.hex.r     }));
+      const swType = terrainAt.get(HexUtils.key({ q: item.hex.q - 1, r: item.hex.r + 1 }));
+      const sH  = sType  ? (TERRAINS[sType]?.height  ?? 0) : 0;
+      const seH = seType ? (TERRAINS[seType]?.height ?? 0) : 0;
+      const swH = swType ? (TERRAINS[swType]?.height ?? 0) : 0;
+      const sameS  = isContinuousBiome && sType  === item.type;
+      const sameSE = isContinuousBiome && seType === item.type;
+      const sameSW = isContinuousBiome && swType === item.type;
+      const drawWalls = () => {
+        if (!sameS  && h > sH)  drawSide(2, 1, 0.7);
+        if (!sameSE && h > seH) drawSide(1, 0, 0.55);
+        if (!sameSW && h > swH) drawSide(2, 3, 0.55);
+      };
+      // HILL / MOUNTAIN / SNOW / GRASSLAND / FOREST fall through to flat colour here —
+      // their painted texture is applied by the TilingSprite overlay below.
       const riverTex = riverTextureRef.current;
-      const hillTex = hillTextureRef.current;
       const sandTex = sandTextureRef.current;
       const seaTex = seaTextureRef.current;
       const deepSeaTex = deepSeaTextureRef.current;
-      // Multiplicative tint on textured fills — darkens the terrain so it sits visually
-      // under unit sprites without overwhelming them. 0xFFFFFF = unchanged, lower = darker.
       let fillStyle: { texture?: PIXI.Texture; matrix?: PIXI.Matrix; color: number };
-      if (item.type === 'GRASSLAND' && grassTex) {
-        fillStyle = { texture: grassTex, matrix: terrainUvMatrix, color: 0x888888 };
-      } else if (item.type === 'FOREST' && forestTex) {
-        fillStyle = { texture: forestTex, matrix: terrainUvMatrix, color: 0x888888 };
-      } else if (item.type === 'RIVER' && riverTex) {
+      if (item.type === 'RIVER' && riverTex) {
         fillStyle = { texture: riverTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
       } else if (item.type === 'SAND' && sandTex) {
         fillStyle = { texture: sandTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
       } else if (item.type === 'SEA' && seaTex) {
-        // Coastal sea: darker filter so the shallows read distinctly from any RIVER/inland
-        // water and the open ocean further out (DEEP_SEA stays at the lighter tint).
         fillStyle = { texture: seaTex, matrix: terrainUvMatrix, color: 0x506070 };
       } else if (item.type === 'DEEP_SEA' && deepSeaTex) {
         fillStyle = { texture: deepSeaTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
       } else {
-        // HILL and MOUNTAIN intentionally fall through to flat color here — the TilingSprite
-        // overlay below paints the textured surface on top with world-space UVs (no per-hex
-        // repetition). The flat color shows only briefly before textures finish loading.
         fillStyle = { color: tDef.color };
       }
-      // hillTex referenced for the overlay build above; mark as read in this scope.
-      void hillTex;
       const topPoints: number[] = [];
       for (let i = 0; i < 6; i++) { topPoints.push(top[i].x, top[i].y); }
       tGfx.poly(topPoints).fill(fillStyle);
-      if (isGlobalUv) {
-        // Global-UV terrains read as one continuous painted plain inside the biome, so
-        // internal same-type edges get NO stroke at all (regardless of showGrid). Only
-        // edges that border a different terrain get a stroke — and that one stays subtle,
-        // since the 3D side wall (still drawn at those edges above) is the dominant biome
-        // cue.
-        // Vertex/dir mapping (pointy-top, `r = 60°·i − 30°`):
-        //   (5,0)→NE dir1, (0,1)→E dir0, (1,2)→SE dir5, (2,3)→SW dir4, (3,4)→W dir3, (4,5)→NW dir2.
-        const edgePairs: [number, number, number][] = [
-          [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
-        ];
-        for (const [v1, v2, dirIdx] of edgePairs) {
-          const dir = HexUtils.directions[dirIdx];
-          const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
-          if (nType !== item.type) {
-            tGfx.poly([top[v1].x, top[v1].y, top[v2].x, top[v2].y])
-                .stroke({ width: 1.5, color: 0x142016, alpha: 0.4 });
-          }
-        }
-      } else if (showGrid) {
-        tGfx.poly(topPoints).stroke({
-          width: 1,
-          color: PIXI.Color.shared.setValue(tDef.color).multiply(0.9).toNumber(),
-          alpha: 0.2,
-        });
-      }
+      // Walls AFTER the fill — covers the AA notch at the wall/polygon shared edge.
+      drawWalls();
     });
 
-    // Global-UV terrain overlays: ONE big TilingSprite per terrain type, covering the
-    // world bbox of that type's hexes and masked to the union of those hex tops. The tile
-    // coordinate space is the sprite's own local space — so adjacent hexes see different
-    // (continuous) patches of the texture, killing the per-hex repetition that the
-    // Graphics fill path produces. Used for terrain types with strong, distinct features
-    // where the per-hex repeat would be obvious (HILL, MOUNTAIN).
+    // Global-UV overlays: one TilingSprite per terrain type, masked to the union of that
+    // biome's hex tops. The sprite tiles in its own local space (not per-polygon bbox),
+    // so neighbouring hexes see different continuous patches of the texture.
     const overlay = terrainOverlayRef.current;
     for (const child of overlay.children.slice()) {
-      // The TilingSprite is masked by the Graphics child; clearing the mask reference
-      // before destroying keeps PIXI from holding onto a destroyed mask.
       if ('mask' in child) (child as PIXI.Sprite).mask = null;
       overlay.removeChild(child);
       child.destroy({ children: true, texture: false });
     }
-    const globalUvOverlays: { type: string; texture: PIXI.Texture | null; tint: number }[] = [
+    interface OverlayLayer {
+      type: string;
+      texture: PIXI.Texture | null;
+      tint: number;
+      /** World px per tile. Default 110px. */
+      tilePx?: number;
+      alpha?: number;
+      blendMode?: PIXI.BLEND_MODES;
+      /** Splits hexes of the same `type` across multiple layers (e.g. chunked patches). */
+      hexFilter?: (hex: Hex) => boolean;
+    }
+    const grassWorldSeed = 1;
+    // Array order = z-order. Sorted by ascending TERRAINS height so taller biomes paint
+    // over shorter ones at the shared edges.
+    const globalUvOverlays: OverlayLayer[] = [
+      { type: 'GRASSLAND', texture: grassTextureRef.current, tint: 0xFFFFFF, tilePx: 200 },
+      {
+        type: 'GRASSLAND',
+        texture: grassMacroNoiseTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 5000,
+        alpha: 0.24,
+        blendMode: 'multiply',
+      },
+      {
+        type: 'GRASSLAND',
+        texture: grassPatchDryTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 700,
+        alpha: 0.65,
+        blendMode: 'normal',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed) === 'DRY',
+      },
+      {
+        type: 'GRASSLAND',
+        texture: grassPatchDenseTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 700,
+        alpha: 0.22,
+        blendMode: 'multiply',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed) === 'DENSE',
+      },
+      {
+        type: 'GRASSLAND',
+        texture: grassFlowerSpeckTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 700,
+        alpha: 0.50,
+        // `multiply` would mud pink flowers into brown against grass green; `normal`
+        // preserves the speck colour.
+        blendMode: 'normal',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed) === 'FLOWERY',
+      },
+      { type: 'FOREST', texture: forestTextureRef.current, tint: 0x888888, tilePx: 100 },
       { type: 'HILL', texture: hillTextureRef.current, tint: 0xC8C8C8 },
       { type: 'MOUNTAIN', texture: mountainTextureRef.current, tint: 0xC8C8C8 },
       { type: 'SNOW', texture: snowTextureRef.current, tint: 0xFFFFFF },
     ];
     for (const layer of globalUvOverlays) {
       if (!layer.texture) continue;
-      const hexes = gridData.filter(d => d.type === layer.type);
+      const hexes = gridData.filter(d =>
+        d.type === layer.type && (!layer.hexFilter || layer.hexFilter(d.hex)),
+      );
       if (hexes.length === 0) continue;
       const hexH = (TERRAINS[layer.type] ?? TERRAINS.SEA).height;
       const sz = HexUtils.size;
@@ -437,7 +576,7 @@ export const GameCanvas: React.FC = () => {
         const p = HexUtils.hexToPixel(d.hex);
         const topY = p.y - hexH;
         for (let i = 0; i < 6; i++) {
-          const r = Math.PI / 180 * (60 * i - 30);
+          const r = Math.PI / 180 * (60 * i);
           const vx = p.x + sz * Math.cos(r);
           const vy = topY + sz * Math.sin(r);
           if (vx < minX) minX = vx;
@@ -451,18 +590,19 @@ export const GameCanvas: React.FC = () => {
       const tile = new PIXI.TilingSprite({ texture: layer.texture, width: w, height: h });
       tile.x = minX;
       tile.y = minY;
-      // One tile spans ~110 world px (≈ 1.4 hex widths): texture details read at hex zoom
-      // without an obvious 1:1 hex:tile coincidence.
-      const tileScale = 110 / layer.texture.width;
+      const tilePx = layer.tilePx ?? 110;
+      const tileScale = tilePx / layer.texture.width;
       tile.tileScale.set(tileScale, tileScale);
       tile.tint = layer.tint;
+      if (layer.alpha !== undefined) tile.alpha = layer.alpha;
+      if (layer.blendMode !== undefined) tile.blendMode = layer.blendMode;
       const mask = new PIXI.Graphics();
       for (const d of hexes) {
         const p = HexUtils.hexToPixel(d.hex);
         const topY = p.y - hexH;
         const pts: number[] = [];
         for (let i = 0; i < 6; i++) {
-          const r = Math.PI / 180 * (60 * i - 30);
+          const r = Math.PI / 180 * (60 * i);
           pts.push(p.x + sz * Math.cos(r), topY + sz * Math.sin(r));
         }
         mask.poly(pts).fill({ color: 0xffffff });
@@ -471,7 +611,117 @@ export const GameCanvas: React.FC = () => {
       overlay.addChild(mask);
       tile.mask = mask;
     }
+
+    // Each shared edge is stroked ONCE — by the taller hex (tiebreak: axial-key compare).
+    // Stops double-line artefacts at elevation boundaries where each side would otherwise
+    // draw its own outline at its own height.
+    if (showGrid) {
+      // Edge → vertex pair → neighbour axial dir (flat-top, r = 60·i).
+      const gridEdges: [number, number, number][] = [
+        [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
+      ];
+      const sz = HexUtils.size;
+      for (const item of gridData) {
+        const tDef = TERRAINS[item.type] || TERRAINS.SEA;
+        const hh = tDef.height;
+        const pos = HexUtils.hexToPixel(item.hex);
+        const myKey = HexUtils.key(item.hex);
+        const topV: { x: number; y: number }[] = [];
+        for (let i = 0; i < 6; i++) {
+          const r = Math.PI / 180 * (60 * i);
+          topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - hh });
+        }
+        for (const [v1, v2, dirIdx] of gridEdges) {
+          const dir = HexUtils.directions[dirIdx];
+          const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
+          const nType = terrainAt.get(nKey);
+          const nH = nType ? (TERRAINS[nType]?.height ?? 0) : -Infinity;
+          const iOwn = !nType || hh > nH || (hh === nH && myKey < nKey);
+          if (!iOwn) continue;
+          gGfx.moveTo(topV[v1].x, topV[v1].y)
+              .lineTo(topV[v2].x, topV[v2].y)
+              .stroke({ width: 1, color: 0x141414, alpha: 1 });
+        }
+      }
+    }
   }, [gridData, showGrid, terrainTexturesLoaded]);
+
+  // Three-layer scatter (embedded / small / landmark), deterministic per hex via seeded
+  // RNG, with density modulated by a 2D simplex noise.
+  const drawDetails = useCallback(() => {
+    const dg = detailsGfx.current;
+    for (const child of dg.children.slice()) {
+      dg.removeChild(child);
+      child.destroy();
+    }
+    if (detailTexturesRef.current.size === 0 || gridData.length === 0) return;
+    const worldSeed = 1;
+    const hexR = HexUtils.size;
+    const densityNoise = detailDensityNoiseRef.current;
+    // Maps simplex's [-1,1] to a density multiplier in [0.3, 1.7] over ~10-hex-wide zones.
+    const densityMultAt = (q: number, r: number): number => {
+      if (!densityNoise) return 1;
+      return 1 + densityNoise(q * 0.08, r * 0.08) * 0.7;
+    };
+    // Per-layer seed offsets so the three layers' RNGs don't correlate.
+    const LAYER_ORDER: Array<'embedded' | 'small' | 'landmark'> = ['embedded', 'small', 'landmark'];
+    const LAYER_SEED_OFFSET: Record<string, number> = { embedded: 11, small: 23, landmark: 41 };
+
+    for (const item of gridData) {
+      const rules = DETAIL_RULES[item.type];
+      if (!rules) continue;
+      const pos = HexUtils.hexToPixel(item.hex);
+      const hexH = (TERRAINS[item.type] ?? TERRAINS.SEA).height;
+      const topY = pos.y - hexH;
+      const densityMult = densityMultAt(item.hex.q, item.hex.r);
+
+      for (const layerName of LAYER_ORDER) {
+        const layer = rules[layerName];
+        if (!layer) continue;
+        const hexSeed = getHexSeed(item.hex.q, item.hex.r, worldSeed + LAYER_SEED_OFFSET[layerName]);
+        const effDensity = Math.min(1, layer.density * densityMult);
+        if (seededRandom(hexSeed) > effDensity) continue;
+
+        const countRng = seededRandom(hexSeed + 1);
+        const count = 1 + Math.floor(countRng * layer.maxPerHex); // 1..maxPerHex
+
+        for (let i = 0; i < count; i++) {
+          const spriteKey = pickWeighted(layer.sprites, seededRandom(hexSeed + i * 10 + 2));
+          const tex = detailTexturesRef.current.get(spriteKey);
+          if (!tex) continue;
+
+          const angle = seededRandom(hexSeed + i * 20 + 3) * Math.PI * 2;
+          const radius = seededRandom(hexSeed + i * 30 + 4) * hexR * 0.35;
+          const xOff = Math.cos(angle) * radius;
+          const yOff = Math.sin(angle) * radius;
+
+          const [scaleLo, scaleHi] = layer.scaleRange;
+          const scale = scaleLo + seededRandom(hexSeed + i * 40 + 5) * (scaleHi - scaleLo);
+          const [alphaLo, alphaHi] = layer.alphaRange;
+          const alpha = alphaLo + seededRandom(hexSeed + i * 60 + 7) * (alphaHi - alphaLo);
+
+          const category = spriteCategory(spriteKey);
+          const tint = rules.categoryStyle[category].tint;
+          const isRock = category === 'rock';
+          const rotRng = seededRandom(hexSeed + i * 50 + 6);
+          // Plants and flowers only get a small tilt — full rotation flips them upside-down.
+          const rotation = isRock ? rotRng * Math.PI * 2 : (rotRng - 0.5) * (Math.PI / 6);
+
+          const sprite = new PIXI.Sprite(tex);
+          sprite.anchor.set(0.5, 0.85);
+          sprite.x = pos.x + xOff;
+          sprite.y = topY + yOff;
+          sprite.scale.set(scale, scale);
+          sprite.rotation = rotation;
+          sprite.alpha = alpha;
+          sprite.tint = tint;
+          dg.addChild(sprite);
+        }
+      }
+    }
+  }, [gridData]);
+
+  useEffect(() => { drawDetails(); }, [gridData, terrainTexturesLoaded, drawDetails]);
 
   const drawUnits = useCallback(() => {
     const c = unitsGfx.current;
@@ -484,9 +734,7 @@ export const GameCanvas: React.FC = () => {
     const unitTexBlueSkir = unitTextureBlueSkirmisherRef.current;
     if (!armyTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
 
-    // Tear down all per-unit containers (kill any in-flight tweens first so GSAP
-    // doesn't touch a destroyed object). Used when leaving tactical view or when
-    // there's no active battle to render.
+    // Kill GSAP tweens before destroy so they don't touch a freed object next frame.
     const destroyAllUnitContainers = () => {
       unitContainersRef.current.forEach(cont => {
         gsap.killTweensOf(cont);
@@ -523,10 +771,7 @@ export const GameCanvas: React.FC = () => {
     }
     const units = armies.get(HexUtils.key(currentStrategicHex)) ?? [];
 
-    // Reconciliation: destroy containers for units that no longer exist (dead,
-    // removed, or the army emptied) so GSAP can't tween into ghosts. Then sweep
-    // any non-container leftovers (e.g., strategic sprites that hadn't been
-    // cleared when we transitioned views).
+    // Destroy containers for units that no longer exist so GSAP can't tween ghosts.
     const wantedIds = new Set(units.map(u => u.id));
     unitContainersRef.current.forEach((cont, id) => {
       if (!wantedIds.has(id)) {
@@ -540,10 +785,8 @@ export const GameCanvas: React.FC = () => {
       if (c.children[i].label !== 'unit-container') c.removeChildAt(i);
     }
 
-    // Lieutenant per (team, groupId): if the group has an active order, the lieutenant is
-    // the unit currently at the attack target hex (i.e., the unit that snapped to slots[0]
-    // at deploy time and has been carried along by the rigid-block march). Otherwise fall
-    // back to the lowest-id live unit so a marker still appears between orders.
+    // Lieutenant per (team, groupId): the unit at the attack target if an order is
+    // active, else the lowest-id live unit so a marker still appears between orders.
     const lieutenantIds = new Set<string>();
     const lowestByGroup = new Map<string, Unit>();
     for (const u of units) {
@@ -565,22 +808,15 @@ export const GameCanvas: React.FC = () => {
       }
     });
 
-    // Map hex-key → team for the team-outline edge filter below. A hex's edge k is
-    // shared with the neighbor at HexUtils.directions[(6 - k) % 6] (verts go clockwise
-    // in screen coords but directions go counterclockwise from E); if that neighbor
-    // holds a same-team ally we skip drawing edge k, so the cluster shows only its
-    // exterior perimeter.
+    // teamByKey is used by the team-outline edge filter below to skip edges shared with
+    // a same-team neighbour (so a cluster shows only its outer perimeter). Mapping:
+    // edge k ↔ neighbour at HexUtils.directions[(6 - k) % 6].
     const teamByKey = new Map<string, Team>();
     for (const u of units) teamByKey.set(HexUtils.key(u.tacticalHex), u.team);
 
-    // Initial LOD state from the live world scale (zoom.current can be stale during a
-    // gsap dive). The ticker re-applies on every threshold crossing too. Hoisted here
-    // so the per-unit overlays AND the per-order attack-target ring share one value.
+    // Read scale directly — zoom.current is stale during a GSAP dive tween.
     const isFar = worldRef.current.scale.x < LOD_THRESHOLD;
 
-    // Fog of war: precompute the set of hex keys any friendly unit can currently see.
-    // Bounding-box scan with axial-distance prune (HexUtils.distance is ground truth).
-    // Friendlies are always rendered below; only enemy units check against this set.
     const visibleHexes = new Set<string>();
     if (fogOfWar) {
       for (const u of units) {
@@ -603,17 +839,12 @@ export const GameCanvas: React.FC = () => {
       const pos = HexUtils.hexToPixel(u.tacticalHex);
       const topY = pos.y - TERRAINS[tile.type].height;
       const hexKey = HexUtils.key(u.tacticalHex);
-      // Animation cache key includes Y elevation so world-regen (same hex, different
-      // terrain type at that hex → different topY) re-targets the container even when
-      // the unit didn't logically move. Without this, a unit standing on a hex whose
-      // terrain type changes would render at the old elevation until it moved.
+      // Includes topY so world regeneration (same hex, new terrain type) re-targets
+      // the container instead of leaving the unit floating at the old elevation.
       const targetKey = `${hexKey}|${Math.round(topY)}`;
 
-      // Get-or-create persistent container per unit. Existing containers tween to
-      // the new position (smooth motion); first-appearance containers snap. We
-      // compare against the LAST TARGET key (not container.position, which is
-      // mid-tween) so re-renders from non-movement causes (fog toggle, hover, etc.)
-      // don't retrigger animation.
+      // Compare against the last TARGET key (not container.position, which is mid-tween)
+      // so non-movement re-renders (fog toggle, hover) don't restart the animation.
       let container = unitContainersRef.current.get(u.id);
       if (!container) {
         container = new PIXI.Container();
@@ -633,36 +864,29 @@ export const GameCanvas: React.FC = () => {
         });
       }
 
-      // Fog of war: hide enemy units outside any friendly's vision. Position keeps
-      // tweening even while hidden, so when fog reveals the unit it's at the
-      // correct current location instead of teleporting from its last-seen hex.
-      // Children are still rebuilt below — keeps HP bar / lieutenant marker fresh
-      // so a fog reveal shows the unit's current state, not the last seen one.
+      // Position keeps tweening while hidden so a fog reveal shows the unit at its
+      // current location, not the last-seen one. Children rebuild every frame so HP
+      // bars / lieutenant markers stay current.
       const isHidden = fogOfWar && u.team !== selectedTeam && !visibleHexes.has(hexKey);
       container.visible = !isHidden;
 
-      // Rebuild children inside the container. Children use RELATIVE offsets from
-      // container origin (= unit's hex top-center in world space). The container's
-      // GSAP tween carries them all along.
       container.removeChildren();
 
       const teamColor = TEAM_TINTS[u.team];
       const s = HexUtils.size;
       const verts: { x: number; y: number }[] = [];
       for (let k = 0; k < 6; k++) {
-        const ang = Math.PI / 180 * (60 * k - 30);
+        const ang = Math.PI / 180 * (60 * k);
         verts.push({ x: s * Math.cos(ang), y: s * Math.sin(ang) });
       }
 
-      // Strategic marker — team-tinted hex top. Drawn before the outline so the
-      // outline strokes render on top of the fill.
+      // Strategic-view team marker; drawn before the outline so strokes sit on top.
       const marker = new PIXI.Graphics();
       marker.poly(verts.flatMap(v => [v.x, v.y])).fill({ color: teamColor, alpha: 0.7 });
       marker.label = 'unit-marker';
       marker.visible = isFar;
       container.addChild(marker);
 
-      // Outline — only the edges not shared with a same-team neighbor.
       const outline = new PIXI.Graphics();
       for (let k = 0; k < 6; k++) {
         const dir = HexUtils.directions[(6 - k) % 6];
@@ -675,9 +899,6 @@ export const GameCanvas: React.FC = () => {
       outline.stroke({ color: teamColor, width: 3, alpha: 0.95 });
       container.addChild(outline);
 
-      // Sprite — team+type-specific unit illustration. y=32 = below container origin
-      // (origin is at hex TOP; sprite anchors at its bottom-center). `unitType` falls
-      // back to 'infantry' for any pre-feature units still in state from hot-reload.
       const unitType = u.unitType ?? 'infantry';
       const tex = u.team === 'red'
         ? (unitType === 'skirmisher' ? unitTexRedSkir : unitType === 'cavalry' ? unitTexRedCav : unitTex)
@@ -686,9 +907,8 @@ export const GameCanvas: React.FC = () => {
       sprite.anchor.set(0.5, 1);
       sprite.x = 0;
       sprite.y = 32;
-      // Roman (red) cavalry and skirmisher artwork has more empty margin inside its bbox
-      // than the infantry sprite, so at the same render size the figures read smaller.
-      // Bump those two up so the visible silhouette matches the infantry on screen.
+      // Red cavalry/skirmisher art has more empty bbox margin than the infantry sprite,
+      // so render bigger to match the visible silhouette.
       const isOversizedRedSprite = u.team === 'red' && (unitType === 'cavalry' || unitType === 'skirmisher');
       const spriteSize = isOversizedRedSprite ? 100 : 72;
       sprite.width = spriteSize;
@@ -697,8 +917,7 @@ export const GameCanvas: React.FC = () => {
       sprite.visible = !isFar;
       container.addChild(sprite);
 
-      // HP bar (only when damaged). Per-type max so cavalry's 30/60 fills 50% rather
-      // than the 30% an infantry's 30/100 would show.
+      // Per-type denominator so cavalry's 30/60 fills 50% (not the 30% an infantry would).
       const maxHp = MAX_HP_BY_TYPE[unitType];
       if (u.hp < maxHp) {
         const barW = 26;
@@ -722,7 +941,6 @@ export const GameCanvas: React.FC = () => {
         container.addChild(fg);
       }
 
-      // Lieutenant ★ + heading arrow.
       if (lieutenantIds.has(u.id)) {
         const star = new PIXI.Text({
           text: '★',
@@ -776,9 +994,8 @@ export const GameCanvas: React.FC = () => {
     let dblClickHandler: ((e: MouseEvent) => void) | null = null;
     const start = async () => {
       await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
-      // The army SVG is natively 40×40. PIXI rasterizes it once at native size, which is
-      // blurry on high-DPI screens (where 40 CSS pixels = 80+ device pixels). Render the
-      // SVG into a high-res canvas (4× display size) so PIXI downsamples nicely instead.
+      // The army SVG is natively 40×40 — too low for high-DPI. Pre-rasterise to a
+      // higher-res canvas so PIXI downsamples instead of upsampling.
       const loadHighResSvgTexture = async (url: string, pixelSize: number): Promise<PIXI.Texture> => {
         const img = new Image();
         img.src = url;
@@ -793,21 +1010,21 @@ export const GameCanvas: React.FC = () => {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, forestTex, riverTex, hillTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
+      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, riverTex, hillTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/roman_soldier.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/hoplite.png'),
-        // Both cavalry sprites are painted PNGs, same pipeline as the infantry/skirmisher
-        // textures (LINEAR + mipmaps below).
         PIXI.Assets.load<PIXI.Texture>('/units/mounted-knight.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/cavalry-hoplite.png'),
-        // Per-team skirmishers: red wolf-helm javelineer, blue generic painted skirmisher.
         PIXI.Assets.load<PIXI.Texture>('/units/roman_skirmisher.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/skirmisher.png'),
-        // Projectile sprite for skirmisher ranged attacks.
         PIXI.Assets.load<PIXI.Texture>('/units/javelin.png'),
-        // Tiled terrain textures.
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-noise.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-macro-noise.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-patch-dry.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-patch-dense.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-flower-speck.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/forest.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/river.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill.png'),
@@ -818,19 +1035,19 @@ export const GameCanvas: React.FC = () => {
         PIXI.Assets.load<PIXI.Texture>('/terrain/deep-sea.png'),
       ]);
       if (!isMounted) return;
-      // All painted sprites: LINEAR scaleMode + auto-generated mipmaps give trilinear
-      // filtering, smooth at any zoom level, including heavy minification when the
-      // strategic camera is zoomed out (without mipmaps, an 800px → 30px downscale
-      // aliases into a shimmering mess).
-      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, forestTex, riverTex, hillTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
+      // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
+      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, riverTex, hillTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
       }
-      // Terrain tiles repeat across the world. 'repeat' wrap mode means adjacent hexes
-      // of the same terrain sample a continuous global UV grid → no per-hex seam, the
-      // whole field looks like one painted surface.
+      // 'repeat' wrap so the TilingSprite overlays tile continuously across each biome.
       grassTex.source.addressMode = 'repeat';
+      grassNoiseTex.source.addressMode = 'repeat';
+      grassMacroNoiseTex.source.addressMode = 'repeat';
+      grassPatchDryTex.source.addressMode = 'repeat';
+      grassPatchDenseTex.source.addressMode = 'repeat';
+      grassFlowerSpeckTex.source.addressMode = 'repeat';
       forestTex.source.addressMode = 'repeat';
       riverTex.source.addressMode = 'repeat';
       hillTex.source.addressMode = 'repeat';
@@ -847,7 +1064,23 @@ export const GameCanvas: React.FC = () => {
       unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
       unitTextureBlueSkirmisherRef.current = skirmisherTex;
       javelinTextureRef.current = javelinTex;
+      const detailTexs = await Promise.all(
+        ALL_DETAIL_KEYS.map(k => PIXI.Assets.load<PIXI.Texture>(detailAssetPath(k))),
+      );
+      if (!isMounted) return;
+      for (let i = 0; i < ALL_DETAIL_KEYS.length; i++) {
+        const tex = detailTexs[i];
+        tex.source.scaleMode = 'linear';
+        tex.source.autoGenerateMipmaps = true;
+        tex.source.updateMipmaps();
+        detailTexturesRef.current.set(ALL_DETAIL_KEYS[i], tex);
+      }
       grassTextureRef.current = grassTex;
+      grassNoiseTextureRef.current = grassNoiseTex;
+      grassMacroNoiseTextureRef.current = grassMacroNoiseTex;
+      grassPatchDryTextureRef.current = grassPatchDryTex;
+      grassPatchDenseTextureRef.current = grassPatchDenseTex;
+      grassFlowerSpeckTextureRef.current = grassFlowerSpeckTex;
       forestTextureRef.current = forestTex;
       riverTextureRef.current = riverTex;
       hillTextureRef.current = hillTex;
@@ -863,13 +1096,13 @@ export const GameCanvas: React.FC = () => {
       const world = worldRef.current;
       world.x = app.screen.width / 2; world.y = app.screen.height / 2; world.scale.set(zoom.current);
       app.stage.addChild(world);
+      // World z-order: terrain → painted overlay → scatter details → grid → units →
+      // projectiles → drag previews → hover highlights.
       world.addChild(terrainGfx.current);
-      // HILL (and any future biome with global-UV tiling) renders here, above the base
-      // terrain Graphics but below the units, so the TilingSprite covers the flat-color
-      // HILL tops while still sitting under any unit standing on a hill.
       world.addChild(terrainOverlayRef.current);
+      world.addChild(detailsGfx.current);
+      world.addChild(gridGfx.current);
       world.addChild(unitsGfx.current);
-      // Projectiles render ABOVE units so a javelin in flight isn't hidden behind a sprite.
       world.addChild(projectilesGfx.current);
       world.addChild(previewGfx.current);
       world.addChild(highlightGfx.current);
@@ -886,7 +1119,6 @@ export const GameCanvas: React.FC = () => {
         setArmies(prev => {
           const next = new Map(prev);
           const existing = next.get(strategicKey) ?? [];
-          // One unit per hex — skip if occupied (any team).
           if (existing.some(u => u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r)) {
             return prev;
           }
@@ -954,8 +1186,7 @@ export const GameCanvas: React.FC = () => {
 
         let slots: Hex[];
         let heading: number;
-        // TW-style continuous-angle drag for LINE / WEDGE. Other formations and the no-real-drag
-        // case use the existing 6-snap path so quick-click keeps the old behavior.
+        // Continuous-angle drag for LINE / WEDGE; other formations use 6-snap.
         if (drag.formation === 'line' && dragHexDist >= 1) {
           const r = computeLineDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
           slots = r.slots;
@@ -995,7 +1226,7 @@ export const GameCanvas: React.FC = () => {
           hex.beginFill(isLieutenant ? 0xfacc15 : teamColor, 0.18);
           const s = HexUtils.size;
           for (let k = 0; k < 6; k++) {
-            const r = Math.PI / 180 * (60 * k - 30);
+            const r = Math.PI / 180 * (60 * k);
             if (k === 0) hex.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
             else hex.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
           }
@@ -1029,9 +1260,7 @@ export const GameCanvas: React.FC = () => {
         previewGfx.current.removeChildren();
       };
 
-      // For defend input mode: BFS the home-terrain blob from `startHex`, derive borders
-      // (filtered by `defendFrom` when present), draw a green outline on each border, and
-      // draw a line from start to end when the drag has moved at least one hex.
+      // Defend preview: BFS the home-terrain blob from `startHex`, outline borders.
       const renderDefendPreview = () => {
         const gfx = previewGfx.current;
         gfx.removeChildren();
@@ -1048,7 +1277,6 @@ export const GameCanvas: React.FC = () => {
         const endTerrain = dragDist > 0 ? terrainAt.get(HexUtils.key(drag.currentEndHex)) : undefined;
         const defendFrom = endTerrain && endTerrain !== homeTerrain ? endTerrain : undefined;
 
-        // BFS the blob.
         const blob = new Set<string>();
         const queue: Hex[] = [drag.startHex];
         while (queue.length) {
@@ -1061,7 +1289,6 @@ export const GameCanvas: React.FC = () => {
           for (const n of HexUtils.getNeighbors(h)) queue.push(n);
         }
 
-        // Borders.
         const borders: Hex[] = [];
         for (const k of blob) {
           const h = HexUtils.fromKey(k);
@@ -1077,9 +1304,7 @@ export const GameCanvas: React.FC = () => {
           }
         }
 
-        // Segment BFS from the gesture's start hex (the anchor). Same algorithm as the
-        // sim's defendHeight branch — RIVER-flanked borders are terminal. Preview only
-        // the borders the sim will actually defend.
+        // Segment BFS from the anchor; matches the sim's defendHeight, RIVER terminal.
         let segmentBorders = borders;
         const borderKeys = new Set(borders.map(b => HexUtils.key(b)));
         let nearestBorder: Hex | null = null;
@@ -1130,10 +1355,8 @@ export const GameCanvas: React.FC = () => {
 
         for (const b of segmentBorders) drawHexOutline(b, 0x16a34a, 0.95, 0.22);
 
-        // Start anchor (slightly brighter outline).
         drawHexOutline(drag.startHex, 0x86efac, 1.0, 0.0);
 
-        // Threat-direction line + endpoint marker.
         if (dragDist > 0) {
           const startPx = HexUtils.hexToPixel(drag.startHex);
           const endPx = HexUtils.hexToPixel(drag.currentEndHex);
@@ -1150,10 +1373,8 @@ export const GameCanvas: React.FC = () => {
         }
       };
 
-      // Commit a defend order onto the selected group. `homeHex`'s terrain becomes the
-      // sticky `defendTerrain`; `fromHex` (when provided) supplies the threat `defendFrom`.
-      // Same-terrain drag (fromHex's terrain == homeHex's terrain) is treated as
-      // omnidirectional.
+      // Commit a defend order. homeHex sets sticky defendTerrain; fromHex (different
+      // terrain) supplies the directional `defendFrom`. Same-terrain drag = omnidirectional.
       const commitDefend = (homeHex: Hex, fromHex: Hex | null) => {
         const team = selectedTeamRef.current;
         const groupId = selectedGroupRef.current;
@@ -1166,9 +1387,8 @@ export const GameCanvas: React.FC = () => {
         const fromTerrain = fromHex ? terrainAt.get(HexUtils.key(fromHex)) : undefined;
         const defendFrom = fromTerrain && fromTerrain !== defendTerrain ? fromTerrain : undefined;
 
-        // Compute the initial sticky unit→slot assignment using current group units +
-        // terrain. The sim then walks each unit toward its stored slot every tick — no
-        // per-tick re-pair, no oscillation.
+        // Sticky unit→slot pairing computed once here; the sim then walks each unit
+        // toward its STORED slot every tick (no per-tick re-pair, no oscillation).
         const strategic = currentStrategicHexRef.current;
         const groupUnits = strategic
           ? (armiesRef.current.get(HexUtils.key(strategic)) ?? []).filter(u => u.team === team && u.groupId === groupId)
@@ -1194,7 +1414,6 @@ export const GameCanvas: React.FC = () => {
         const formation = computeDefendFormation(groupUnits, tentativeOrder, {
           damagePerTick: DAMAGE_PER_TICK,
           mapApi,
-          // Pre-pairing helper; doesn't advance time. Pass 0; the helper doesn't read it.
           currentTick: 0,
         });
         const defendAssignments: Record<string, Hex> | undefined = formation
@@ -1220,7 +1439,6 @@ export const GameCanvas: React.FC = () => {
       };
 
       app.stage.on('pointerdown', (e) => {
-        // Brush mode: in placing mode, paint instead of dragging.
         const mode = inputModeRef.current;
         if ((mode === 'place' || mode === 'assign') && currentStrategicHexRef.current) {
           isPaintingRef.current = true;
@@ -1296,10 +1514,8 @@ export const GameCanvas: React.FC = () => {
           const dragEndHex = HexUtils.pixelToHex({ x: drag.currentWorld.x, y: drag.currentWorld.y });
           const dragHexDist = HexUtils.distance(drag.targetHex, dragEndHex);
 
-          // Compute the slot list for the deploy snap.
           let heading: number;
           let slots: Hex[];
-          // Only set for LINE drags; selects type-aware pairing below.
           let lineFrontWidth = 0;
           if (drag.formation === 'line' && dragHexDist >= 1) {
             const r = computeLineDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
@@ -1323,9 +1539,8 @@ export const GameCanvas: React.FC = () => {
             );
           }
 
-          // LINE drags pair by unit role (cav→flanks, skir→front-center, inf→back). Every
-          // other formation keeps the march-projection pairing where the frontmost unit
-          // lands at slots[0].
+          // LINE pairs by role (cav→flanks, skir→front-center, inf→back); other
+          // formations keep the march-projection pairing.
           const pairing = lineFrontWidth > 0
             ? computeLineSlotAssignmentsByType(groupUnits, slots, drag.targetHex, lineFrontWidth)
             : computeOrderedSlotAssignments(groupUnits, slots, drag.targetHex);
@@ -1374,9 +1589,8 @@ export const GameCanvas: React.FC = () => {
           setInputMode(null);
           cancelOrderDrag();
         }
-        // Defend mode: if the user dragged, commit a directional defense and exit mode.
-        // If they didn't drag (static click), don't commit and don't exit — wait for the
-        // browser dblclick event to complete the omnidirectional gesture.
+        // Dragged → directional defend + exit. Static click → wait for dblclick (the
+        // omnidirectional gesture; don't commit on the single tap).
         const dDrag = defendDragRef.current;
         if (dDrag) {
           const dragDist = HexUtils.distance(dDrag.startHex, dDrag.currentEndHex);
@@ -1391,8 +1605,7 @@ export const GameCanvas: React.FC = () => {
         isPaintingRef.current = false;
         lastPaintedKeyRef.current = null;
       });
-      // Browser dblclick on the canvas — used by 'defend' input mode for the
-      // omnidirectional gesture (double-click on the hex whose terrain to defend).
+      // dblclick = omnidirectional defend gesture (click the hex's home terrain).
       dblClickHandler = (e: MouseEvent) => {
         if (inputModeRef.current !== 'defend') return;
         const rect = app.canvas.getBoundingClientRect();
@@ -1404,9 +1617,7 @@ export const GameCanvas: React.FC = () => {
       app.canvas.addEventListener('dblclick', dblClickHandler);
       app.stage.on('pointertap', (e) => {
         if (isDragging.current) return;
-        // Order mode: commit happens in pointerup so the drag direction is captured.
-        // pointertap would fire here as well after a static click, but the drag path
-        // already handled it (committing on pointerup with auto-heading fallback).
+        // Order commits in pointerup (captures drag direction); pointertap is a no-op.
         if (inputModeRef.current === 'order') return;
         const local = world.toLocal(e.global); const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
         if (isScanningRef.current) {
@@ -1440,20 +1651,18 @@ export const GameCanvas: React.FC = () => {
         setInputMode(null);
       });
 
-      // Per-frame: refresh highlights and apply zoom-based LOD. We read world.scale.x
-      // (not zoom.current) because gsap mutates scale directly during the dive animation
-      // without touching zoom.current, and we want LOD to follow the camera live.
-      // Only iterate children on threshold crossings, so steady-state is ~free.
+      // Read world.scale.x (not zoom.current) — GSAP mutates scale directly during the
+      // dive animation. Iterate children only on threshold crossings.
       let lastLodFar: boolean | null = null;
       // eslint-disable-next-line react-hooks/immutability
       app.ticker.add(() => {
         updateHighlights();
+        gridGfx.current.alpha = world.scale.x < 0.6 ? 0.15 : 0.30;
         const isFar = world.scale.x < LOD_THRESHOLD;
         if (isFar === lastLodFar) return;
         lastLodFar = isFar;
-        // Top-level children may be per-unit containers (tactical) or flat sprites
-        // (strategic / attack-target indicators). Descend one level into containers
-        // labeled 'unit-container'; apply LOD directly to top-level labeled children.
+        // Per-unit containers (tactical) and flat sprites (strategic) coexist; descend
+        // into 'unit-container' children and apply LOD directly to top-level labels.
         const applyLod = (child: PIXI.Container) => {
           if (child.label === 'unit-sprite') child.visible = !isFar;
           else if (child.label === 'unit-marker') child.visible = isFar;
@@ -1478,19 +1687,16 @@ export const GameCanvas: React.FC = () => {
     return () => {
       isMounted = false;
       if (dblClickHandler) app.canvas.removeEventListener('dblclick', dblClickHandler);
-      // Kill any in-flight GSAP tweens targeting unit-container positions before
-      // PIXI destroys them — otherwise GSAP keeps updating freed objects for up
-      // to TICK_MS after unmount.
+      // Kill GSAP tweens before PIXI destroys their targets — otherwise GSAP keeps
+      // updating freed objects for up to TICK_MS after unmount.
       containers.forEach(cont => {
         gsap.killTweensOf(cont);
         gsap.killTweensOf(cont.position);
       });
       containers.clear();
-      // Kill any in-flight projectile tweens before PIXI tears down the sprites.
       for (const child of projectilesGfx.current.children) {
         gsap.killTweensOf(child);
       }
-      // Clear masks so PIXI doesn't hold references to soon-to-be-destroyed Graphics.
       for (const child of terrainOverlayRef.current.children) {
         if ('mask' in child) (child as PIXI.Sprite).mask = null;
       }
@@ -1500,13 +1706,9 @@ export const GameCanvas: React.FC = () => {
 
   const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
-  // Monotonic tick counter passed into simulateTick so unit movement cooldowns
-  // (`unit.nextMoveTick`) compare against a real time axis. Must NOT reset on
-  // setInterval start: units retain absolute `nextMoveTick` values across pauses
-  // and battle restarts. Resetting tick to 0 while units still hold cooldowns
-  // from the prior run (e.g., nextMoveTick=279) leaves every unit frozen on
-  // cooldown for hundreds of ticks. The counter is only reset on regenerate /
-  // return to strategic, where armies are also wiped.
+  // MUST stay monotonic across battle pauses/restarts — units carry absolute
+  // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
+  // Only reset on regenerate / return-to-strategic (where armies are also wiped).
   const tickCounterRef = useRef(0);
 
   useEffect(() => {
@@ -1517,11 +1719,8 @@ export const GameCanvas: React.FC = () => {
       const strategicKey = HexUtils.key(strategic);
       const units = armiesRef.current.get(strategicKey) ?? [];
       if (units.length === 0) return;
-      // Compute simulateTick BEFORE dispatching state updates. React batches updater
-      // functions and runs them later during render — assigning to a closure variable
-      // inside `setArmies(prev => ...)` and reading it on the next line is undefined
-      // (the updater hasn't run yet). Compute synchronously here, then dispatch both
-      // setters with already-computed values.
+      // simulateTick BEFORE the setters — reading a closure variable written inside a
+      // setX(prev => ...) on the next line is undefined (the updater hasn't run yet).
       const teamsBefore = new Set(units.map(u => u.team));
       if (teamsBefore.size >= 2) lastTickHadBothTeamsRef.current = true;
       const grid = gridDataRef.current;
@@ -1546,15 +1745,10 @@ export const GameCanvas: React.FC = () => {
           isBarrier: (h: Hex) => terrainAt.get(HexUtils.key(h)) === 'RIVER',
         },
       });
-      // Spawn javelin sprites for any ranged attacks this tick. Each sprite tweens from
-      // attacker hex to target hex over ~250ms (sub-tick) and self-destroys onComplete.
       const javelinTex = javelinTextureRef.current;
       if (javelinTex && result.projectiles.length > 0) {
-        // Asset orientation: javelin tip in the upper-left of the image, butt in the
-        // lower-right. The vector from butt→tip in image pixels is roughly (-1610, -670)
-        // (the asset is 1813×822 with the diagonal javelin). Pre-compute the angle of
-        // that vector once so the sprite's natural tip-direction is known; the throw
-        // rotation is then `throwAngle - assetTipAngle` to point the tip at the target.
+        // Asset's natural tip points up-left (1813×822 diagonal). atan2(-670, -1610) is
+        // the from-butt-to-tip angle; subtract to rotate the throw to face the target.
         const assetTipAngle = Math.atan2(-670, -1610);
         const container = projectilesGfx.current;
         for (const p of result.projectiles) {
@@ -1564,7 +1758,6 @@ export const GameCanvas: React.FC = () => {
           const dyp = toPx.y - fromPx.y;
           const sprite = new PIXI.Sprite(javelinTex);
           sprite.anchor.set(0.5, 0.5);
-          // Scale to a hex-appropriate length (~50 px = a bit more than one hex).
           const targetLengthPx = 50;
           const intrinsicLen = Math.max(javelinTex.width, 1);
           const s = targetLengthPx / intrinsicLen;
@@ -1732,12 +1925,9 @@ export const GameCanvas: React.FC = () => {
       const key = groupOrderKey(team, gid);
 
       if (k === 't') {
-        // Assign mode toggle. Doesn't require an order; lets you reassign existing
-        // units to this group with a brush paint on the canvas.
         setInputMode(prev => (prev === 'assign' ? null : 'assign'));
         setIsScanning(false);
       } else if (k === 'q') {
-        // Attack mode: needs at least one unit in the selected group.
         const hex = currentStrategicHexRef.current;
         const units = hex ? armiesRef.current.get(HexUtils.key(hex)) ?? [] : [];
         const count = units.filter(u => u.team === team && u.groupId === gid).length;
@@ -1745,7 +1935,6 @@ export const GameCanvas: React.FC = () => {
         setInputMode(prev => (prev === 'order' ? null : 'order'));
         setIsScanning(false);
       } else if (k === 'w') {
-        // Hold toggle on active order.
         setGroupOrders(prev => {
           const cur = prev.get(key);
           if (!cur?.attackTarget) return prev;
@@ -1758,7 +1947,7 @@ export const GameCanvas: React.FC = () => {
       } else if (k === 'r') {
         toggleMode('unleash');
       } else if (k === 'a') {
-        // Mirror march heading horizontally: NE↔NW, SE↔SW, E↔W. No-op if no active order.
+        // Mirror heading horizontally: NE↔NW, SE↔SW, N↔N, S↔S.
         setGroupOrders(prev => {
           const cur = prev.get(key);
           if (!cur?.attackTarget) return prev;
@@ -1769,7 +1958,6 @@ export const GameCanvas: React.FC = () => {
       } else if (k === 's') {
         toggleDefend();
       } else if (k === 'd') {
-        // Cycle formation through FORMATION_CYCLE. Defaults to 'line' if unset.
         setGroupFormations(prev => {
           const cur = prev.get(key) ?? 'line';
           const idx = FORMATION_CYCLE.indexOf(cur);
@@ -1781,7 +1969,6 @@ export const GameCanvas: React.FC = () => {
       } else if (k === 'f') {
         toggleMode('retreat');
       } else if (k === 'v') {
-        // Cycle depth through DEPTH_CYCLE. Defaults to 1 if unset.
         setGroupDepths(prev => {
           const cur = prev.get(key) ?? 1;
           const idx = DEPTH_CYCLE.indexOf(cur);
@@ -1833,9 +2020,8 @@ export const GameCanvas: React.FC = () => {
       if (e.key === 'z' || e.key === 'Z') { setPlacementType('infantry'); return; }
       if (e.key === 'x' || e.key === 'X') { setPlacementType('cavalry'); return; }
       if (e.key === 'c' || e.key === 'C') { setPlacementType('skirmisher'); return; }
-      // Backspace → kill every unit in the currently selected team+group on this
-      // strategic hex, and clear the group's order (no phantom lieutenant marker or
-      // attack-target ring lingers).
+      // Backspace: kill every unit in the selected team+group on this hex, and clear
+      // the group's order so no phantom lieutenant marker survives.
       if (e.key === 'Backspace') {
         e.preventDefault();
         const strategic = currentStrategicHexRef.current;
@@ -1877,7 +2063,7 @@ export const GameCanvas: React.FC = () => {
     if (isScanning) { h.lineStyle(4, 0x00e6ff, 0.9).beginFill(0x00e6ff, 0.1).drawCircle(pos.x, topY, HexUtils.size * 6.5).endFill(); }
     else {
       h.lineStyle(4, 0xffffff, 0.9); const s = HexUtils.size; for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i - 30);
+        const r = Math.PI / 180 * (60 * i);
         if (i === 0) h.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r)); else h.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
       }
       h.closePath();
