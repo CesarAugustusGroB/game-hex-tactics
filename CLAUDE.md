@@ -10,6 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Code:** minimal. No comments that restate the code. No defensive checks for impossible states. No abstractions for hypothetical reuse. No backwards-compat shims. Delete unused code instead of commenting it out. If three lines do the job, don't write ten.
 - **Only add comments when the WHY is non-obvious:** a library gotcha, a load-bearing invariant, a workaround for a specific bug. If removing the comment wouldn't confuse a future reader, don't write it.
 
+## Documentation cadence
+
+Periodically (every ~3–5 substantial back-and-forths, or after landing a tricky bug fix or architectural change) prompt the user with: **"Hay algo de esto que valga la pena documentar en `LEARNINGS.md`?"** Suggest concrete candidates — a non-obvious bug we just fixed, a library gotcha we hit, a design decision with a "why" that won't be visible from the code, a pattern worth repeating. If the user says yes, append to `LEARNINGS.md` in the existing style (descriptive prose, focused on the trap or insight, not a play-by-play). Skip routine work — only ask when there's a real candidate.
+
 ## Commands
 
 - `npm run dev` — Vite dev server (default http://localhost:5173). The parent worktree may already be using this port; pass `-- --port 5174` if needed.
@@ -27,7 +31,7 @@ Single-canvas PIXI.js application with a thin React HUD. Logic lives in:
 - `src/main.tsx` — React root.
 - `src/App.tsx` — renders only `<GameCanvas />`.
 - `src/components/GameCanvas.tsx` — the entire app: world generation, rendering, input, HUD.
-- `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (pointy-top, `size = 40`).
+- `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (flat-top, `size = 40`).
 - `src/battle/simulate.ts` — pure battle simulator (no React/PIXI). Exports `simulateTick`, unit/order types, and per-type tunables (`MARCH_HEXES_PER_TICK`, `MAX_HP_BY_TYPE`, etc.).
 - `src/battle/terrain.ts` — pure terrain modifier table (defense/moveCost/attrition/vision) and downhill damage bonus. Sole owner of mechanical terrain values.
 - `scripts/sim-formations.ts` — Node harness that drives `simulateTick` against scripted scenarios. Mirrors map state via a fake `MapApi`. Treat as a regression check.
@@ -39,9 +43,16 @@ Single-canvas PIXI.js application with a thin React HUD. Logic lives in:
 
 ### Rendering pipeline (`GameCanvas.tsx`)
 
-`gridData` (state) → `drawMap()` rebuilds `terrainGfx` from scratch on every change. Each hex is a faux-3D prism: two side quads (shaded 0.6× / 0.4×) plus a top hexagon. Heights come from `TERRAINS[type].height`. `highlightGfx` is redrawn every tick from the ticker, not from React state, so hover updates don't re-run `drawMap`.
+`gridData` → `drawMap()` rebuilds the terrain in two passes:
 
-A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`). The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
+1. **`terrainGfx` (Pass 1, per-hex Graphics)** — top polygon fill (flat colour or `Texture` for `RIVER`/`SAND`/`SEA`/`DEEP_SEA`) plus shaded S/SE/SW side walls. Walls are drawn **only for non-textured biomes** (`SAND`, `RIVER`, `SEA`, `DEEP_SEA`, `ROCKY`); textured biomes get their cliff faces from Pass 2 instead. Hexes iterate in ascending `TERRAINS[type].height` so taller terrain renders after — and thus over — its shorter neighbours.
+2. **`terrainOverlayRef` (Pass 2, `TilingSprite` + hex-mask per biome)** — `GRASSLAND` / `FOREST` / `HILL` / `MOUNTAIN` / `SNOW` each get a world-space tiled texture clipped to a mask. The base mask of each biome is **the union of its hex top polygons _plus_ the visible cliff face against each shorter neighbour** (a `(hexH − nH)`-tall quad along the S/SE/SW shared edge). Result: the biome texture paints continuously over both the hex top and the cliff slope — no dark shaded wall and no protrusion into the shorter neighbour's territory. Decoration layers (grass-macro, dry/dense/flowery patches) reuse the same per-biome filter but stay top-only.
+
+Heights live in `TERRAINS[type].height`. `highlightGfx` and `previewGfx` are redrawn every tick from the ticker (not from React state) so hover/drag updates don't re-run `drawMap`.
+
+A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`). World z-order: `terrainGfx → terrainOverlayRef → detailsGfx → gridGfx → bordersGfx? → unitsGfx → projectilesGfx → previewGfx → highlightGfx`. The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
+
+**PIXI v8 gotcha:** `Color.multiply(number)` treats the number as a hex int via bit-shifts (`0.7 | 0 === 0` → black). Always pass an RGB-normalised array (`[s, s, s, 1]`) when shading. See `LEARNINGS.md` for the full story.
 
 ### World generation (`generateWorldData`)
 

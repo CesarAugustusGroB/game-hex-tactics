@@ -2,6 +2,105 @@
 
 What got built, what bit us, and what to remember when coming back to this code.
 
+## Scope expansion: terrain rendering (`feature/terrain-modifiers`)
+
+The branch grew beyond unit mechanics into a full terrain-rendering rework:
+
+- **Flat-top hex grid.** `HexUtils` rotated 30° from pointy-top — flat edges face N/S, vertices E/W. Only the q/r↔pixel mapping changes; the 6 axial neighbour offsets stay the same.
+- **Textured terrain pipeline.** Five "biomes" (`GRASSLAND`, `FOREST`, `HILL`, `MOUNTAIN`, `SNOW`) render via a global-UV `TilingSprite` + hex-mask overlay instead of per-polygon `Graphics.fill`. World-space UVs mean neighbouring hexes see different continuous patches of the texture rather than the same per-bbox-normalized stamp.
+- **2.5D side walls.** Each hex is a faux-prism: top hexagon + S/SE/SW shaded quads (N/NE/NW are hidden from the top-down camera). Hexes render in ascending `TERRAINS[type].height` so taller terrain overlaps shorter neighbours.
+- **Chunked grass patches.** Per-`(6×6 axial chunk, seed)` patch type (`NONE/DRY/DENSE/FLOWERY`), each with its own overlay layer (separate masks, separate textures) so a single grassland reads as a varied landscape.
+- **Macro noise overlay.** Low-frequency luminance variation across grassland to break up the tile repetition without per-hex work.
+- **Three-layer scatter sprites.** `embedded`/`small`/`landmark` per biome (grass/flower/rock sets), density modulated by a simplex zone field, deterministic per hex via seeded RNG.
+
+## More patterns that paid off
+
+### Z-sort by `TERRAINS[type].height` instead of per-vertex push
+
+Early attempt to make taller hexes visually overhang shorter neighbours pushed each hex's top vertices outward by some `(height − neighbourHeight)` factor. That distorts shared vertices between neighbouring hexes — adjacent hex tops no longer line up at the same point in screen space, and you get a visible double-line / notch artefact along every elevation step.
+
+The fix is conceptually simpler: leave vertices alone, render hexes in ascending-height order. A taller hex's top + walls draw *after* its shorter neighbour, so they cover the neighbour's polygon along the shared edge with no vertex math. The "overhang" is just z-order, not geometry.
+
+Pattern: when "thing A should visually cover thing B," prefer draw-order over geometric trickery. Cheaper, no shared-vertex artefacts, no special cases for 3-way corners.
+
+### `taller-owns` rule for shared-edge strokes
+
+The hex grid is drawn as a single stroke per edge. Naïvely, each hex strokes its own 6 edges → every shared edge gets stroked twice, at slightly different y values when the two hexes have different heights → a visible double line on every elevation step.
+
+Fix: each edge is owned by exactly one hex (the taller; tiebreak by axial-key string compare). Each hex iterates its 6 edges and skips any it doesn't own. Single stroke per edge, at the taller hex's elevation, which is also where the cliff/wall sits — the line reads correctly.
+
+Same pattern applies if you ever add biome border strokes or any other per-edge stroke layer.
+
+## Bugs we caught, and the lessons (continued)
+
+### PIXI v8 `Color.multiply(number)` is a hex-int bit-shift, not a scalar multiply
+
+```ts
+PIXI.Color.shared.setValue(0xC0C0C0).multiply(0.7).toNumber()
+// → 0  (BLACK)
+```
+
+`Color.multiply` expects an RGBA-normalised array `[r, g, b, a]` (each in 0..1). Passing a bare number treats it as a hex integer that gets bit-shifted into channels — `0.7 | 0 === 0`, so every channel multiplies by 0, every wall renders black.
+
+Fix:
+
+```ts
+.multiply([shade, shade, shade, 1]).toNumber()
+```
+
+Bit us hard: the 2.5D walls rendered as black slabs across the entire map until a code-review agent flagged this with 97% confidence. The TS type accepted both forms, so the compiler didn't catch it.
+
+Lesson: when a PIXI v8 API takes "a colour-like thing," check whether bare scalars round-trip through `Color` the way you expect. The bit-shift dispatch on `number` is easy to miss if you're used to a "tint" or "modulate" call from another engine that does take scalars.
+
+### Per-polygon UVs vs world-space UVs — the per-hex repetition trap
+
+`PIXI.Graphics.fill({ texture, matrix })` normalises UVs to the *polygon bounding box*. Every hex draws the same patch of the source texture, stretched to its bbox. A map of textured grass hexes shows the same tile in every cell — visually like wallpaper.
+
+The fix is `TilingSprite` + hex-shaped `Graphics` mask. The tile sprite has a single world-space coordinate origin; tiling repeats over world coordinates; the mask clips the visible region to the hex shape. Neighbouring hexes see *different* patches of the same continuous texture, so the result reads as one large landscape, not many identical stamps.
+
+Cost: one `TilingSprite` + one mask `Graphics` per biome (per layer for chunked patches), instead of `Graphics.fill` per hex. For ~1000 hexes this is fewer draw calls, not more.
+
+Lesson: bbox-normalised UVs are correct for "this single polygon shows this texture" (an icon, a sprite). They're wrong for "many polygons sample the same world-space pattern." Pick the right primitive based on whether the texture should follow the polygon or the world.
+
+### Wall extends to base + dark shade = "dark wedge between biomes"
+
+Each 2.5D side wall drew from the hex's elevated top down to absolute base (`y - 0`). With the render order *ascending height*, the taller hex's wall was drawn *after* the shorter neighbour's top fill — meaning the wall painted *over* the shorter neighbour's top in the region where the wall extended below the shared edge.
+
+For FOREST (h=18) over GRASSLAND (h=12): 6 px of "visible cliff" between the two tops (correct), plus 12 px of wall protruding *into* the grass polygon below the shared edge (wrong, looks like a dark green slab). With shade `0.55 × forest_base_color`, the wall reads as near-black — the "dark wedge" complaint.
+
+We tried two fixes and walked into the same trap twice:
+
+1. **Clamp wall bottom to neighbour's top** (`neighborH = sH` so wall stops at the shorter neighbour's elevation). Works for a single edge. *Breaks at 3-way corners*: when a hex's three lower neighbours have different heights, the wall's bottom corners end at three different y values, so adjacent walls of the same hex don't meet at the shared bottom vertex — vertical slot gaps appear at every 3-way corner.
+
+2. **Extend wall fully to base, let the shorter neighbour's overlay clip the protrusion**. The overlay container already draws after `terrainGfx`, so its mask should clip the wall in the shorter neighbour's polygon footprint. The visible 6-px cliff above the shared edge is still painted as a dark shaded wall (the dark wedge persists, just narrower).
+
+The real fix: **move the cliff face into the taller biome's overlay mask** as part of the textured surface, and remove the wall entirely for textured biomes. Each base-biome layer's mask now includes the hex top polygon *plus* a quadrilateral per shorter neighbour spanning from the hex's top edge down to the neighbour's top edge. The biome's `TilingSprite` paints continuous texture over both the top and the cliff face. No dark shade. No `neighborH` clamp. No 3-way corner gap (the mask is a 2D region — corners just close cleanly).
+
+Non-textured biomes (`SAND`, `RIVER`, `SEA`, `DEEP_SEA`, `ROCKY`) still draw shaded walls in `terrainGfx`, since they have no overlay to extend.
+
+Lesson: "draw a wall and hope something clips it later" is fragile. If the surface and the cliff are both meant to *be* the same biome material, render them together as one continuous masked region. The overlay mask doesn't have to follow the hex polygon — it can be the hex polygon *plus whatever cliff faces belong to this biome*.
+
+### Cliff geometry: matching vertex pairs share an x, differ in y by `Δheight`
+
+For flat-top hexes, the taller hex's S/SE/SW top edge vertices and the shorter neighbour's matching N/NE/NW top edge vertices have *the same x*, with `y_short = y_tall + (h_tall − h_short)`. That makes the cliff quad trivial to build:
+
+```ts
+const dh = hexH - neighborH;
+mask.poly([
+  topV[v1].x, topV[v1].y,            // top edge corner 1 (taller)
+  topV[v2].x, topV[v2].y,            // top edge corner 2 (taller)
+  topV[v2].x, topV[v2].y + dh,       // bottom edge corner 2 (shorter)
+  topV[v1].x, topV[v1].y + dh,       // bottom edge corner 1 (shorter)
+]).fill({ color: 0xffffff });
+```
+
+Edge → axial direction mapping (flat-top, vertex i at angle 60°·i):
+- `v0–v1` (SE edge) → `directions[0]` = `(+1, 0)` SE neighbour
+- `v1–v2` (S edge)  → `directions[5]` = `(0, +1)` S neighbour
+- `v2–v3` (SW edge) → `directions[4]` = `(−1, +1)` SW neighbour
+
+Worth saving — every edge/direction question in this codebase wants the same six lines.
+
 ## Scope of the branch
 
 This worktree took `hex-tactics` from "two coordinate systems and a noise-based world generator" to a working tactical battle sandbox:

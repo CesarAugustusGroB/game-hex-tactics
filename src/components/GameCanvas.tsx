@@ -177,6 +177,24 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
       rock:   { tint: 0xFFFFFF },
     },
   },
+  HILL: {
+    small: {
+      density: 0.08,
+      maxPerHex: 1,
+      scaleRange: [0.04, 0.14],
+      alphaRange: [0.25, 0.55],
+      sprites: [
+        ...GRASS_KEYS.map(k => ({ key: k, weight: 55 })),
+        ...ROCK_KEYS.map(k => ({ key: k, weight: 35 })),
+        ...FLOWER_KEYS.map(k => ({ key: k, weight: 10 })),
+      ],
+    },
+    categoryStyle: {
+      grass:  { tint: 0xFFFFFF },
+      flower: { tint: 0xFFFFFF },
+      rock:   { tint: 0xFFFFFF },
+    },
+  },
 };
 
 const spriteCategory = (key: string): 'grass' | 'flower' | 'rock' =>
@@ -265,8 +283,14 @@ export const GameCanvas: React.FC = () => {
   const grassPatchDenseTextureRef = useRef<PIXI.Texture | null>(null);
   const grassFlowerSpeckTextureRef = useRef<PIXI.Texture | null>(null);
   const forestTextureRef = useRef<PIXI.Texture | null>(null);
+  const forestMacroVariationTextureRef = useRef<PIXI.Texture | null>(null);
+  const forestDensePatchTextureRef = useRef<PIXI.Texture | null>(null);
+  const forestMossPatchTextureRef = useRef<PIXI.Texture | null>(null);
   const riverTextureRef = useRef<PIXI.Texture | null>(null);
   const hillTextureRef = useRef<PIXI.Texture | null>(null);
+  const hillMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
+  const hillPatchDryTextureRef = useRef<PIXI.Texture | null>(null);
+  const hillPatchDenseTextureRef = useRef<PIXI.Texture | null>(null);
   const mountainTextureRef = useRef<PIXI.Texture | null>(null);
   const snowTextureRef = useRef<PIXI.Texture | null>(null);
   const sandTextureRef = useRef<PIXI.Texture | null>(null);
@@ -423,6 +447,8 @@ export const GameCanvas: React.FC = () => {
     gGfx.clear();
     const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
     const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
+    const isTexturedBiome = (t: string): boolean =>
+      t === 'GRASSLAND' || t === 'FOREST' || t === 'HILL' || t === 'MOUNTAIN' || t === 'SNOW';
     // Shorter terrain first so taller hexes draw on top of their shorter neighbours.
     const renderOrder = [...gridData].sort((a, b) => {
       const ha = TERRAINS[a.type]?.height ?? 0;
@@ -442,37 +468,28 @@ export const GameCanvas: React.FC = () => {
         top.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) - h });
         base.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) });
       }
-      // `neighborH` clips the wall bottom up to the neighbour's top y (defaults to 0 =
-      // wall reaches absolute base). PIXI v8 gotcha: `Color.multiply(number)` treats the
-      // number as a hex int via bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
-      const drawSide = (v1: number, v2: number, shade: number, neighborH: number = 0) => {
+      // PIXI v8 gotcha: `Color.multiply(number)` treats the number as a hex int via
+      // bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
+      const drawSide = (v1: number, v2: number, shade: number) => {
         tGfx.beginFill(PIXI.Color.shared.setValue(tDef.color).multiply([shade, shade, shade, 1]).toNumber());
         tGfx.moveTo(top[v1].x, top[v1].y)
             .lineTo(top[v2].x, top[v2].y)
-            .lineTo(base[v2].x, base[v2].y - neighborH)
-            .lineTo(base[v1].x, base[v1].y - neighborH)
+            .lineTo(base[v2].x, base[v2].y)
+            .lineTo(base[v1].x, base[v1].y)
             .closePath().endFill();
       };
-      // Only S / SE / SW walls are drawn — N / NE / NW would render inside the top
-      // polygon and get hidden. Skipped when the neighbour is the same continuous biome
-      // (so the textured surface reads continuous) or taller than us (no step from here).
-      const isContinuousBiome = item.type === 'HILL' || item.type === 'MOUNTAIN' || item.type === 'SNOW' || item.type === 'GRASSLAND' || item.type === 'FOREST';
+      // S / SE / SW only — N / NE / NW are hidden inside the hex top from top-down view.
       const sType  = terrainAt.get(HexUtils.key({ q: item.hex.q,     r: item.hex.r + 1 }));
       const seType = terrainAt.get(HexUtils.key({ q: item.hex.q + 1, r: item.hex.r     }));
       const swType = terrainAt.get(HexUtils.key({ q: item.hex.q - 1, r: item.hex.r + 1 }));
       const sH  = sType  ? (TERRAINS[sType]?.height  ?? 0) : 0;
       const seH = seType ? (TERRAINS[seType]?.height ?? 0) : 0;
       const swH = swType ? (TERRAINS[swType]?.height ?? 0) : 0;
-      const sameS  = isContinuousBiome && sType  === item.type;
-      const sameSE = isContinuousBiome && seType === item.type;
-      const sameSW = isContinuousBiome && swType === item.type;
       const drawWalls = () => {
-        if (!sameS  && h > sH)  drawSide(2, 1, 0.7);
-        if (!sameSE && h > seH) drawSide(1, 0, 0.55);
-        if (!sameSW && h > swH) drawSide(2, 3, 0.55);
+        if (h > sH)  drawSide(2, 1, 0.7);
+        if (h > seH) drawSide(1, 0, 0.55);
+        if (h > swH) drawSide(2, 3, 0.55);
       };
-      // HILL / MOUNTAIN / SNOW / GRASSLAND / FOREST fall through to flat colour here —
-      // their painted texture is applied by the TilingSprite overlay below.
       const riverTex = riverTextureRef.current;
       const sandTex = sandTextureRef.current;
       const seaTex = seaTextureRef.current;
@@ -492,8 +509,10 @@ export const GameCanvas: React.FC = () => {
       const topPoints: number[] = [];
       for (let i = 0; i < 6; i++) { topPoints.push(top[i].x, top[i].y); }
       tGfx.poly(topPoints).fill(fillStyle);
-      // Walls AFTER the fill — covers the AA notch at the wall/polygon shared edge.
-      drawWalls();
+      // Walls in tGfx only for non-textured biomes. Textured biomes (GRASSLAND, FOREST,
+      // HILL, MOUNTAIN, SNOW) instead paint their cliff faces as part of the overlay mask
+      // below, so the cliff continues the biome texture instead of showing a dark shade.
+      if (!isTexturedBiome(item.type)) drawWalls();
     });
 
     // Global-UV overlays: one TilingSprite per terrain type, masked to the union of that
@@ -558,10 +577,67 @@ export const GameCanvas: React.FC = () => {
         blendMode: 'normal',
         hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed) === 'FLOWERY',
       },
-      { type: 'FOREST', texture: forestTextureRef.current, tint: 0x888888, tilePx: 100 },
-      { type: 'HILL', texture: hillTextureRef.current, tint: 0xC8C8C8 },
+      { type: 'FOREST', texture: forestTextureRef.current, tint: 0xFFFFFF, tilePx: 100 },
+      {
+        type: 'FOREST',
+        texture: forestMacroVariationTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 300,
+        alpha: 0.50,
+        blendMode: 'overlay',
+      },
+      {
+        type: 'FOREST',
+        texture: forestDensePatchTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 250,
+        alpha: 0.14,
+        blendMode: 'multiply',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed + 200) === 'DENSE',
+      },
+      {
+        type: 'FOREST',
+        texture: forestMossPatchTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 280,
+        alpha: 0.40,
+        blendMode: 'soft-light',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed + 300) === 'DENSE',
+      },
+      { type: 'HILL', texture: hillTextureRef.current, tint: 0xE0E0E0 },
+      {
+        type: 'HILL',
+        texture: hillMacroNoiseTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 5000,
+        alpha: 0.14,
+        blendMode: 'multiply',
+      },
+      {
+        type: 'HILL',
+        texture: hillPatchDryTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 400,
+        alpha: 0.30,
+        blendMode: 'multiply',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed + 100) === 'DRY',
+      },
+      {
+        type: 'HILL',
+        texture: hillPatchDenseTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 400,
+        alpha: 0.30,
+        blendMode: 'multiply',
+        hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed + 100) === 'DENSE',
+      },
       { type: 'MOUNTAIN', texture: mountainTextureRef.current, tint: 0xC8C8C8 },
       { type: 'SNOW', texture: snowTextureRef.current, tint: 0xFFFFFF },
+    ];
+    // Cliff edges (taller hex → shorter neighbour). vertex pair + axial direction. Only
+    // S / SE / SW — the other three would render inside the hex top in 2.5D.
+    const cliffEdges: [number, number, number][] = [
+      [1, 2, 5], [0, 1, 0], [2, 3, 4],
     ];
     for (const layer of globalUvOverlays) {
       if (!layer.texture) continue;
@@ -571,6 +647,10 @@ export const GameCanvas: React.FC = () => {
       if (hexes.length === 0) continue;
       const hexH = (TERRAINS[layer.type] ?? TERRAINS.SEA).height;
       const sz = HexUtils.size;
+      // Base layers (no hexFilter) extend the mask to the visible cliff faces against
+      // shorter neighbours — biome texture continues down the cliff instead of leaving a
+      // dark shaded wall. Decoration layers (dry/dense/flowery patches) stay top-only.
+      const includeCliffs = !layer.hexFilter;
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       for (const d of hexes) {
         const p = HexUtils.hexToPixel(d.hex);
@@ -584,6 +664,7 @@ export const GameCanvas: React.FC = () => {
           if (vy < minY) minY = vy;
           if (vy > maxY) maxY = vy;
         }
+        if (includeCliffs && p.y > maxY) maxY = p.y; // cliffs drop down by at most hexH (= p.y).
       }
       const w = maxX - minX;
       const h = maxY - minY;
@@ -600,12 +681,31 @@ export const GameCanvas: React.FC = () => {
       for (const d of hexes) {
         const p = HexUtils.hexToPixel(d.hex);
         const topY = p.y - hexH;
+        const topV: { x: number; y: number }[] = [];
         const pts: number[] = [];
         for (let i = 0; i < 6; i++) {
           const r = Math.PI / 180 * (60 * i);
-          pts.push(p.x + sz * Math.cos(r), topY + sz * Math.sin(r));
+          const vx = p.x + sz * Math.cos(r);
+          const vy = topY + sz * Math.sin(r);
+          topV.push({ x: vx, y: vy });
+          pts.push(vx, vy);
         }
         mask.poly(pts).fill({ color: 0xffffff });
+        if (!includeCliffs) continue;
+        for (const [v1, v2, dirIdx] of cliffEdges) {
+          const dir = HexUtils.directions[dirIdx];
+          const nKey = HexUtils.key({ q: d.hex.q + dir.q, r: d.hex.r + dir.r });
+          const nType = terrainAt.get(nKey);
+          const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
+          if (hexH <= nH) continue;
+          const dh = hexH - nH;
+          mask.poly([
+            topV[v1].x, topV[v1].y,
+            topV[v2].x, topV[v2].y,
+            topV[v2].x, topV[v2].y + dh,
+            topV[v1].x, topV[v1].y + dh,
+          ]).fill({ color: 0xffffff });
+        }
       }
       overlay.addChild(tile);
       overlay.addChild(mask);
@@ -1010,7 +1110,7 @@ export const GameCanvas: React.FC = () => {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, riverTex, hillTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
+      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/roman_soldier.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/hoplite.png'),
@@ -1026,8 +1126,14 @@ export const GameCanvas: React.FC = () => {
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass-patch-dense.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass-flower-speck.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/forest.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/forest-macro-variation.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/forest-dense-patch.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/forest-moss-patch.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/river.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/hill-macro-noise.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/hill-patch-dry.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/hill-patch-dense.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/mountain.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/snow.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/sand.png'),
@@ -1036,7 +1142,7 @@ export const GameCanvas: React.FC = () => {
       ]);
       if (!isMounted) return;
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, riverTex, hillTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
+      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -1049,8 +1155,14 @@ export const GameCanvas: React.FC = () => {
       grassPatchDenseTex.source.addressMode = 'repeat';
       grassFlowerSpeckTex.source.addressMode = 'repeat';
       forestTex.source.addressMode = 'repeat';
+      forestMacroVariationTex.source.addressMode = 'repeat';
+      forestDensePatchTex.source.addressMode = 'repeat';
+      forestMossPatchTex.source.addressMode = 'repeat';
       riverTex.source.addressMode = 'repeat';
       hillTex.source.addressMode = 'repeat';
+      hillMacroNoiseTex.source.addressMode = 'repeat';
+      hillPatchDryTex.source.addressMode = 'repeat';
+      hillPatchDenseTex.source.addressMode = 'repeat';
       mountainTex.source.addressMode = 'repeat';
       snowTex.source.addressMode = 'repeat';
       sandTex.source.addressMode = 'repeat';
@@ -1082,8 +1194,14 @@ export const GameCanvas: React.FC = () => {
       grassPatchDenseTextureRef.current = grassPatchDenseTex;
       grassFlowerSpeckTextureRef.current = grassFlowerSpeckTex;
       forestTextureRef.current = forestTex;
+      forestMacroVariationTextureRef.current = forestMacroVariationTex;
+      forestDensePatchTextureRef.current = forestDensePatchTex;
+      forestMossPatchTextureRef.current = forestMossPatchTex;
       riverTextureRef.current = riverTex;
       hillTextureRef.current = hillTex;
+      hillMacroNoiseTextureRef.current = hillMacroNoiseTex;
+      hillPatchDryTextureRef.current = hillPatchDryTex;
+      hillPatchDenseTextureRef.current = hillPatchDenseTex;
       mountainTextureRef.current = mountainTex;
       snowTextureRef.current = snowTex;
       sandTextureRef.current = sandTex;
