@@ -29,9 +29,9 @@ export interface Unit {
   hp: number;
   state: UnitState;
   /** Position the unit occupied at the start of the most recent tick during which it
-   *  moved. Used by defendHeight's lateral fallback to avoid backtracking (so a unit
-   *  that side-stepped tick N doesn't immediately step back to its previous hex tick
-   *  N+1, which would oscillate). Optional — undefined for units that have never moved. */
+   *  moved. Used by `unleash`'s lateral fallback to avoid backtracking (so a unit that
+   *  side-stepped tick N doesn't immediately step back to its previous hex tick N+1,
+   *  which would oscillate). Optional — undefined for units that have never moved. */
   prevTacticalHex?: Hex;
   /** Absolute tick number at which the unit is next allowed to move. Set when the unit
    *  enters a hex: `currentTick + 1 + terrainMoveCost`. Movement steps skip any unit
@@ -46,29 +46,36 @@ export interface Unit {
 
 /**
  * Player-selectable motion modes layered on top of an active attack order.
- * - 'march'        : rigid-block advance, all-or-nothing, combat freezes the block.
- * - 'charge'       : per-unit advance at CHARGE_SPEED_HEXES per tick for CHARGE_DURATION_TICKS
- *                    ticks; stragglers get left behind; deals impact damage in a 3-hex lance.
- * - 'retreat'      : rigid-block advance in the OPPOSITE of `heading`; ignores 'fighting' state
- *                    so the block can disengage.
- * - 'unleash'      : break formation; each unit greedily steps toward its nearest enemy.
- * - 'defendHeight' : spread to the borders of the group's home terrain (captured at activation);
- *                    per-unit greedy step toward nearest border hex, units stay on home terrain.
+ * - 'march'   : rigid-block advance, all-or-nothing, combat freezes the block. (HUD label = ADVANCE.)
+ * - 'hold'    : stand still and accrue defensive damage reduction. Counter `holdTicks`
+ *               increments each tick; reduction = min(holdTicks * HOLD_REDUCTION_PER_TICK,
+ *               HOLD_REDUCTION_CAP). When holdTicks reaches HOLD_AUTO_IDLE_AFTER_TICKS the
+ *               mode auto-flips to 'idle' and the counter clears (defensive ceiling).
+ * - 'idle'    : stand still, no movement, no defensive bonus.
+ * - 'charge'  : per-unit advance at CHARGE_SPEED_HEXES per tick for CHARGE_DURATION_TICKS
+ *               ticks; stragglers get left behind; deals impact damage in a 3-hex lance.
+ * - 'retreat' : rigid-block advance in team-absolute backward direction (red→S, blue→N),
+ *               ignores 'fighting' state so the block can disengage. Auto-clears the order
+ *               when the group lands fully back in its deploy zone. One-way commit.
+ * - 'unleash' : break formation; each unit greedily steps toward its nearest enemy. Sets
+ *               `committed=true` — group is locked out of further orders until retreat
+ *               returns it home.
  */
-export type OrderMode = 'march' | 'charge' | 'retreat' | 'unleash' | 'defendHeight';
+export type OrderMode = 'march' | 'hold' | 'idle' | 'charge' | 'retreat' | 'unleash';
 
 export interface GroupOrder {
   team: Team;
   groupId: GroupId;
   attackTarget: Hex | null;
-  /** Snapped 0..5 hex direction captured at deploy time. Used by the HUD for facing
-   *  indicators; not load-bearing for movement in the rigid-block model. */
+  /** Snapped 0..5 hex direction. UI clamps to the team's forward cone (red:{NW,N,NE},
+   *  blue:{SW,S,SE}); retreat ignores it and uses the team-absolute backward direction. */
   heading: number;
-  /** Player-controlled hold flag. When true, the rigid-block march is suppressed for
-   *  this group (combat still resolves). Toggled from the HUD HOLD button. */
-  hold?: boolean;
   /** Player-selected motion mode. Undefined = 'march' (default). */
   mode?: OrderMode;
+  /** Ticks the group has been in 'hold' mode. Drives the per-tick damage reduction
+   *  computed in the combat phase. Reset to undefined whenever mode leaves 'hold'
+   *  (including the auto-transition to 'idle' at the cap). */
+  holdTicks?: number;
   /** Set when mode='charge' is engaged; counts down to 0, then mode reverts to 'march'.
    *  HOLD pauses the countdown (so a charge can be paused and resumed intact). */
   chargeTicksRemaining?: number;
@@ -77,26 +84,11 @@ export interface GroupOrder {
    *  on contact, not a sustained beam that re-damages as the unit advances. Cleared when
    *  the charge ends. */
   chargeDamagedIds?: string[];
-  /** Sticky home-terrain key captured at the moment 'defendHeight' is toggled on (e.g.
-   *  'HILL'). The sim defends the connected blob of THIS terrain, even if the group
-   *  drifts onto adjacent terrain. Cleared whenever mode reverts to anything else. */
-  defendTerrain?: string;
-  /** Sticky threat-source terrain captured at activation. When set, the defendHeight
-   *  border list is filtered to blob hexes adjacent to ≥1 hex of THIS terrain only,
-   *  yielding a directional defense (one side of the blob instead of all 360°).
-   *  Undefined = omnidirectional. Cleared whenever mode reverts to anything else. */
-  defendFrom?: string;
-  /** Sticky anchor hex captured at the moment 'defendHeight' is activated — the hex the
-   *  player clicked / drag-started on. The sim narrows defense to the perimeter SEGMENT
-   *  containing the border nearest this anchor; barrier-flanked borders (e.g. RIVER)
-   *  terminate the segment. Undefined = full perimeter (legacy / no-anchor orders). */
-  defendAnchor?: Hex;
-  /** Sticky unit→slot assignment, fixed at defendHeight activation by `commitDefend` in
-   *  the UI. Keyed by unit id; values are the assigned formation slot. When set, the sim
-   *  walks each unit one step toward its STORED slot every tick — NO per-tick re-pairing,
-   *  so units converge on a stable formation instead of oscillating. Cleared on
-   *  toggle-off / mode switch. Undefined = legacy path (recompute pairing each tick). */
-  defendAssignments?: Record<string, Hex>;
+  /** Lifecycle lock. Set true when the player commits via `unleash`; once committed, the
+   *  UI rejects all order changes except `mode: 'retreat'`. Cleared by the sim when the
+   *  retreating group lands every living unit back inside its team's deploy zone (so the
+   *  player may issue a fresh order on the redeployed group). */
+  committed?: boolean;
 }
 
 export interface MapApi {
@@ -104,8 +96,7 @@ export interface MapApi {
   isInside(hex: Hex): boolean;
   /** Whether terrain at the hex permits unit occupation. */
   isWalkable(hex: Hex): boolean;
-  /** Terrain key at the given hex (e.g. 'HILL', 'GRASSLAND'), or undefined if off-map.
-   *  Used by 'defendHeight' to identify the perimeter to defend. */
+  /** Terrain key at the given hex (e.g. 'HILL', 'GRASSLAND'), or undefined if off-map. */
   getTerrainType(hex: Hex): string | undefined;
   /** Mechanical mods (defenseMult / moveCost / attritionPerTick / visionRadius) for the
    *  terrain at this hex. Off-map / unknown terrain returns neutral defaults. Sim reads
@@ -115,10 +106,10 @@ export interface MapApi {
    *  Used by the damage step to compute the downhill attack bonus. Off-map hexes return
    *  0 (no bonus, no penalty). */
   getTerrainHeight(hex: Hex): number;
-  /** Whether this hex is a "natural barrier" — walkable but cuts the defense line.
-   *  Today: RIVER hexes. A perimeter border that touches a barrier hex is a segment
-   *  terminator; the defendHeight BFS does not expand past it. */
-  isBarrier(hex: Hex): boolean;
+  /** Whether the given hex belongs to the team's deploy zone. The sim queries this on
+   *  every retreat tick to decide when a retreating group has "safely returned home" —
+   *  at which point the order is cleared and the group becomes re-orderable. */
+  isInDeployZone(team: Team, hex: Hex): boolean;
 }
 
 export interface SimulationConfig {
@@ -159,18 +150,18 @@ export const CHARGE_IMPACT_RANGE = 2;
  *  Fractional values (skirmisher 1.5) resolve to alternating integer steps per tick via
  *  `stepsForTick(speed, currentTick)` so the rigid-block step stays integer-axial. */
 export const MARCH_HEXES_PER_TICK: Record<UnitType, number> = {
-  infantry: 1,
-  cavalry: 2,
-  skirmisher: 1.5,
+  infantry: 2,
+  cavalry: 4,
+  skirmisher: 3,
 };
 
 /** Per-unit-type hexes advanced per tick during a CHARGE. Same group-min rule as
- *  `MARCH_HEXES_PER_TICK`: mixed cavalry+infantry charge runs at infantry speed (2).
+ *  `MARCH_HEXES_PER_TICK`: mixed cavalry+infantry charge runs at infantry speed.
  *  Skirmisher charges at infantry pace — "no shock bonus." */
 export const CHARGE_HEXES_PER_TICK: Record<UnitType, number> = {
-  infantry: 2,
-  cavalry: 3,
-  skirmisher: 2,
+  infantry: 4,
+  cavalry: 6,
+  skirmisher: 4,
 };
 
 /** Lance impact damage on a single enemy per CHARGE pass, keyed by the ATTACKER's type.
@@ -208,6 +199,17 @@ export const stepsForTick = (speed: number, tick: number): number =>
  *  units fall back to closest-overall so they still engage. */
 export const UNLEASH_MAX_ENGAGERS = 3;
 
+/** Hold-mode defensive bonus: each tick spent in `hold` adds `HOLD_REDUCTION_PER_TICK`
+ *  to the damage-taken reduction, capped at `HOLD_REDUCTION_CAP`. After
+ *  `HOLD_AUTO_IDLE_AFTER_TICKS` ticks the bonus is at the cap and the sim flips the
+ *  group to `idle` (counter clears, no more bonus). Player has to re-engage hold from
+ *  scratch to rebuild the bonus. */
+export const HOLD_REDUCTION_PER_TICK = 0.05;
+export const HOLD_REDUCTION_CAP = 0.40;
+export const HOLD_AUTO_IDLE_AFTER_TICKS = 8;
+export const holdReduction = (holdTicks: number): number =>
+  Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP);
+
 const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
 
 // sameHex was used by the per-unit movement loop; the rigid-block march uses key compares.
@@ -234,6 +236,51 @@ export const snapHeading = (px: number, py: number): number => {
     }
   }
   return bestIdx;
+};
+
+// Flat-top direction indices: 0=SE, 1=NE, 2=N, 3=NW, 4=SW, 5=S (see HEADING_ARROWS).
+// Red deploys south, attacks north → forward cone = {NE, N, NW}.
+// Blue deploys north, attacks south → forward cone = {SE, S, SW}.
+const FORWARD_CONE_RED  = new Set<number>([1, 2, 3]);
+const FORWARD_CONE_BLUE = new Set<number>([0, 4, 5]);
+
+/** The 3 hex directions a team is allowed to advance / charge / unleash into. */
+export const forwardCone = (team: Team): Set<number> =>
+  team === 'red' ? FORWARD_CONE_RED : FORWARD_CONE_BLUE;
+
+/** The single hex direction a team retreats into (team-absolute, NOT heading-relative). */
+export const backwardDir = (team: Team): number => team === 'red' ? 5 : 2;
+
+/** Returns the in-cone direction nearest to `heading`, picked by maximizing the dot
+ *  product between the two directions' pixel vectors. Used to snap drag-derived
+ *  headings to the legal cone. */
+export const snapToForwardCone = (team: Team, heading: number): number => {
+  const cone = forwardCone(team);
+  if (cone.has(heading)) return heading;
+  const src = HexUtils.hexToPixel(HexUtils.directions[heading]);
+  let bestIdx = -1;
+  let bestDot = -Infinity;
+  for (const idx of cone) {
+    const d = HexUtils.hexToPixel(HexUtils.directions[idx]);
+    const dot = src.x * d.x + src.y * d.y;
+    if (dot > bestDot) { bestDot = dot; bestIdx = idx; }
+  }
+  return bestIdx === -1 ? heading : bestIdx;
+};
+
+// Visual left → right cycle order for each team's cone. Used by the A-key / HUD button
+// to step through the 3 valid forward headings (replaces the old E↔W mirror, which
+// can't apply when only 3 directions are legal).
+const CONE_CYCLE_RED:  number[] = [3, 2, 1]; // NW → N → NE
+const CONE_CYCLE_BLUE: number[] = [4, 5, 0]; // SW → S → SE
+
+/** Returns the next-in-cycle forward heading for this team. Snaps `heading` into the
+ *  cone first if needed, then advances by one visual position (wrapping). */
+export const cycleConeHeading = (team: Team, heading: number): number => {
+  const cycle = team === 'red' ? CONE_CYCLE_RED : CONE_CYCLE_BLUE;
+  const cur = snapToForwardCone(team, heading);
+  const idx = cycle.indexOf(cur);
+  return cycle[(idx + 1) % cycle.length];
 };
 
 export const groupHeading = (units: Unit[], target: Hex): number => {
@@ -753,266 +800,6 @@ export const computeSlotAssignments = (
   return computeOrderedSlotAssignments(units, slots, target);
 };
 
-export interface DefendFormation {
-  /** Home-terrain blob the group is defending. */
-  blob: Set<string>;
-  /** Rank (BFS distance from any segment border) for each blob hex. */
-  rank: Map<string, number>;
-  /** Unit id → assigned formation slot. */
-  assignment: Map<string, Hex>;
-}
-
-/**
- * Build the defendHeight formation: BFS the home blob, derive the perimeter segment,
- * compute ranks via BFS-from-segment, perimeter-walk to index rank-0 hexes, inherit
- * indices for rank-1+ hexes, sort slots by (rank, index, key), take the first N as the
- * formation, then global-pair the units to formation slots by their projected index
- * along the perimeter axis.
- *
- * Pure: deterministic for given inputs. Returns `null` when there's nothing to defend
- * (no home terrain set, no blob reachable, no borders, no segment).
- *
- * Called by `simulateTick` every tick in the no-sticky path AND by the canvas at
- * activation time to compute the initial `defendAssignments` to store on the order.
- */
-export const computeDefendFormation = (
-  groupUnits: Unit[],
-  order: GroupOrder,
-  config: SimulationConfig,
-): DefendFormation | null => {
-  const homeTerrain = order.defendTerrain;
-  if (!homeTerrain) return null;
-
-  // Blob BFS — connected home-terrain region reachable from the group.
-  const blob = new Set<string>();
-  const bfsQueue: Hex[] = [];
-  for (const u of groupUnits) {
-    if (config.mapApi.getTerrainType(u.tacticalHex) === homeTerrain) bfsQueue.push(u.tacticalHex);
-  }
-  if (bfsQueue.length === 0) {
-    for (const u of groupUnits) {
-      for (const n of HexUtils.getNeighbors(u.tacticalHex)) {
-        if (config.mapApi.getTerrainType(n) === homeTerrain) { bfsQueue.push(n); break; }
-      }
-    }
-  }
-  if (bfsQueue.length === 0) return null;
-  while (bfsQueue.length) {
-    const h = bfsQueue.shift()!;
-    const k = HexUtils.key(h);
-    if (blob.has(k)) continue;
-    if (!config.mapApi.isInside(h)) continue;
-    if (config.mapApi.getTerrainType(h) !== homeTerrain) continue;
-    blob.add(k);
-    for (const n of HexUtils.getNeighbors(h)) bfsQueue.push(n);
-  }
-
-  // Borders: blob hexes with ≥1 walkable non-home neighbor. defendFrom further narrows.
-  const borders: Hex[] = [];
-  for (const k of blob) {
-    const h = HexUtils.fromKey(k);
-    for (const n of HexUtils.getNeighbors(h)) {
-      if (!config.mapApi.isInside(n)) continue;
-      if (!config.mapApi.isWalkable(n)) continue;
-      const nt = config.mapApi.getTerrainType(n);
-      if (nt === homeTerrain) continue;
-      if (order.defendFrom && nt !== order.defendFrom) continue;
-      borders.push(h);
-      break;
-    }
-  }
-  if (borders.length === 0) return null;
-
-  // Segment BFS from anchor — barrier-flanked borders are terminal.
-  let segmentBorders = borders;
-  if (order.defendAnchor) {
-    const anchor = order.defendAnchor;
-    const borderKeys = new Set(borders.map(b => HexUtils.key(b)));
-    let nearest: Hex | null = null;
-    let nearestD = Infinity;
-    for (const b of borders) {
-      const d = HexUtils.distance(anchor, b);
-      if (d < nearestD) { nearestD = d; nearest = b; }
-    }
-    if (nearest) {
-      const segment = new Set<string>();
-      const segQueue: Hex[] = [nearest];
-      while (segQueue.length) {
-        const h = segQueue.shift()!;
-        const hk = HexUtils.key(h);
-        if (segment.has(hk)) continue;
-        segment.add(hk);
-        let flanked = false;
-        for (const n of HexUtils.getNeighbors(h)) {
-          if (blob.has(HexUtils.key(n))) continue;
-          if (config.mapApi.isBarrier(n)) { flanked = true; break; }
-        }
-        if (flanked) continue;
-        for (const n of HexUtils.getNeighbors(h)) {
-          const nk = HexUtils.key(n);
-          if (!borderKeys.has(nk) || segment.has(nk)) continue;
-          segQueue.push(n);
-        }
-      }
-      segmentBorders = borders.filter(b => segment.has(HexUtils.key(b)));
-    }
-  }
-  if (segmentBorders.length === 0) return null;
-
-  // Rank BFS through the blob from segment borders.
-  const rank = new Map<string, number>();
-  const rankQueue: Hex[] = [];
-  for (const b of segmentBorders) {
-    rank.set(HexUtils.key(b), 0);
-    rankQueue.push(b);
-  }
-  while (rankQueue.length) {
-    const h = rankQueue.shift()!;
-    const r = rank.get(HexUtils.key(h))!;
-    for (const n of HexUtils.getNeighbors(h)) {
-      const nk = HexUtils.key(n);
-      if (!blob.has(nk)) continue;
-      if (rank.has(nk)) continue;
-      rank.set(nk, r + 1);
-      rankQueue.push(n);
-    }
-  }
-
-  // Back-rank extension: when there are more live units than blob hexes, continue
-  // the rank BFS outward into walkable non-threat hexes so the surplus units get
-  // formation slots (behind the front line). Without this, surplus units never
-  // receive an assignment and just stand wherever they were placed, producing the
-  // "stacking in the rear" symptom. Safety cap = 3 × slotsNeeded so a degenerate
-  // map (everything walkable in every direction) can't blow up the BFS.
-  const liveUnitCount = groupUnits.filter(u => u.hp > 0).length;
-  if (liveUnitCount > blob.size) {
-    const slotsNeeded = liveUnitCount - blob.size;
-    const extQueue: Hex[] = [];
-    for (const k of rank.keys()) extQueue.push(HexUtils.fromKey(k));
-    // Process in ascending-rank order so the extension grows layer by layer
-    // outward, not jumping ahead from deep hexes first.
-    extQueue.sort((a, b) => rank.get(HexUtils.key(a))! - rank.get(HexUtils.key(b))!);
-    const cap = slotsNeeded * 3;
-    let added = 0;
-    while (extQueue.length > 0 && added < slotsNeeded && added < cap) {
-      const h = extQueue.shift()!;
-      const r = rank.get(HexUtils.key(h))!;
-      for (const n of HexUtils.getNeighbors(h)) {
-        const nk = HexUtils.key(n);
-        if (rank.has(nk)) continue;
-        if (blob.has(nk)) continue;
-        if (!config.mapApi.isInside(n)) continue;
-        if (!config.mapApi.isWalkable(n)) continue;
-        if (order.defendFrom && config.mapApi.getTerrainType(n) === order.defendFrom) continue;
-        rank.set(nk, r + 1);
-        extQueue.push(n);
-        added++;
-        if (added >= slotsNeeded) break;
-      }
-    }
-  }
-
-  // Perimeter walk over segment borders for rank-0 indexing.
-  const segSet = new Set(segmentBorders.map(b => HexUtils.key(b)));
-  const adj = new Map<string, string[]>();
-  for (const b of segmentBorders) {
-    const k = HexUtils.key(b);
-    const nbrs: string[] = [];
-    for (const n of HexUtils.getNeighbors(b)) {
-      const nk = HexUtils.key(n);
-      if (segSet.has(nk)) nbrs.push(nk);
-    }
-    nbrs.sort();
-    adj.set(k, nbrs);
-  }
-  let startKey: string | null = null;
-  for (const [k, nbrs] of adj) {
-    if (nbrs.length <= 1 && (startKey === null || k < startKey)) startKey = k;
-  }
-  if (startKey === null) {
-    for (const k of adj.keys()) {
-      if (startKey === null || k < startKey) startKey = k;
-    }
-  }
-  const r0Index = new Map<string, number>();
-  const orderedR0: Hex[] = [];
-  {
-    let cur: string | null = startKey;
-    let prev: string | null = null;
-    while (cur && !r0Index.has(cur)) {
-      r0Index.set(cur, orderedR0.length);
-      orderedR0.push(HexUtils.fromKey(cur));
-      const nbrs = adj.get(cur) ?? [];
-      let next: string | null = null;
-      for (const n of nbrs) {
-        if (n === prev) continue;
-        if (r0Index.has(n)) continue;
-        if (next === null || n < next) next = n;
-      }
-      prev = cur;
-      cur = next;
-    }
-  }
-  for (const k of segSet) {
-    if (!r0Index.has(k)) {
-      r0Index.set(k, orderedR0.length);
-      orderedR0.push(HexUtils.fromKey(k));
-    }
-  }
-
-  // Rank-1+ hexes inherit nearest rank-0 hex's index (column structure).
-  // Iterates over `rank.keys()` so back-rank extension hexes also get a slotIndex.
-  const slotIndex = new Map<string, number>();
-  for (const k of rank.keys()) {
-    if (r0Index.has(k)) { slotIndex.set(k, r0Index.get(k)!); continue; }
-    const h = HexUtils.fromKey(k);
-    let bestIdx = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < orderedR0.length; i++) {
-      const d = HexUtils.distance(h, orderedR0[i]);
-      if (d < bestD || (d === bestD && i < bestIdx)) { bestD = d; bestIdx = i; }
-    }
-    slotIndex.set(k, bestIdx);
-  }
-
-  // Sort all ranked hexes (blob + back-rank extension) by (rank, slotIndex, key).
-  // First N = formation.
-  const allSlots: Hex[] = [];
-  for (const k of rank.keys()) allSlots.push(HexUtils.fromKey(k));
-  allSlots.sort((a, b) => {
-    const ka = HexUtils.key(a);
-    const kb = HexUtils.key(b);
-    const dr = rank.get(ka)! - rank.get(kb)!;
-    if (dr !== 0) return dr;
-    const di = (slotIndex.get(ka) ?? 0) - (slotIndex.get(kb) ?? 0);
-    if (di !== 0) return di;
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
-  const liveUnits = groupUnits.filter(u => u.hp > 0);
-  const formation = allSlots.slice(0, liveUnits.length);
-
-  // Global pairing: sort units by projected index, pair to formation slots.
-  const unitsWithIdx = liveUnits.map(u => {
-    let bestIdx = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < orderedR0.length; i++) {
-      const d = HexUtils.distance(u.tacticalHex, orderedR0[i]);
-      if (d < bestD || (d === bestD && i < bestIdx)) { bestD = d; bestIdx = i; }
-    }
-    return { unit: u, idx: bestIdx };
-  });
-  unitsWithIdx.sort((a, b) => {
-    if (a.idx !== b.idx) return a.idx - b.idx;
-    return a.unit.id < b.unit.id ? -1 : a.unit.id > b.unit.id ? 1 : 0;
-  });
-  const assignment = new Map<string, Hex>();
-  for (let i = 0; i < unitsWithIdx.length && i < formation.length; i++) {
-    assignment.set(unitsWithIdx[i].unit.id, formation[i]);
-  }
-
-  return { blob, rank, assignment };
-};
-
 /**
  * Run one simulation tick. Returns surviving units and (possibly mutated) orders.
  * Pure: no mutation of inputs; deterministic given inputs.
@@ -1038,15 +825,28 @@ export const simulateTick = (
   const working: Unit[] = units.map(u => ({ ...u, state: 'idle' as UnitState }));
   const byId = new Map<string, Unit>(working.map(u => [u.id, u]));
 
+  // Hold-mode defensive reduction per defender (looked up via team:groupId → order).
+  // Computed once here so the per-pair damage loop below doesn't have to re-resolve the
+  // order on every hit.
+  const holdReductionByUnit = new Map<string, number>();
+  for (const u of working) {
+    const order = orders.get(groupOrderKey(u.team, u.groupId));
+    if (order?.mode === 'hold' && (order.holdTicks ?? 0) > 0) {
+      holdReductionByUnit.set(u.id, holdReduction(order.holdTicks ?? 0));
+    }
+  }
+
   // Combat phase: each unit attacks. MELEE for anyone with adjacent enemies; RANGED for
   // skirmishers with NO adjacent enemy and at least one enemy within
   // SKIRMISHER_MISSILE_RANGE. A skirmisher engaged in melee drops their javelins and
   // fights hand-to-hand — they don't get to both attack at melee range AND throw.
-  // Per-pair melee damage = damagePerTick * (1 + heightBonus) / defenderDefenseMult.
+  // Per-pair melee damage = damagePerTick * (1 + heightBonus) / defenderDefenseMult *
+  //   (1 - defenderHoldReduction).
   // Attacker terrain contributes ONLY via the height bonus (offensive lever); defender
-  // terrain contributes the cover divisor (defenseMult > 1 = better cover, < 1 = worse).
-  // Missile damage = SKIRMISHER_MISSILE_DAMAGE / defenderDefenseMult (no height bonus —
-  // throwing parabolic javelins, cover still works).
+  // terrain contributes the cover divisor (defenseMult > 1 = better cover, < 1 = worse)
+  // and the hold-mode reduction (defensive stance accrues over time, capped).
+  // Missile damage = SKIRMISHER_MISSILE_DAMAGE / defenderDefenseMult * (1 - hold) —
+  // same defensive levers, no height bonus (throwing parabolic javelins).
   const damage = new Map<string, number>();
   const projectiles: Projectile[] = [];
   for (const u of working) {
@@ -1062,7 +862,8 @@ export const simulateTick = (
       const hAtt = config.mapApi.getTerrainHeight(u.tacticalHex);
       const hDef = config.mapApi.getTerrainHeight(target.tacticalHex);
       const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
-      const dmg = (config.damagePerTick * (1 + heightDamageBonus(hAtt, hDef))) / defenseMult;
+      const holdRed = holdReductionByUnit.get(target.id) ?? 0;
+      const dmg = ((config.damagePerTick * (1 + heightDamageBonus(hAtt, hDef))) / defenseMult) * (1 - holdRed);
       damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
       u.state = 'fighting';
     } else if ((u.unitType ?? 'infantry') === 'skirmisher') {
@@ -1081,7 +882,8 @@ export const simulateTick = (
       }
       if (target) {
         const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
-        const dmg = SKIRMISHER_MISSILE_DAMAGE / defenseMult;
+        const holdRed = holdReductionByUnit.get(target.id) ?? 0;
+        const dmg = (SKIRMISHER_MISSILE_DAMAGE / defenseMult) * (1 - holdRed);
         damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
         projectiles.push({
           fromHex: u.tacticalHex,
@@ -1176,9 +978,23 @@ export const simulateTick = (
   for (const [key, groupUnits] of groupsByKey) {
     const order = orders.get(key);
     if (!order?.attackTarget) continue;
-    if (order.hold) continue;
 
     const mode = order.mode ?? 'march';
+
+    if (mode === 'idle') continue;
+
+    if (mode === 'hold') {
+      // Stand still + accrue defensive reduction. Combat phase reads `holdTicks` to
+      // dampen incoming damage (see damage formula above). When the counter hits the
+      // ceiling the order flips to 'idle' and the counter clears.
+      const cur = (order.holdTicks ?? 0) + 1;
+      if (cur >= HOLD_AUTO_IDLE_AFTER_TICKS) {
+        writeOrder(key, { ...order, mode: 'idle', holdTicks: undefined });
+      } else {
+        writeOrder(key, { ...order, holdTicks: cur });
+      }
+      continue;
+    }
 
     if (mode === 'march') {
       if (groupUnits.some(u => u.state === 'fighting')) continue;
@@ -1196,14 +1012,29 @@ export const simulateTick = (
         if (!tryRigidBlockStep(groupUnits, HexUtils.directions[order.heading], startBlocked)) break;
       }
     } else if (mode === 'retreat') {
-      // Disengage allowed: do NOT skip on 'fighting'. Opposite of heading.
+      // Disengage allowed: do NOT skip on 'fighting'. Direction is team-absolute backward
+      // (red→S, blue→N) regardless of `heading`, since the player's deploy zone is on a
+      // fixed edge of the map.
       const groupSpeed = Math.min(
         ...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry']),
       );
       const steps = stepsForTick(groupSpeed, config.currentTick);
       const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
+      const retreatDelta = HexUtils.directions[backwardDir(order.team)];
       for (let step = 0; step < steps; step++) {
-        if (!tryRigidBlockStep(groupUnits, HexUtils.directions[(order.heading + 3) % 6], startBlocked)) break;
+        if (!tryRigidBlockStep(groupUnits, retreatDelta, startBlocked)) break;
+      }
+      // Redeploy reset: when every living unit of a retreating group is back in its
+      // team's deploy zone, the order is cleared. The group becomes re-orderable as if
+      // freshly arrived from the roster pool (committed flag dropped, mode reset).
+      const alive = groupUnits.filter(u => u.hp > 0);
+      if (alive.length > 0 && alive.every(u => config.mapApi.isInDeployZone(order.team, u.tacticalHex))) {
+        writeOrder(key, {
+          team: order.team,
+          groupId: order.groupId,
+          attackTarget: null,
+          heading: order.heading,
+        });
       }
     } else if (mode === 'unleash') {
       // Per-unit greedy step toward an enemy, with engagement spreading and a lateral
@@ -1273,10 +1104,16 @@ export const simulateTick = (
           // engagement-cap accounting consistent with infantry's one-step behavior.
           if (step === 0) claimsThisTick.set(target.id, (claimsThisTick.get(target.id) ?? 0) + 1);
 
+          // Forward-only constraint: per-unit movement candidates are restricted to the
+          // team's 3-direction forward cone. A unit unleashed toward an enemy "behind"
+          // the cone won't reach them — by design, the player committed direction at
+          // deploy time and can't take it back without retreating.
+          const cone = forwardCone(u.team);
           // Best neighbor minimizing distance to target.
           let bestNext: Hex | null = null;
           let bestNextD = bestD;
-          for (const dir of HexUtils.directions) {
+          for (const idx of cone) {
+            const dir = HexUtils.directions[idx];
             const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
             const d = HexUtils.distance(next, target.tacticalHex);
             if (d >= bestNextD) continue;
@@ -1288,12 +1125,13 @@ export const simulateTick = (
           }
           // Lateral fallback: if no strict-decrease neighbor (blocked by allies, usually),
           // try equal-distance neighbors that aren't the unit's previous hex (anti-
-          // backtrack). Lowest-key tiebreak for determinism.
+          // backtrack). Lowest-key tiebreak for determinism. Cone-bounded.
           if (!bestNext) {
             const prev = u.prevTacticalHex;
             let bestLat: Hex | null = null;
             let bestLatKey: string | null = null;
-            for (const dir of HexUtils.directions) {
+            for (const idx of cone) {
+              const dir = HexUtils.directions[idx];
               const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
               if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
               if (occupancy.get(HexUtils.key(next))) continue;
@@ -1399,100 +1237,6 @@ export const simulateTick = (
           chargeTicksRemaining: remaining,
           chargeDamagedIds: Array.from(damaged),
         });
-      }
-    } else if (mode === 'defendHeight') {
-      const result = computeDefendFormation(groupUnits, order, config);
-      if (!result) continue;
-      const { rank } = result;
-
-      // Sticky path: if the order carries a pre-computed `defendAssignments` (set by the
-      // canvas at commitDefend time), use it directly. This avoids the per-tick re-pair
-      // that previously caused units to oscillate when their projected index shifted as
-      // they moved. Fall back to the freshly computed assignment when no sticky map is
-      // present (legacy / first-tick orders).
-      let assignment: Map<string, Hex>;
-      if (order.defendAssignments) {
-        assignment = new Map<string, Hex>();
-        for (const [id, hex] of Object.entries(order.defendAssignments)) {
-          assignment.set(id, hex);
-        }
-      } else {
-        assignment = result.assignment;
-      }
-
-      const liveUnits = groupUnits.filter(u => u.hp > 0);
-
-      // Process units in DESCENDING order of their assigned slot's rank — deep-rank
-      // targets (rank 2+, interior) move first within a tick, so they can traverse
-      // through still-empty border hexes before front-targeted units claim them.
-      const processOrder = [...liveUnits].sort((a, b) => {
-        const aTarget = assignment.get(a.id);
-        const bTarget = assignment.get(b.id);
-        const aRank = aTarget ? (rank.get(HexUtils.key(aTarget)) ?? 0) : 0;
-        const bRank = bTarget ? (rank.get(HexUtils.key(bTarget)) ?? 0) : 0;
-        if (aRank !== bRank) return bRank - aRank;
-        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-      });
-
-      // Per-unit step: walk one hex toward the assigned slot. First try strict-decrease
-      // neighbor (current behavior). If blocked (no strict decrease available — usually
-      // because allies occupy the closer hexes), try a LATERAL step (same distance to
-      // target) that isn't the unit's previous-tick position. The lateral fallback breaks
-      // crowd-jam stalls; the anti-backtrack guard prevents A→B→A→B oscillation across
-      // ticks. Lowest-key tiebreak among lateral candidates for determinism.
-      for (const u of processOrder) {
-        const target = assignment.get(u.id);
-        if (!target) continue;
-        if (target.q === u.tacticalHex.q && target.r === u.tacticalHex.r) continue;
-        if (isOnCooldown(u)) continue;
-
-        // "Formation footprint" = blob + back-rank extension (both live in `rank`).
-        // If currently inside the footprint, only step within it — preserves tight
-        // formation. Outside-footprint units (still marching in) move freely.
-        const onFormation = rank.has(HexUtils.key(u.tacticalHex));
-        const curD = HexUtils.distance(u.tacticalHex, target);
-        let bestNext: Hex | null = null;
-        let bestNextD = curD;
-        for (const dir of HexUtils.directions) {
-          const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
-          if (onFormation && !rank.has(HexUtils.key(next))) continue;
-          if (!config.mapApi.isInside(next)) continue;
-          if (!config.mapApi.isWalkable(next)) continue;
-          if (occupancy.get(HexUtils.key(next))) continue;
-          const d = HexUtils.distance(next, target);
-          if (d >= bestNextD) continue;
-          bestNext = next; bestNextD = d;
-        }
-        if (!bestNext) {
-          // Lateral fallback.
-          const prev = u.prevTacticalHex;
-          let bestLat: Hex | null = null;
-          let bestLatKey: string | null = null;
-          for (const dir of HexUtils.directions) {
-            const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
-            if (onFormation && !rank.has(HexUtils.key(next))) continue;
-            if (!config.mapApi.isInside(next)) continue;
-            if (!config.mapApi.isWalkable(next)) continue;
-            if (occupancy.get(HexUtils.key(next))) continue;
-            if (prev && next.q === prev.q && next.r === prev.r) continue;
-            const d = HexUtils.distance(next, target);
-            if (d !== curD) continue;
-            const nk = HexUtils.key(next);
-            if (bestLatKey === null || nk < bestLatKey) {
-              bestLat = next;
-              bestLatKey = nk;
-            }
-          }
-          bestNext = bestLat;
-        }
-        if (bestNext) {
-          occupancy.delete(HexUtils.key(u.tacticalHex));
-          u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
-          u.tacticalHex = bestNext;
-          u.state = 'moving';
-          applyEntryCooldown(u, bestNext, false);
-          occupancy.set(HexUtils.key(bestNext), u);
-        }
       }
     }
   }

@@ -121,18 +121,9 @@ interface Scenario {
   mode?: OrderMode;
   /** Override the heading auto-derived from group centroid → target. */
   forceHeading?: number;
-  /** Terrain key per hex for the 'defendHeight' mode. Hexes not listed are treated as
-   *  'GRASSLAND' (a walkable default). All terrains here are also walkable. */
+  /** Terrain key per hex. Hexes not listed are treated as 'GRASSLAND' (a walkable
+   *  default). All terrains here are also walkable. */
   terrainAt?: Map<string, string>;
-  /** Sticky 'defendTerrain' for 'defendHeight' — captured at toggle time in the live
-   *  game; supplied directly here. */
-  defendTerrain?: string;
-  /** Sticky 'defendFrom' for directional defendHeight — filters borders to those
-   *  adjacent to this terrain only. */
-  defendFrom?: string;
-  /** Anchor hex for defendHeight segment selection. Borders are BFS-restricted to the
-   *  segment containing the border nearest this anchor. */
-  defendAnchor?: Hex;
 }
 
 const seedUnit = (s: ScenarioUnit, terrainAt?: Map<string, string>): Unit => ({
@@ -314,194 +305,6 @@ const scenarios: Scenario[] = [
     mode: 'unleash',
   },
   {
-    // DEFEND HEIGHT (thicket attack, large blob): 19-hex RIDGELINE blob (radius 2),
-    // THICKET surrounding to the south. 15 reds start in the THICKET (3 rows × 5 cols).
-    // Defend with anchor (0,2) (south-center) and defendFrom='THICKET' to focus on the
-    // south arc. Expected: ~5 borders in the south segment fill rank 0, 6 ring-1 hexes
-    // fill rank 1, 4 more units flow into rank 2 (deeper). Demonstrates multi-rank fill
-    // at realistic army-on-large-blob scale.
-    name: 'defend-thicket-large',
-    units: (() => {
-      const out: ScenarioUnit[] = [];
-      let i = 1;
-      for (let r = 3; r <= 5; r++) {
-        for (let q = -3; q <= 1; q++) {
-          out.push({ id: id(i++), team: 'red', groupId: 1, hex: { q, r } });
-        }
-      }
-      return out;
-    })(),
-    attackTarget: { q: 0, r: -10 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 10,
-    mode: 'defendHeight',
-    defendTerrain: 'RIDGELINE',
-    defendFrom: 'THICKET',
-    defendAnchor: { q: 0, r: 2 },
-    terrainAt: RIDGELINE_TERRAIN,
-  },
-  {
-    // DEFEND HEIGHT (SURPLUS units): same 19-hex RIDGELINE blob as defend-thicket-large,
-    // but with 30 reds — 11 surplus over blob capacity. Verifies the diagnostic that
-    // surplus units end up unassigned (no slot in formation) and stand still where they
-    // started, looking "stacked" while the first 19 sorted units migrate to the blob.
-    name: 'defend-thicket-surplus',
-    units: (() => {
-      const out: ScenarioUnit[] = [];
-      let i = 1;
-      // 6 rows × 5 cols = 30 reds starting in THICKET south of the blob.
-      for (let r = 3; r <= 8; r++) {
-        for (let q = -3; q <= 1; q++) {
-          out.push({ id: id(i++), team: 'red', groupId: 1, hex: { q, r } });
-        }
-      }
-      return out;
-    })(),
-    attackTarget: { q: 0, r: -10 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 10,
-    mode: 'defendHeight',
-    defendTerrain: 'RIDGELINE',
-    defendFrom: 'THICKET',
-    defendAnchor: { q: 0, r: 2 },
-    terrainAt: RIDGELINE_TERRAIN,
-  },
-  {
-    // DEFEND HEIGHT (no bunching): 7-hex HILL blob, no rivers. 6 reds ALL start clustered
-    // in the SW corner of GRASSLAND (not adjacent to most borders). Anchor (0,0). With the
-    // global slot-assignment algorithm, each unit's projected index along the perimeter
-    // determines which slot it gets — units don't all flock to the nearby western borders.
-    // After enough ticks, the 6 units should occupy 6 DIFFERENT perimeter hexes, spread
-    // around the blob (not clustered on the SW two).
-    name: 'defend-no-bunching',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: -3, r: 2 } },
-      { id: id(2), team: 'red', groupId: 1, hex: { q: -2, r: 2 } },
-      { id: id(3), team: 'red', groupId: 1, hex: { q: -3, r: 3 } },
-      { id: id(4), team: 'red', groupId: 1, hex: { q: -2, r: 3 } },
-      { id: id(5), team: 'red', groupId: 1, hex: { q: -4, r: 2 } },
-      { id: id(6), team: 'red', groupId: 1, hex: { q: -4, r: 3 } },
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 12,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    defendAnchor: { q: 0, r: 0 },
-    terrainAt: HILL_TERRAIN,
-  },
-  {
-    // DEFEND HEIGHT (multi-rank fill): 7-hex HILL blob, no rivers. 6 reds start on
-    // GRASSLAND adjacent to each of the 6 borders. Rank 0 = 6 perimeter; rank 1 = center.
-    // Expected: every unit reaches a border in ~1-2 ticks. Demonstrates that rank-0
-    // fills cleanly when each unit has an unblocked entry hex.
-    name: 'defend-multi-rank-fills-front',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 2 } },     // S of (0,1)
-      { id: id(2), team: 'red', groupId: 1, hex: { q: -1, r: 2 } },    // SW of (-1,1)
-      { id: id(3), team: 'red', groupId: 1, hex: { q: -2, r: 1 } },    // W of (-1,1)
-      { id: id(4), team: 'red', groupId: 1, hex: { q: 1, r: 1 } },     // SE of (1,0)
-      { id: id(5), team: 'red', groupId: 1, hex: { q: 2, r: 0 } },     // E of (1,0)
-      { id: id(6), team: 'red', groupId: 1, hex: { q: 0, r: -2 } },    // N of (0,-1)
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 5,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    defendAnchor: { q: 0, r: 0 },
-    terrainAt: HILL_TERRAIN,
-  },
-  {
-    // DEFEND HEIGHT (advance from back rank): 7-hex HILL blob. 5 reds pre-positioned
-    // on 5 of the 6 borders (E border (1,0) left intentionally empty), 1 red at the
-    // center (0,0) — rank 1. Expected: the center unit ADVANCES to fill the empty E
-    // border (uRank=1 > bestRank=0). Final state: 6 on borders, center empty.
-    name: 'defend-advance-from-rank-1',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },     // center, rank 1
-      { id: id(2), team: 'red', groupId: 1, hex: { q: 0, r: 1 } },     // SE border
-      { id: id(3), team: 'red', groupId: 1, hex: { q: -1, r: 1 } },    // SW border
-      { id: id(4), team: 'red', groupId: 1, hex: { q: -1, r: 0 } },    // W border
-      { id: id(5), team: 'red', groupId: 1, hex: { q: 0, r: -1 } },    // NW border
-      { id: id(6), team: 'red', groupId: 1, hex: { q: 1, r: -1 } },    // NE border
-      // (1,0) E border intentionally empty
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 3,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    defendAnchor: { q: 0, r: 0 },
-    terrainAt: HILL_TERRAIN,
-  },
-  {
-    // DEFEND HEIGHT (river segments, SOUTH anchor): 7-hex HILL blob, RIVERs to E (2,0)
-    // and W (-2,0). The two river-flanked borders (1,0) and (-1,0) split the perimeter
-    // into a NORTH arc {(1,-1), (0,-1)} and a SOUTH arc {(0,1), (-1,1)} with shared
-    // terminators. Anchor at (0,1) (SE) → 3 units at center hexes should collectively
-    // spread within the SOUTH segment {(-1,1), (0,1), (1,0), (-1,0)} only, never landing
-    // on (0,-1) or (1,-1) (north arc).
-    name: 'defend-river-segments-south',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },
-      { id: id(2), team: 'red', groupId: 1, hex: { q: 0, r: 1 } },
-      { id: id(3), team: 'red', groupId: 1, hex: { q: -1, r: 1 } },
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 4,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    defendAnchor: { q: 0, r: 1 },
-    terrainAt: HILL_BLOB_WITH_RIVERS,
-  },
-  {
-    // Same setup, NORTH anchor at (0,-1). Same 3 units. Expected: spread within the
-    // NORTH segment {(0,-1), (1,-1), (1,0), (-1,0)}, never on (0,1) or (-1,1).
-    name: 'defend-river-segments-north',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },
-      { id: id(2), team: 'red', groupId: 1, hex: { q: 0, r: -1 } },
-      { id: id(3), team: 'red', groupId: 1, hex: { q: 1, r: -1 } },
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 4,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    defendAnchor: { q: 0, r: -1 },
-    terrainAt: HILL_BLOB_WITH_RIVERS,
-  },
-  {
-    // DEFEND HEIGHT (directional): same 7-hex HILL blob, but east-side neighbors are
-    // FOREST and west-side are SAND. With defendFrom='FOREST', the border list narrows to
-    // the 3 east-facing HILL borders: (1,0), (1,-1), (0,1). 1 red unit at the center
-    // should step to one of those 3, never to the west side.
-    name: 'defend-directional',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 3,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    defendFrom: 'FOREST',
-    terrainAt: HILL_DIRECTIONAL_TERRAIN,
-  },
-  {
-    // DEFEND HEIGHT: 7-hex HILL blob (center + 6 neighbors), the rest GRASSLAND. 4 reds:
-    //   - u01 on the center (NOT a border, surrounded by HILL) → steps to a free border
-    //   - u02/u03 on E/NE borders → already on a border, hold position
-    //   - u04 OFF the blob on GRASSLAND, one hex from a free SW border → routes onto blob
-    // After ~2 ticks all 4 should be on border hexes.
-    name: 'defend-spread-to-border',
-    units: [
-      { id: id(1), team: 'red', groupId: 1, hex: { q: 0, r: 0 } },    // center HILL (not border)
-      { id: id(2), team: 'red', groupId: 1, hex: { q: 1, r: 0 } },    // E HILL border
-      { id: id(3), team: 'red', groupId: 1, hex: { q: 1, r: -1 } },   // NE HILL border
-      { id: id(4), team: 'red', groupId: 1, hex: { q: -2, r: 1 } },   // off-blob GRASSLAND, adj to SW border
-    ],
-    attackTarget: { q: 10, r: 0 },
-    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 4,
-    mode: 'defendHeight',
-    defendTerrain: 'HILL',
-    terrainAt: HILL_TERRAIN,
-  },
-  {
     // TERRAIN MODS: equal-size infantry groups, one on HILL (h=35) facing one on
     // GRASSLAND (h=12), already in melee contact. Verifies the per-pair damage
     // formula end-to-end:
@@ -623,7 +426,8 @@ const buildMapApi = (unwalkable: Hex[] | undefined, terrainAt?: Map<string, stri
     getTerrainType: typeAt,
     getTerrainMods: (h: Hex) => getTerrainMods(typeAt(h)),
     getTerrainHeight: (h: Hex) => HARNESS_HEIGHTS[typeAt(h)] ?? 0,
-    isBarrier: (h: Hex) => terrainAt?.get(HexUtils.key(h)) === 'RIVER',
+    // Harness has no real deploy zones; retreating units never auto-clear their order.
+    isInDeployZone: () => false,
   };
 };
 
@@ -666,9 +470,6 @@ const runScenario = (s: Scenario): ScenarioResult => {
     team: s.team, groupId: s.groupId, attackTarget: s.attackTarget, heading,
     mode: s.mode,
     chargeTicksRemaining: s.mode === 'charge' ? CHARGE_DURATION_TICKS : undefined,
-    defendTerrain: s.defendTerrain,
-    defendFrom: s.defendFrom,
-    defendAnchor: s.defendAnchor,
   };
   let orders = new Map<string, GroupOrder>([[orderKey, initialOrder]]);
   const config: SimulationConfig = {
@@ -702,7 +503,7 @@ const runScenario = (s: Scenario): ScenarioResult => {
     const modeTag = curOrder?.mode ?? 'march';
     const chargeTag = curOrder?.chargeTicksRemaining != null ? `  charge=${curOrder.chargeTicksRemaining}` : '';
     console.log(`\n[tick ${tick}]  centroid=(${centroidHex.q},${centroidHex.r})  mode=${modeTag}${chargeTag}`);
-    if (s.mode === 'defendHeight' || s.mode === 'unleash') {
+    if (s.mode === 'unleash') {
       const posList = units
         .filter(u => u.team === s.team && u.groupId === s.groupId)
         .map(u => `${u.id}@(${u.tacticalHex.q},${u.tacticalHex.r})`)

@@ -3,8 +3,8 @@ import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import gsap from 'gsap';
 import { createNoise2D } from 'simplex-noise';
-import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeLineSlotAssignmentsByType, computeDefendFormation, CHARGE_DURATION_TICKS, MAX_HP_BY_TYPE } from '../battle/simulate';
-import type { Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, MapApi, UnitType } from '../battle/simulate';
+import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeLineSlotAssignmentsByType, snapToForwardCone, cycleConeHeading, CHARGE_DURATION_TICKS, MAX_HP_BY_TYPE, HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP } from '../battle/simulate';
+import type { Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, UnitType } from '../battle/simulate';
 import { TERRAIN_MODS, getTerrainMods } from '../battle/terrain';
 import { getAiController, type OrderChange } from '../battle/ai';
 
@@ -19,13 +19,6 @@ interface OrderDrag {
   targetHex: Hex;
   startWorld: { x: number; y: number };
   currentWorld: { x: number; y: number };
-}
-
-interface DefendDrag {
-  team: Team;
-  groupId: GroupId;
-  startHex: Hex;
-  currentEndHex: Hex;
 }
 
 // Flat-top axial→visual mapping:
@@ -56,12 +49,24 @@ interface TerrainDef {
   visionRadius?: number;
 }
 
-type InputMode = 'place' | 'assign' | 'order' | 'defend';
+type InputMode = 'place' | 'assign' | 'order';
 
 type Armies = Map<string, Unit[]>;
 type GroupOrders = Map<string, GroupOrder>;
 type GroupFormations = Map<string, FormationType>;
 type GroupDepths = Map<string, number>;
+
+// Per-team pool of unspent units, decremented by `deployCohort`. Reset on regenerate
+// and return-to-strategic.
+type Roster = Record<UnitType, number>;
+type Rosters = Map<Team, Roster>;
+const INITIAL_ROSTER: Roster = { infantry: 20, cavalry: 6, skirmisher: 4 };
+const COHORT_SIZE = 4;
+const makeInitialRosters = (): Rosters =>
+  new Map<Team, Roster>([
+    ['red', { ...INITIAL_ROSTER }],
+    ['blue', { ...INITIAL_ROSTER }],
+  ]);
 
 const FORMATION_CYCLE: FormationType[] = ['line', 'wedge', 'column', 'hex'];
 const FORMATION_LABELS: Record<FormationType, string> = {
@@ -71,7 +76,6 @@ const FORMATION_LABELS: Record<FormationType, string> = {
   column: '│ COL',
 };
 
-const DEPTH_CYCLE: number[] = [1, 2, 3, 4];
 
 const TEAM_TINTS: Record<Team, number> = {
   red: 0xef4444,
@@ -92,6 +96,32 @@ const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${group
 
 // Used in upcoming tasks; intentionally referenced.
 void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
+
+// Fraction of the tactical map's screen-y span that each side's deployment zone occupies,
+// measured from its edge inward. 0.22 ≈ "bottom 22% of the visible map is red's zone, top
+// 22% is blue's." Computed in pixel-y (not axial-r) so the strips read as HORIZONTAL — in
+// flat-top hexes the axial-r rows are slanted diagonally and look wrong as a zone marker.
+const DEPLOY_ZONE_FRAC = 0.22;
+
+/** Hex keys belonging to a team's deployment zone, derived from the screen-y extent of
+ *  `gridData`. Red gets the bottom strip, blue the top. */
+const deployZoneFor = (team: Team, gridData: { hex: Hex; type: string }[]): Set<string> => {
+  const zone = new Set<string>();
+  if (gridData.length === 0) return zone;
+  let minY = Infinity, maxY = -Infinity;
+  for (const d of gridData) {
+    const py = HexUtils.hexToPixel(d.hex).y;
+    if (py < minY) minY = py;
+    if (py > maxY) maxY = py;
+  }
+  const depthPx = (maxY - minY) * DEPLOY_ZONE_FRAC;
+  const threshold = team === 'red' ? maxY - depthPx : minY + depthPx;
+  for (const d of gridData) {
+    const py = HexUtils.hexToPixel(d.hex).y;
+    if (team === 'red' ? py >= threshold : py <= threshold) zone.add(HexUtils.key(d.hex));
+  }
+  return zone;
+};
 
 // --- Terrain detail sprites (grass tufts / flowers / rocks / forest undergrowth) ---
 // Cutout PNGs sit in public/details/{grass,flower,rock,forest}/.
@@ -197,15 +227,22 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
   },
   HILL: {
     small: {
-      density: 0.08,
+      density: 0.12,
       maxPerHex: 1,
-      scaleRange: [0.04, 0.14],
-      alphaRange: [0.25, 0.55],
+      scaleRange: [0.05, 0.16],
+      alphaRange: [0.30, 0.65],
       sprites: [
-        ...GRASS_KEYS.map(k => ({ key: k, weight: 55 })),
-        ...ROCK_KEYS.map(k => ({ key: k, weight: 35 })),
-        ...FLOWER_KEYS.map(k => ({ key: k, weight: 10 })),
+        ...GRASS_KEYS.map(k => ({ key: k, weight: 35 })),
+        ...ROCK_KEYS.map(k => ({ key: k, weight: 60 })),
+        ...FLOWER_KEYS.map(k => ({ key: k, weight: 5 })),
       ],
+    },
+    landmark: {
+      density: 0.025,
+      maxPerHex: 1,
+      scaleRange: [0.16, 0.24],
+      alphaRange: [0.45, 0.75],
+      sprites: ROCK_KEYS.map(k => ({ key: k, weight: 1 })),
     },
     categoryStyle: {
       grass:  { tint: 0xFFFFFF },
@@ -215,17 +252,17 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
   },
   FOREST: {
     small: {
-      density: 0.16,
+      density: 0.22,
       maxPerHex: 1,
       scaleRange: [0.07, 0.16],
       alphaRange: [0.40, 0.70],
       sprites: [
-        ...TINY_PINE_CLUSTER_KEYS.map(k => ({ key: k, weight: 35 })),
-        ...LOW_SHRUB_CLUSTER_KEYS.map(k => ({ key: k, weight: 25 })),
-        ...DARK_LEAF_PATCH_KEYS.map(k => ({ key: k, weight: 12 })),
-        ...DARK_UNDERGROWTH_KEYS.map(k => ({ key: k, weight: 8 })),
-        ...MOSS_CLUMP_KEYS.map(k => ({ key: k, weight: 12 })),
-        ...FALLEN_NEEDLES_KEYS.map(k => ({ key: k, weight: 8 })),
+        ...TINY_PINE_CLUSTER_KEYS.map(k => ({ key: k, weight: 55 })),
+        ...LOW_SHRUB_CLUSTER_KEYS.map(k => ({ key: k, weight: 20 })),
+        ...DARK_LEAF_PATCH_KEYS.map(k => ({ key: k, weight: 8 })),
+        ...DARK_UNDERGROWTH_KEYS.map(k => ({ key: k, weight: 5 })),
+        ...MOSS_CLUMP_KEYS.map(k => ({ key: k, weight: 8 })),
+        ...FALLEN_NEEDLES_KEYS.map(k => ({ key: k, weight: 4 })),
       ],
     },
     categoryStyle: {
@@ -306,6 +343,9 @@ export const GameCanvas: React.FC = () => {
   // zoom-out without re-running the (expensive) drawMap. Strokes are baked at alpha 1.0;
   // the layer's `alpha` property is set by the ticker each frame from world.scale.x.
   const gridGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
+  // Tinted deploy-zone strips. Repainted by `drawMap` alongside the grid; no separate
+  // visibility toggle for now (always on in TACTICAL view).
+  const deployZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const unitsGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Per-unit containers keyed by unit.id. Persist across drawUnits calls so we can
@@ -338,6 +378,9 @@ export const GameCanvas: React.FC = () => {
   const forestDensePatchTextureRef = useRef<PIXI.Texture | null>(null);
   const forestMossPatchTextureRef = useRef<PIXI.Texture | null>(null);
   const riverTextureRef = useRef<PIXI.Texture | null>(null);
+  const riverFlowVariationTextureRef = useRef<PIXI.Texture | null>(null);
+  const riverDepthPatchTextureRef = useRef<PIXI.Texture | null>(null);
+  const riverShimmerHighlightTextureRef = useRef<PIXI.Texture | null>(null);
   const hillTextureRef = useRef<PIXI.Texture | null>(null);
   const hillMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const hillPatchDryTextureRef = useRef<PIXI.Texture | null>(null);
@@ -376,6 +419,7 @@ export const GameCanvas: React.FC = () => {
   const [groupOrders, setGroupOrders] = useState<GroupOrders>(new Map());
   const [groupFormations, setGroupFormations] = useState<GroupFormations>(new Map());
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
+  const [rosters, setRosters] = useState<Rosters>(makeInitialRosters);
   const [isBattleRunning, setIsBattleRunning] = useState(false);
   // Set true once terrain-related textures (currently just grass) finish loading.
   // drawMap reads it via deps so the map redraws once textures are ready.
@@ -496,6 +540,8 @@ export const GameCanvas: React.FC = () => {
     const gGfx = gridGfx.current;
     tGfx.clear();
     gGfx.clear();
+    const dzGfx = deployZoneGfx.current;
+    dzGfx.clear();
     const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
     const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
     const isTexturedBiome = (t: string): boolean =>
@@ -557,9 +603,6 @@ export const GameCanvas: React.FC = () => {
       const topPoints: number[] = [];
       for (let i = 0; i < 6; i++) { topPoints.push(top[i].x, top[i].y); }
       tGfx.poly(topPoints).fill(fillStyle);
-      // Walls in tGfx only for non-textured biomes. Textured biomes (GRASSLAND, FOREST,
-      // RIVER, HILL, MOUNTAIN, SNOW) instead paint their cliff faces as part of the overlay mask
-      // below, so the cliff continues the biome texture instead of showing a dark shade.
       if (!isTexturedBiome(item.type)) drawWalls();
     });
 
@@ -580,6 +623,10 @@ export const GameCanvas: React.FC = () => {
       tilePx?: number;
       alpha?: number;
       blendMode?: PIXI.BLEND_MODES;
+      /** Override whether this layer paints cliff faces. Defaults to base layers only. */
+      includeCliffs?: boolean;
+      /** Paint this terrain's shaded prism sides immediately before this layer. */
+      paintCliffsBefore?: string;
       /** Splits hexes of the same `type` across multiple layers (e.g. chunked patches). */
       hexFilter?: (hex: Hex) => boolean;
     }
@@ -588,6 +635,30 @@ export const GameCanvas: React.FC = () => {
     // over shorter ones at the shared edges.
     const globalUvOverlays: OverlayLayer[] = [
       { type: 'RIVER', texture: riverTextureRef.current, tint: 0xFFFFFF, tilePx: 120 },
+      {
+        type: 'RIVER',
+        texture: riverFlowVariationTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 216,
+        alpha: 0.35,
+        blendMode: 'soft-light',
+      },
+      {
+        type: 'RIVER',
+        texture: riverDepthPatchTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 264,
+        alpha: 0.18,
+        blendMode: 'multiply',
+      },
+      {
+        type: 'RIVER',
+        texture: riverShimmerHighlightTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 192,
+        alpha: 0.45,
+        blendMode: 'screen',
+      },
       { type: 'GRASSLAND', texture: grassTextureRef.current, tint: 0xFFFFFF, tilePx: 200 },
       {
         type: 'GRASSLAND',
@@ -653,7 +724,14 @@ export const GameCanvas: React.FC = () => {
         blendMode: 'soft-light',
         hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed + 300) === 'DENSE',
       },
-      { type: 'HILL', texture: hillTextureRef.current, tint: 0xE0E0E0 },
+      {
+        type: 'HILL',
+        texture: hillTextureRef.current,
+        tint: 0xE0E0E0,
+        tilePx: 360,
+        includeCliffs: false,
+        paintCliffsBefore: 'HILL',
+      },
       {
         type: 'HILL',
         texture: hillMacroNoiseTextureRef.current,
@@ -678,9 +756,16 @@ export const GameCanvas: React.FC = () => {
         tilePx: 400,
         alpha: 0.30,
         blendMode: 'multiply',
+        includeCliffs: false,
         hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed + 100) === 'DENSE',
       },
-      { type: 'MOUNTAIN', texture: mountainTextureRef.current, tint: 0xC8C8C8 },
+      {
+        type: 'MOUNTAIN',
+        texture: mountainTextureRef.current,
+        tint: 0xC8C8C8,
+        includeCliffs: false,
+        paintCliffsBefore: 'MOUNTAIN',
+      },
       { type: 'SNOW', texture: snowTextureRef.current, tint: 0xFFFFFF },
     ];
     // Cliff edges (taller hex → shorter neighbour). vertex pair + axial direction. Only
@@ -688,8 +773,53 @@ export const GameCanvas: React.FC = () => {
     const cliffEdges: [number, number, number][] = [
       [1, 2, 5], [0, 1, 0], [2, 3, 4],
     ];
+    const drawTerrainCliffs = (target: PIXI.Graphics, terrainType: string) => {
+      const terrain = TERRAINS[terrainType];
+      if (!terrain) return;
+      const terrainH = terrain.height;
+      const sz = HexUtils.size;
+      const terrainEdges: [number, number, number, number][] = [
+        [2, 1, 5, 0.70],
+        [1, 0, 0, 0.55],
+        [2, 3, 4, 0.55],
+      ];
+
+      for (const item of gridData) {
+        if (item.type !== terrainType) continue;
+        const pos = HexUtils.hexToPixel(item.hex);
+        const topV: { x: number; y: number }[] = [];
+        for (let i = 0; i < 6; i++) {
+          const r = Math.PI / 180 * (60 * i);
+          topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - terrainH });
+        }
+
+        for (const [v1, v2, dirIdx, shade] of terrainEdges) {
+          const dir = HexUtils.directions[dirIdx];
+          const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
+          const nType = terrainAt.get(nKey);
+          const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
+          if (terrainH <= nH) continue;
+          const dh = terrainH - nH;
+          target
+            .poly([
+              topV[v1].x, topV[v1].y,
+              topV[v2].x, topV[v2].y,
+              topV[v2].x, topV[v2].y + dh,
+              topV[v1].x, topV[v1].y + dh,
+            ])
+            .fill({
+              color: PIXI.Color.shared.setValue(terrain.color).multiply([shade, shade, shade, 1]).toNumber(),
+            });
+        }
+      }
+    };
     for (const layer of globalUvOverlays) {
       if (!layer.texture) continue;
+      if (layer.paintCliffsBefore) {
+        const terrainCliffs = new PIXI.Graphics();
+        drawTerrainCliffs(terrainCliffs, layer.paintCliffsBefore);
+        overlay.addChild(terrainCliffs);
+      }
       const hexes = gridData.filter(d =>
         d.type === layer.type && (!layer.hexFilter || layer.hexFilter(d.hex)),
       );
@@ -699,7 +829,7 @@ export const GameCanvas: React.FC = () => {
       // Base layers (no hexFilter) extend the mask to the visible cliff faces against
       // shorter neighbours — biome texture continues down the cliff instead of leaving a
       // dark shaded wall. Decoration layers (dry/dense/flowery patches) stay top-only.
-      const includeCliffs = !layer.hexFilter;
+      const includeCliffs = layer.includeCliffs ?? !layer.hexFilter;
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       for (const d of hexes) {
         const p = HexUtils.hexToPixel(d.hex);
@@ -759,6 +889,41 @@ export const GameCanvas: React.FC = () => {
       overlay.addChild(tile);
       overlay.addChild(mask);
       tile.mask = mask;
+    }
+
+    // Deploy zone frontier — for each zone hex, stroke only the edges that face a
+    // non-zone neighbour (or the map edge). Produces one bold line along each side's
+    // front, no fill clutter inside the zones. Vertex pair → axial dir mapping is the
+    // same as `gridEdges` below (flat-top, vertex i at angle 60°·i).
+    {
+      const redZone = deployZoneFor('red', gridData);
+      const blueZone = deployZoneFor('blue', gridData);
+      const sz = HexUtils.size;
+      const zoneEdges: [number, number, number][] = [
+        [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
+      ];
+      for (const item of gridData) {
+        const k = HexUtils.key(item.hex);
+        const zone = redZone.has(k) ? redZone : blueZone.has(k) ? blueZone : null;
+        if (!zone) continue;
+        const color = zone === redZone ? 0xff3344 : 0x3b82f6;
+        const tDef = TERRAINS[item.type] || TERRAINS.SEA;
+        const hh = tDef.height;
+        const pos = HexUtils.hexToPixel(item.hex);
+        const topV: { x: number; y: number }[] = [];
+        for (let i = 0; i < 6; i++) {
+          const r = Math.PI / 180 * (60 * i);
+          topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - hh });
+        }
+        for (const [v1, v2, dirIdx] of zoneEdges) {
+          const dir = HexUtils.directions[dirIdx];
+          const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
+          if (zone.has(nKey)) continue;
+          dzGfx.moveTo(topV[v1].x, topV[v1].y)
+               .lineTo(topV[v2].x, topV[v2].y)
+               .stroke({ width: 3, color, alpha: 0.9 });
+        }
+      }
     }
 
     // Each shared edge is stroked ONCE — by the taller hex (tiebreak: axial-key compare).
@@ -851,15 +1016,7 @@ export const GameCanvas: React.FC = () => {
 
           const category = spriteCategory(spriteKey);
           const tint = rules.categoryStyle[category]?.tint ?? 0xFFFFFF;
-          const isFreelyRotatable =
-            category === 'rock' ||
-            category === 'leafPatch' ||
-            category === 'undergrowth' ||
-            category === 'moss' ||
-            category === 'needles';
-          const rotRng = seededRandom(hexSeed + i * 50 + 6);
-          // Plants and flowers only get a small tilt — full rotation flips them upside-down.
-          const rotation = isFreelyRotatable ? rotRng * Math.PI * 2 : (rotRng - 0.5) * (Math.PI / 6);
+          const rotation = 0;
 
           const sprite = new PIXI.Sprite(tex);
           sprite.anchor.set(0.5, 0.85);
@@ -867,7 +1024,7 @@ export const GameCanvas: React.FC = () => {
           sprite.y = topY + yOff;
           sprite.scale.set(scale, scale);
           sprite.rotation = rotation;
-          sprite.alpha = alpha;
+          sprite.alpha = category === 'rock' ? 1.0 : alpha;
           sprite.tint = tint;
           dg.addChild(sprite);
         }
@@ -1009,10 +1166,16 @@ export const GameCanvas: React.FC = () => {
         c.addChild(container);
       } else if ((container as unknown as { _targetKey?: string })._targetKey !== targetKey) {
         (container as unknown as { _targetKey: string })._targetKey = targetKey;
+        // Stretch the tween over the destination terrain's cooldown so the unit GLIDES
+        // across rough hexes instead of teleporting in TICK_MS and then sitting idle for
+        // the moveCost cooldown ticks. The sim's discrete steps remain — only the
+        // visual interpolation changes. By the time the tween finishes the cooldown is
+        // also up, so the next step engages immediately → smooth and slow.
+        const moveCost = getTerrainMods(tile.type).moveCost;
         gsap.to(container.position, {
           x: pos.x,
           y: topY,
-          duration: TICK_MS / 1000,
+          duration: (TICK_MS * (1 + moveCost)) / 1000,
           ease: 'linear',
           overwrite: true,
         });
@@ -1159,6 +1322,15 @@ export const GameCanvas: React.FC = () => {
     const key = groupOrderKey(team, groupId);
     const next = new Map(groupOrdersRef.current);
     const existing = next.get(key);
+    // Lifecycle lock: once `committed` is true (set when the player chose `unleash`), the
+    // only further intent change accepted is `mode: 'retreat'`. The sim's own writes
+    // (chargeTicksRemaining ticks, sim-clear-on-redeploy-zone) skip this guard by going
+    // through the writeOrder code path, not through issueOrder.
+    if (existing?.committed) {
+      const isRetreatRequest = change.mode === 'retreat';
+      const touchesIntent = 'mode' in change || 'heading' in change || 'attackTarget' in change;
+      if (touchesIntent && !isRetreatRequest) return;
+    }
     next.set(key, {
       team, groupId, attackTarget: null, heading: 0,
       ...existing,
@@ -1180,8 +1352,6 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
     const app = new PIXI.Application();
-    // Hoisted so the unmount cleanup can detach the dblclick listener registered inside `start`.
-    let dblClickHandler: ((e: MouseEvent) => void) | null = null;
     const start = async () => {
       await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
       // The army SVG is natively 40×40 — too low for high-DPI. Pre-rasterise to a
@@ -1200,7 +1370,7 @@ export const GameCanvas: React.FC = () => {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
+      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/roman_soldier.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/hoplite.png'),
@@ -1220,6 +1390,9 @@ export const GameCanvas: React.FC = () => {
         PIXI.Assets.load<PIXI.Texture>('/terrain/forest-dense-patch.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/forest-moss-patch.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/river.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/river-flow-variation.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/river-depth-patch.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/river-shimmer-highlight.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill-macro-noise.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill-patch-dry.png'),
@@ -1232,7 +1405,7 @@ export const GameCanvas: React.FC = () => {
       ]);
       if (!isMounted) return;
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
+      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -1249,6 +1422,9 @@ export const GameCanvas: React.FC = () => {
       forestDensePatchTex.source.addressMode = 'repeat';
       forestMossPatchTex.source.addressMode = 'repeat';
       riverTex.source.addressMode = 'repeat';
+      riverFlowVariationTex.source.addressMode = 'repeat';
+      riverDepthPatchTex.source.addressMode = 'repeat';
+      riverShimmerHighlightTex.source.addressMode = 'repeat';
       hillTex.source.addressMode = 'repeat';
       hillMacroNoiseTex.source.addressMode = 'repeat';
       hillPatchDryTex.source.addressMode = 'repeat';
@@ -1288,6 +1464,9 @@ export const GameCanvas: React.FC = () => {
       forestDensePatchTextureRef.current = forestDensePatchTex;
       forestMossPatchTextureRef.current = forestMossPatchTex;
       riverTextureRef.current = riverTex;
+      riverFlowVariationTextureRef.current = riverFlowVariationTex;
+      riverDepthPatchTextureRef.current = riverDepthPatchTex;
+      riverShimmerHighlightTextureRef.current = riverShimmerHighlightTex;
       hillTextureRef.current = hillTex;
       hillMacroNoiseTextureRef.current = hillMacroNoiseTex;
       hillPatchDryTextureRef.current = hillPatchDryTex;
@@ -1309,6 +1488,7 @@ export const GameCanvas: React.FC = () => {
       world.addChild(terrainGfx.current);
       world.addChild(terrainOverlayRef.current);
       world.addChild(detailsGfx.current);
+      world.addChild(deployZoneGfx.current);
       world.addChild(gridGfx.current);
       world.addChild(unitsGfx.current);
       world.addChild(projectilesGfx.current);
@@ -1317,34 +1497,63 @@ export const GameCanvas: React.FC = () => {
       
       app.stage.eventMode = 'static'; app.stage.hitArea = app.screen;
 
+      // Drop a cohort centered on `hex`: the clicked hex plus its in-zone unoccupied
+      // neighbours, up to `COHORT_SIZE` units (capped by roster remaining). Refused
+      // outright if the clicked hex is outside the active team's deploy zone or its
+      // roster is empty for this type. Each click = at most one cohort (the paint loop's
+      // hex-dedupe guard at the top prevents the same drag re-firing on the same hex).
       const paintPlace = (hex: Hex) => {
         const strategicHex = currentStrategicHexRef.current;
         if (!strategicHex) return;
         const hexKey = HexUtils.key(hex);
         if (lastPaintedKeyRef.current === hexKey) return;
         lastPaintedKeyRef.current = hexKey;
+        const team = selectedTeamRef.current;
+        const zone = deployZoneFor(team, gridDataRef.current);
+        if (!zone.has(hexKey)) return;
+        const unitType = selectedUnitTypeRef.current;
+        const remaining = rostersRef.current.get(team)?.[unitType] ?? 0;
+        if (remaining <= 0) return;
         const strategicKey = HexUtils.key(strategicHex);
-        setArmies(prev => {
-          const next = new Map(prev);
-          const existing = next.get(strategicKey) ?? [];
-          if (existing.some(u => u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r)) {
-            return prev;
-          }
-          const placementType = gridDataRef.current.find(d => d.hex.q === hex.q && d.hex.r === hex.r)?.type;
-          const unitType = selectedUnitTypeRef.current;
-          const newUnit: Unit = {
+        const existing = armiesRef.current.get(strategicKey) ?? [];
+        const occupied = new Set(existing.map(u => HexUtils.key(u.tacticalHex)));
+        const target: Hex[] = [];
+        const candidates: Hex[] = [hex, ...HexUtils.getNeighbors(hex)];
+        const cap = Math.min(COHORT_SIZE, remaining);
+        for (const c of candidates) {
+          if (target.length >= cap) break;
+          const k = HexUtils.key(c);
+          if (!zone.has(k) || occupied.has(k)) continue;
+          target.push(c);
+          occupied.add(k);
+        }
+        if (target.length === 0) return;
+        const groupId = selectedGroupRef.current;
+        const newUnits: Unit[] = target.map(h => {
+          const placementType = gridDataRef.current.find(d => d.hex.q === h.q && d.hex.r === h.r)?.type;
+          return {
             id: crypto.randomUUID(),
-            team: selectedTeamRef.current,
+            team,
             unitType,
-            tacticalHex: hex,
-            homeHex: hex,
-            groupId: selectedGroupRef.current,
+            tacticalHex: h,
+            homeHex: h,
+            groupId,
             hp: MAX_HP_BY_TYPE[unitType],
             state: 'idle',
             nextMoveTick: 0,
             visionRadius: getTerrainMods(placementType).visionRadius,
           };
-          next.set(strategicKey, [...existing, newUnit]);
+        });
+        setArmies(prev => {
+          const next = new Map(prev);
+          const cur = next.get(strategicKey) ?? [];
+          next.set(strategicKey, [...cur, ...newUnits]);
+          return next;
+        });
+        setRosters(prev => {
+          const next = new Map(prev);
+          const r = next.get(team) ?? { ...INITIAL_ROSTER };
+          next.set(team, { ...r, [unitType]: r[unitType] - newUnits.length });
           return next;
         });
       };
@@ -1468,178 +1677,6 @@ export const GameCanvas: React.FC = () => {
         previewGfx.current.removeChildren();
       };
 
-      // Defend preview: BFS the home-terrain blob from `startHex`, outline borders.
-      const renderDefendPreview = () => {
-        const gfx = previewGfx.current;
-        gfx.removeChildren();
-        const drag = defendDragRef.current;
-        if (!drag) return;
-
-        const grid = gridDataRef.current;
-        const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
-        const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
-        const homeTerrain = terrainAt.get(HexUtils.key(drag.startHex));
-        if (!homeTerrain) return;
-
-        const dragDist = HexUtils.distance(drag.startHex, drag.currentEndHex);
-        const endTerrain = dragDist > 0 ? terrainAt.get(HexUtils.key(drag.currentEndHex)) : undefined;
-        const defendFrom = endTerrain && endTerrain !== homeTerrain ? endTerrain : undefined;
-
-        const blob = new Set<string>();
-        const queue: Hex[] = [drag.startHex];
-        while (queue.length) {
-          const h = queue.shift()!;
-          const k = HexUtils.key(h);
-          if (blob.has(k)) continue;
-          if (!gridSet.has(k)) continue;
-          if (terrainAt.get(k) !== homeTerrain) continue;
-          blob.add(k);
-          for (const n of HexUtils.getNeighbors(h)) queue.push(n);
-        }
-
-        const borders: Hex[] = [];
-        for (const k of blob) {
-          const h = HexUtils.fromKey(k);
-          for (const n of HexUtils.getNeighbors(h)) {
-            const nk = HexUtils.key(n);
-            if (!gridSet.has(nk)) continue;
-            const nt = terrainAt.get(nk);
-            if (!nt || !TERRAINS[nt].walkable) continue;
-            if (nt === homeTerrain) continue;
-            if (defendFrom && nt !== defendFrom) continue;
-            borders.push(h);
-            break;
-          }
-        }
-
-        // Segment BFS from the anchor; matches the sim's defendHeight, RIVER terminal.
-        let segmentBorders = borders;
-        const borderKeys = new Set(borders.map(b => HexUtils.key(b)));
-        let nearestBorder: Hex | null = null;
-        let nearestD = Infinity;
-        for (const b of borders) {
-          const d = HexUtils.distance(drag.startHex, b);
-          if (d < nearestD) { nearestD = d; nearestBorder = b; }
-        }
-        if (nearestBorder) {
-          const segment = new Set<string>();
-          const segQueue: Hex[] = [nearestBorder];
-          while (segQueue.length) {
-            const h = segQueue.shift()!;
-            const hk = HexUtils.key(h);
-            if (segment.has(hk)) continue;
-            segment.add(hk);
-            let flanked = false;
-            for (const n of HexUtils.getNeighbors(h)) {
-              if (blob.has(HexUtils.key(n))) continue;
-              if (terrainAt.get(HexUtils.key(n)) === 'RIVER') { flanked = true; break; }
-            }
-            if (flanked) continue;
-            for (const n of HexUtils.getNeighbors(h)) {
-              const nk = HexUtils.key(n);
-              if (!borderKeys.has(nk) || segment.has(nk)) continue;
-              segQueue.push(n);
-            }
-          }
-          segmentBorders = borders.filter(b => segment.has(HexUtils.key(b)));
-        }
-
-        const drawHexOutline = (hex: Hex, color: number, alpha: number, fillAlpha: number) => {
-          const pos = HexUtils.hexToPixel(hex);
-          const tile = grid.find(d => d.hex.q === hex.q && d.hex.r === hex.r);
-          const topY = pos.y - (tile ? TERRAINS[tile.type].height : 0);
-          const poly = new PIXI.Graphics();
-          poly.lineStyle(2, color, alpha);
-          poly.beginFill(color, fillAlpha);
-          const s = HexUtils.size;
-          for (let kk = 0; kk < 6; kk++) {
-            const r = Math.PI / 180 * (60 * kk - 30);
-            if (kk === 0) poly.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
-            else poly.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
-          }
-          poly.closePath().endFill();
-          gfx.addChild(poly);
-        };
-
-        for (const b of segmentBorders) drawHexOutline(b, 0x16a34a, 0.95, 0.22);
-
-        drawHexOutline(drag.startHex, 0x86efac, 1.0, 0.0);
-
-        if (dragDist > 0) {
-          const startPx = HexUtils.hexToPixel(drag.startHex);
-          const endPx = HexUtils.hexToPixel(drag.currentEndHex);
-          const startTile = grid.find(d => d.hex.q === drag.startHex.q && d.hex.r === drag.startHex.r);
-          const endTile = grid.find(d => d.hex.q === drag.currentEndHex.q && d.hex.r === drag.currentEndHex.r);
-          const startY = startPx.y - (startTile ? TERRAINS[startTile.type].height : 0);
-          const endY = endPx.y - (endTile ? TERRAINS[endTile.type].height : 0);
-          const line = new PIXI.Graphics();
-          line.lineStyle(3, 0xfacc15, 0.9);
-          line.moveTo(startPx.x, startY);
-          line.lineTo(endPx.x, endY);
-          gfx.addChild(line);
-          drawHexOutline(drag.currentEndHex, 0xfacc15, 0.95, 0.15);
-        }
-      };
-
-      // Commit a defend order. homeHex sets sticky defendTerrain; fromHex (different
-      // terrain) supplies the directional `defendFrom`. Same-terrain drag = omnidirectional.
-      const commitDefend = (homeHex: Hex, fromHex: Hex | null) => {
-        const team = selectedTeamRef.current;
-        const groupId = selectedGroupRef.current;
-        const grid = gridDataRef.current;
-        const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
-        const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
-        const defendTerrain = terrainAt.get(HexUtils.key(homeHex));
-        if (!defendTerrain) return;
-        const fromTerrain = fromHex ? terrainAt.get(HexUtils.key(fromHex)) : undefined;
-        const defendFrom = fromTerrain && fromTerrain !== defendTerrain ? fromTerrain : undefined;
-
-        // Sticky unit→slot pairing computed once here; the sim then walks each unit
-        // toward its STORED slot every tick (no per-tick re-pair, no oscillation).
-        const strategic = currentStrategicHexRef.current;
-        const groupUnits = strategic
-          ? (armiesRef.current.get(HexUtils.key(strategic)) ?? []).filter(u => u.team === team && u.groupId === groupId)
-          : [];
-        const mapApi: MapApi = {
-          isInside: (h: Hex) => gridSet.has(HexUtils.key(h)),
-          isWalkable: (h: Hex) => {
-            const t = terrainAt.get(HexUtils.key(h));
-            return t ? TERRAINS[t].walkable : false;
-          },
-          getTerrainType: (h: Hex) => terrainAt.get(HexUtils.key(h)),
-          getTerrainMods: (h: Hex) => getTerrainMods(terrainAt.get(HexUtils.key(h))),
-          getTerrainHeight: (h: Hex) => {
-            const t = terrainAt.get(HexUtils.key(h));
-            return t ? TERRAINS[t].height : 0;
-          },
-          isBarrier: (h: Hex) => terrainAt.get(HexUtils.key(h)) === 'RIVER',
-        };
-        const tentativeOrder: GroupOrder = {
-          team, groupId, attackTarget: { q: 0, r: 0 }, heading: 0,
-          mode: 'defendHeight', defendTerrain, defendFrom, defendAnchor: homeHex,
-        };
-        const formation = computeDefendFormation(groupUnits, tentativeOrder, {
-          damagePerTick: DAMAGE_PER_TICK,
-          mapApi,
-          currentTick: 0,
-        });
-        const defendAssignments: Record<string, Hex> | undefined = formation
-          ? Object.fromEntries(formation.assignment)
-          : undefined;
-
-        const cur = groupOrdersRef.current.get(groupOrderKey(team, groupId));
-        if (!cur?.attackTarget) return;
-        issueOrder(team, groupId, {
-          mode: 'defendHeight',
-          defendTerrain,
-          defendFrom,
-          defendAnchor: homeHex,
-          defendAssignments,
-          chargeTicksRemaining: undefined,
-          chargeDamagedIds: undefined,
-        });
-      };
-
       app.stage.on('pointerdown', (e) => {
         const mode = inputModeRef.current;
         if ((mode === 'place' || mode === 'assign') && currentStrategicHexRef.current) {
@@ -1674,15 +1711,6 @@ export const GameCanvas: React.FC = () => {
           renderOrderPreview();
           return;
         }
-        if (mode === 'defend' && currentStrategicHexRef.current) {
-          const team = selectedTeamRef.current;
-          const groupId = selectedGroupRef.current;
-          const local = world.toLocal(e.global);
-          const startHex = HexUtils.pixelToHex({ x: local.x, y: local.y });
-          defendDragRef.current = { team, groupId, startHex, currentEndHex: startHex };
-          renderDefendPreview();
-          return;
-        }
         isDragging.current = true;
         lastMousePos.current = { x: e.global.x, y: e.global.y };
       });
@@ -1695,10 +1723,6 @@ export const GameCanvas: React.FC = () => {
         if (orderDragRef.current) {
           orderDragRef.current.currentWorld = { x: local.x, y: local.y };
           renderOrderPreview();
-        }
-        if (defendDragRef.current) {
-          defendDragRef.current.currentEndHex = hex;
-          renderDefendPreview();
         }
       });
       app.stage.on('pointerup', () => {
@@ -1780,37 +1804,15 @@ export const GameCanvas: React.FC = () => {
               updated.set(HexUtils.key(strategic), arr);
               return updated;
             });
-            issueOrder(drag.team, drag.groupId, { attackTarget: drag.targetHex, heading });
+            issueOrder(drag.team, drag.groupId, { attackTarget: drag.targetHex, heading: snapToForwardCone(drag.team, heading) });
           }
           setInputMode(null);
           cancelOrderDrag();
-        }
-        // Dragged → directional defend + exit. Static click → wait for dblclick (the
-        // omnidirectional gesture; don't commit on the single tap).
-        const dDrag = defendDragRef.current;
-        if (dDrag) {
-          const dragDist = HexUtils.distance(dDrag.startHex, dDrag.currentEndHex);
-          if (dragDist > 0) {
-            commitDefend(dDrag.startHex, dDrag.currentEndHex);
-            setInputMode(null);
-          }
-          defendDragRef.current = null;
-          previewGfx.current.removeChildren();
         }
         isDragging.current = false;
         isPaintingRef.current = false;
         lastPaintedKeyRef.current = null;
       });
-      // dblclick = omnidirectional defend gesture (click the hex's home terrain).
-      dblClickHandler = (e: MouseEvent) => {
-        if (inputModeRef.current !== 'defend') return;
-        const rect = app.canvas.getBoundingClientRect();
-        const local = world.toLocal({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-        const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
-        commitDefend(hex, null);
-        setInputMode(null);
-      };
-      app.canvas.addEventListener('dblclick', dblClickHandler);
       app.stage.on('pointertap', (e) => {
         if (isDragging.current) return;
         // Order commits in pointerup (captures drag direction); pointertap is a no-op.
@@ -1882,7 +1884,6 @@ export const GameCanvas: React.FC = () => {
     start();
     return () => {
       isMounted = false;
-      if (dblClickHandler) app.canvas.removeEventListener('dblclick', dblClickHandler);
       // Kill GSAP tweens before PIXI destroys their targets — otherwise GSAP keeps
       // updating freed objects for up to TICK_MS after unmount.
       containers.forEach(cont => {
@@ -1922,6 +1923,11 @@ export const GameCanvas: React.FC = () => {
       const grid = gridDataRef.current;
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
+      // Precompute deploy zone hex sets — the retreat-clear logic queries this per tick.
+      const deployZones: Record<Team, Set<string>> = {
+        red:  deployZoneFor('red',  grid),
+        blue: deployZoneFor('blue', grid),
+      };
       tickCounterRef.current += 1;
       // AI phase. Each registered controller writes its team's orders via `issueOrder`,
       // which mutates the orders ref synchronously — so the `simulateTick` call below
@@ -1963,7 +1969,7 @@ export const GameCanvas: React.FC = () => {
             const t = terrainAt.get(HexUtils.key(h));
             return t ? TERRAINS[t].height : 0;
           },
-          isBarrier: (h: Hex) => terrainAt.get(HexUtils.key(h)) === 'RIVER',
+          isInDeployZone: (t: Team, h: Hex) => deployZones[t].has(HexUtils.key(h)),
         },
       });
       const javelinTex = javelinTextureRef.current;
@@ -2037,9 +2043,9 @@ export const GameCanvas: React.FC = () => {
   // can be defined before the long-lived handlers that capture them.
   const groupFormationsRef = useRef<GroupFormations>(new Map());
   const groupDepthsRef = useRef<GroupDepths>(new Map());
+  const rostersRef = useRef<Rosters>(makeInitialRosters());
   const armiesRef = useRef<Armies>(new Map());
   const orderDragRef = useRef<OrderDrag | null>(null);
-  const defendDragRef = useRef<DefendDrag | null>(null);
   const gridDataRef = useRef<{ hex: Hex; type: string }[]>([]);
   const isBattleRunningRef = useRef(false);
   const fogOfWarRef = useRef(false);
@@ -2047,11 +2053,6 @@ export const GameCanvas: React.FC = () => {
     inputModeRef.current = inputMode;
     if (inputMode !== 'order') {
       orderDragRef.current = null;
-    }
-    if (inputMode !== 'defend') {
-      defendDragRef.current = null;
-    }
-    if (inputMode !== 'order' && inputMode !== 'defend') {
       previewGfx.current?.removeChildren();
     }
   }, [inputMode]);
@@ -2062,6 +2063,7 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { groupOrdersRef.current = groupOrders; }, [groupOrders]);
   useEffect(() => { groupFormationsRef.current = groupFormations; }, [groupFormations]);
   useEffect(() => { groupDepthsRef.current = groupDepths; }, [groupDepths]);
+  useEffect(() => { rostersRef.current = rosters; }, [rosters]);
   useEffect(() => { armiesRef.current = armies; }, [armies]);
   useEffect(() => { gridDataRef.current = gridData; }, [gridData]);
   useEffect(() => { isBattleRunningRef.current = isBattleRunning; }, [isBattleRunning]);
@@ -2070,66 +2072,45 @@ export const GameCanvas: React.FC = () => {
 
   // Shared toggle for CHARGE / RETREAT / UNLEASH shortcuts and HUD buttons. Toggling the
   // active mode reverts the group to 'march'; CHARGE additionally arms / clears the
-  // duration counter so re-entering charge starts a fresh window. DefendHeight is NOT
-  // handled here — it uses an input-mode gesture flow (see toggleDefend).
-  const toggleMode = useCallback((mode: Exclude<OrderMode, 'march' | 'defendHeight'>) => {
+  // duration counter so re-entering charge starts a fresh window.
+  const toggleMode = useCallback((mode: Exclude<OrderMode, 'march'>) => {
     const gid = selectedGroupRef.current;
     const team = selectedTeamRef.current;
     const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
     if (!cur?.attackTarget) return;
+    // Once committed (post-unleash), only RETREAT is allowed. The HUD button is also
+    // disabled but the keyboard could still fire — short-circuit here for symmetry.
+    if (cur.committed && mode !== 'retreat') return;
     const isActive = (cur.mode ?? 'march') === mode;
-    issueOrder(team, gid, isActive
-      ? { mode: 'march', chargeTicksRemaining: undefined, chargeDamagedIds: undefined }
-      : {
-          mode,
-          chargeTicksRemaining: mode === 'charge' ? CHARGE_DURATION_TICKS : undefined,
-          chargeDamagedIds: undefined,
-        });
-  }, [issueOrder]);
-
-  // Three-state toggle for DEFEND:
-  //   1. Order already in defendHeight → click cancels (revert to march, clear sticky fields).
-  //   2. Already in 'defend' input mode (no order yet) → click exits input mode.
-  //   3. Otherwise → enter 'defend' input mode so the next canvas gesture (double-click or
-  //      drag) specifies what to defend.
-  // Requires an active attack order to enter the mode in the first place.
-  const toggleDefend = useCallback(() => {
-    const gid = selectedGroupRef.current;
-    const team = selectedTeamRef.current;
-    const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
-    const isDefending = (cur?.mode ?? 'march') === 'defendHeight';
-
-    if (isDefending) {
-      if (!cur?.attackTarget) return;
-      issueOrder(team, gid, {
-        mode: 'march',
-        defendTerrain: undefined,
-        defendFrom: undefined,
-        defendAnchor: undefined,
-        defendAssignments: undefined,
-      });
+    if (isActive) {
+      // Toggle off — unleash is one-way (never toggled off here; HUD/key disabled when
+      // committed). Hold/idle/charge toggle back to march normally; clear all
+      // mode-specific scratch fields so the new march starts clean.
+      issueOrder(team, gid, { mode: 'march', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined });
       return;
     }
-
-    if (inputModeRef.current === 'defend') {
-      setInputMode(null);
-      return;
-    }
-
-    if (!cur?.attackTarget) return;
-    setInputMode('defend');
-    setIsScanning(false);
+    issueOrder(team, gid, {
+      mode,
+      chargeTicksRemaining: mode === 'charge' ? CHARGE_DURATION_TICKS : undefined,
+      chargeDamagedIds: undefined,
+      // Hold starts the defensive-reduction counter; idle clears it; anything else
+      // leaves it undefined (no bonus).
+      holdTicks: mode === 'hold' ? 0 : undefined,
+      // Both unleash AND retreat are one-way commits: once engaged, no further orders
+      // until the sim clears the order on deploy-zone arrival. Charge stays editable.
+      committed: (mode === 'unleash' || mode === 'retreat') ? true : undefined,
+    });
   }, [issueOrder]);
 
   // Order-related shortcuts for the currently selected group. Layout — top row:
-  //   T Q W E R  →  Assign / Attack / Hold / Charge / Unleash
+  //   T Q W E R  →  Assign / Deploy / Hold / Charge / Unleash
   // Bottom row:
-  //   A S D F V  →  Mirror direction / Defend / Cycle formation / Retreat / Cycle depth
+  //   A S D F    →  Cycle heading / Idle / Cycle formation / Retreat
   // All TACTICAL-only; ignored while typing in inputs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (!'tqwerasdfv'.includes(k)) return;
+      if (!'tqwerasdf'.includes(k)) return;
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -2149,18 +2130,19 @@ export const GameCanvas: React.FC = () => {
         setInputMode(prev => (prev === 'order' ? null : 'order'));
         setIsScanning(false);
       } else if (k === 'w') {
-        const cur = groupOrdersRef.current.get(key);
-        if (cur?.attackTarget) issueOrder(team, gid, { hold: !cur.hold });
+        toggleMode('hold');
       } else if (k === 'e') {
         toggleMode('charge');
       } else if (k === 'r') {
         toggleMode('unleash');
-      } else if (k === 'a') {
-        // Mirror heading horizontally: NE↔NW, SE↔SW, N↔N, S↔S.
-        const cur = groupOrdersRef.current.get(key);
-        if (cur?.attackTarget) issueOrder(team, gid, { heading: (3 - cur.heading + 6) % 6 });
       } else if (k === 's') {
-        toggleDefend();
+        toggleMode('idle');
+      } else if (k === 'a') {
+        // Cycle heading within the team's forward cone (NW → N → NE → NW for red,
+        // SW → S → SE → SW for blue). Replaces the old horizontal-mirror semantics
+        // since only 3 directions are legal under the forward-cone movement model.
+        const cur = groupOrdersRef.current.get(key);
+        if (cur?.attackTarget) issueOrder(team, gid, { heading: cycleConeHeading(team, cur.heading) });
       } else if (k === 'd') {
         setGroupFormations(prev => {
           const cur = prev.get(key) ?? 'line';
@@ -2172,20 +2154,11 @@ export const GameCanvas: React.FC = () => {
         });
       } else if (k === 'f') {
         toggleMode('retreat');
-      } else if (k === 'v') {
-        setGroupDepths(prev => {
-          const cur = prev.get(key) ?? 1;
-          const idx = DEPTH_CYCLE.indexOf(cur);
-          const nextDepth = DEPTH_CYCLE[(idx + 1) % DEPTH_CYCLE.length];
-          const next = new Map(prev);
-          next.set(key, nextDepth);
-          return next;
-        });
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, toggleDefend, issueOrder]);
+  }, [viewMode, toggleMode, issueOrder]);
 
   // Global shortcuts:
   //   SPACE         → start/pause battle (preventDefault to suppress page scroll)
@@ -2216,6 +2189,9 @@ export const GameCanvas: React.FC = () => {
         return;
       }
       const setPlacementType = (type: UnitType) => {
+        // Hotkeys obey the same roster gate as the HUD buttons.
+        const team = selectedTeamRef.current;
+        if ((rostersRef.current.get(team)?.[type] ?? 0) <= 0) return;
         const samePlacing = inputModeRef.current === 'place' && selectedUnitTypeRef.current === type;
         setSelectedUnitType(type);
         setInputMode(samePlacing ? null : 'place');
@@ -2340,27 +2316,32 @@ export const GameCanvas: React.FC = () => {
           {isScanning ? 'CANCEL SCAN' : '🎯 INITIATE TACTICAL DIVE'}
         </button>
 
-        {/* Placement row: INFANTRY (Z), CAVALRY (X), SKIRMISHER (C). The active button
-            is the one whose unitType matches selectedUnitType, but ONLY while inputMode
-            === 'place'. Click toggles place-mode for that type; clicking another type
-            while already placing swaps without exiting. */}
+        {/* Deploy row: each button drops a cohort of up to COHORT_SIZE units of that
+            type into the selected team's zone on the next zone click. Button shows the
+            remaining roster count for the active team; disabled when that count is 0. */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
           {(['infantry', 'cavalry', 'skirmisher'] as const).map(type => {
             const samePlacing = isPlacing && selectedUnitType === type;
-            const disabled = viewMode !== 'TACTICAL';
+            const remaining = rosters.get(selectedTeam)?.[type] ?? 0;
+            const outOfStock = remaining <= 0;
+            const disabled = viewMode !== 'TACTICAL' || outOfStock;
             const keyHint = type === 'infantry' ? '(Z)' : type === 'cavalry' ? '(X)' : '(C)';
             const label = type === 'infantry' ? 'INFANTRY' : type === 'cavalry' ? 'CAVALRY' : 'SKIRMISH';
             return (
               <button
                 key={type}
                 onClick={() => {
-                  if (viewMode !== 'TACTICAL') return;
+                  if (viewMode !== 'TACTICAL' || outOfStock) return;
                   setSelectedUnitType(type);
                   setInputMode(samePlacing ? null : 'place');
                   if (!samePlacing) setIsScanning(false);
                 }}
                 disabled={disabled}
-                title={disabled ? 'Dive into a tactical view first' : `Place ${type}`}
+                title={
+                  viewMode !== 'TACTICAL' ? 'Dive into a tactical view first'
+                  : outOfStock ? `No ${type} left in roster`
+                  : `Deploy a cohort of up to ${COHORT_SIZE} ${type} — ${remaining} remaining`
+                }
                 style={{
                   flex: 1,
                   padding: '14px 6px',
@@ -2377,7 +2358,7 @@ export const GameCanvas: React.FC = () => {
                   transition: '0.2s',
                 }}
               >
-                {samePlacing ? `STOP ${keyHint}` : `${label} ${keyHint}`}
+                {samePlacing ? `STOP ${keyHint}` : `${label} ×${remaining} ${keyHint}`}
               </button>
             );
           })}
@@ -2448,18 +2429,21 @@ export const GameCanvas: React.FC = () => {
               const formationKey = groupOrderKey(selectedTeam, gid);
               const formation: FormationType = groupFormations.get(formationKey) ?? 'line';
               const formationIsDefault = formation === 'line';
-              const depth = groupDepths.get(formationKey) ?? 1;
-              const depthIsDefault = depth === 1;
               const order = groupOrders.get(formationKey);
-              const holdActive = !!order?.hold;
               const canHold = !!order?.attackTarget;
+              const committed = !!order?.committed;
+              // Post-unleash lock: every interaction except RETREAT is disabled. The
+              // group becomes re-orderable again only after retreat lands it back in
+              // its deploy zone (sim auto-clears the order; see simulate.ts retreat).
+              const canEdit = canHold && !committed;
               const orderMode: OrderMode = order?.mode ?? 'march';
               const chargeActive = orderMode === 'charge';
               const retreatActive = orderMode === 'retreat';
               const unleashActive = orderMode === 'unleash';
-              const defendActive = orderMode === 'defendHeight';
-              const defendInputActive = inputMode === 'defend' && selectedGroup === gid;
-              const defendShown = defendActive || defendInputActive;
+              const holdActive = orderMode === 'hold';
+              const idleActive = orderMode === 'idle';
+              const holdTicks = order?.holdTicks ?? 0;
+              const holdPct = Math.round(Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP) * 100);
               const chargeRemaining = order?.chargeTicksRemaining;
               // AOE-style two-row layout. Each row mirrors a keyboard row so the buttons
               // sit under the keys that activate them:
@@ -2495,10 +2479,10 @@ export const GameCanvas: React.FC = () => {
                     >
                       G{gid} <span style={{ color: '#64748b', fontWeight: 600 }}>×{count}</span>
                     </button>
-                    {/* Q — ATTACK (enter order mode) */}
+                    {/* Q — DEPLOY (enter order mode for drag-deploy / direction set) */}
                     <button
                       disabled={count === 0}
-                      title="Attack (shortcut: Q)"
+                      title="Deploy: drag from a deploy-zone hex to set heading + formation (shortcut: Q)"
                       onClick={() => {
                         setSelectedGroup(gid);
                         setInputMode(prev => (prev === 'order' && selectedGroup === gid) ? null : 'order');
@@ -2512,59 +2496,69 @@ export const GameCanvas: React.FC = () => {
                         cursor: count === 0 ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      ATTACK (Q)
+                      DEPLOY (Q)
                     </button>
-                    {/* W — HOLD */}
+                    {/* W — HOLD: stand still + accrue defensive damage reduction up to a cap.
+                        When the cap is reached the sim auto-flips the group to IDLE. */}
                     <button
-                      disabled={!canHold}
-                      title={canHold ? (holdActive ? 'Hold active — block will not march (shortcut: W)' : 'Hold block in place (shortcut: W)') : 'No active order to hold'}
-                      onClick={() => {
-                        if (!canHold) return;
-                        const cur = groupOrdersRef.current.get(formationKey);
-                        if (cur) issueOrder(selectedTeam, gid, { hold: !cur.hold });
-                      }}
+                      disabled={!canEdit}
+                      title={
+                        committed ? '🔒 Group committed — retreat to redeploy'
+                        : !canHold ? 'No active order to hold'
+                        : holdActive ? `Holding — ${holdPct}% damage reduction (cap ${Math.round(HOLD_REDUCTION_CAP * 100)}%). Click to cancel (shortcut: W).`
+                        : `Hold: stand still, accrue +${Math.round(HOLD_REDUCTION_PER_TICK * 100)}% damage reduction per tick up to ${Math.round(HOLD_REDUCTION_CAP * 100)}% cap (shortcut: W)`
+                      }
+                      onClick={() => { if (canEdit) toggleMode('hold'); }}
                       style={{
                         ...btnBase,
                         background: holdActive ? '#f59e0b' : 'rgba(255,255,255,0.04)',
-                        color: !canHold ? '#475569' : holdActive ? 'white' : '#94a3b8',
+                        color: !canEdit ? '#475569' : holdActive ? 'white' : '#94a3b8',
                         border: holdActive ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canHold ? 'not-allowed' : 'pointer',
-                        opacity: !canHold ? 0.5 : 1,
+                        cursor: !canEdit ? 'not-allowed' : 'pointer',
+                        opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      HOLD (W)
+                      {holdActive ? `HOLD ${holdPct}% (W)` : 'HOLD (W)'}
                     </button>
                     {/* E — CHARGE */}
                     <button
-                      disabled={!canHold}
-                      title={canHold ? (chargeActive ? `Charge active${chargeRemaining != null ? ` (${chargeRemaining} ticks left)` : ''} — click to cancel (shortcut: E)` : 'Charge: 2 hexes/tick, lance damage, 1.5s burst (shortcut: E)') : 'No active order'}
-                      onClick={() => { if (canHold) toggleMode('charge'); }}
+                      disabled={!canEdit}
+                      title={
+                        committed ? '🔒 Group committed — retreat to redeploy'
+                        : canEdit ? (chargeActive ? `Charge active${chargeRemaining != null ? ` (${chargeRemaining} ticks left)` : ''} — click to cancel (shortcut: E)` : 'Charge: 2 hexes/tick, lance damage, 1.5s burst (shortcut: E)')
+                        : 'No active order'
+                      }
+                      onClick={() => { if (canEdit) toggleMode('charge'); }}
                       style={{
                         ...btnBase,
                         background: chargeActive ? '#dc2626' : 'rgba(255,255,255,0.04)',
-                        color: !canHold ? '#475569' : chargeActive ? 'white' : '#94a3b8',
+                        color: !canEdit ? '#475569' : chargeActive ? 'white' : '#94a3b8',
                         border: chargeActive ? '1px solid #dc2626' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canHold ? 'not-allowed' : 'pointer',
-                        opacity: !canHold ? 0.5 : 1,
+                        cursor: !canEdit ? 'not-allowed' : 'pointer',
+                        opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
                       {chargeActive && chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : 'CHARGE (E)'}
                     </button>
-                    {/* R — UNLEASH */}
+                    {/* R — UNLEASH (one-way commit) */}
                     <button
-                      disabled={!canHold}
-                      title={canHold ? (unleashActive ? 'Unleashed — units chase nearest enemy (shortcut: R)' : 'Unleash: break formation, each unit hunts nearest enemy (shortcut: R)') : 'No active order'}
-                      onClick={() => { if (canHold) toggleMode('unleash'); }}
+                      disabled={!canEdit}
+                      title={
+                        committed ? '🔒 Unleashed — locked. Retreat to redeploy'
+                        : canEdit ? (unleashActive ? 'Unleashed — units chase nearest enemy (shortcut: R)' : 'Unleash: ONE-WAY commit — no more orders until retreat reaches deploy zone (shortcut: R)')
+                        : 'No active order'
+                      }
+                      onClick={() => { if (canEdit) toggleMode('unleash'); }}
                       style={{
                         ...btnBase,
                         background: unleashActive ? '#a855f7' : 'rgba(255,255,255,0.04)',
-                        color: !canHold ? '#475569' : unleashActive ? 'white' : '#94a3b8',
+                        color: !canEdit ? '#475569' : unleashActive ? 'white' : '#94a3b8',
                         border: unleashActive ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canHold ? 'not-allowed' : 'pointer',
-                        opacity: !canHold ? 0.5 : 1,
+                        cursor: !canEdit ? 'not-allowed' : 'pointer',
+                        opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      UNLEASH (R)
+                      {committed ? '🔒 UNLEASH' : 'UNLEASH (R)'}
                     </button>
                     {/* T — ASSIGN. Sits right of UNLEASH so the row reads Q W E R T,
                         matching the keyboard. Available regardless of order state. */}
@@ -2586,51 +2580,54 @@ export const GameCanvas: React.FC = () => {
                       ASSIGN (T)
                     </button>
                   </div>
-                  {/* Row 2 ──────── A  S  D  F  V ──────── */}
+                  {/* Row 2 ──────── A  S  D  F ──────── */}
                   <div style={{ ...rowStyle, paddingLeft: '54px' /* aligns under the QWER cluster, past the G label */ }}>
-                    {/* A — MIRROR heading. Button face shows the arrow we'd flip TO. */}
+                    {/* A — CYCLE heading within forward cone. Button face shows the next
+                        cone heading the cycle would advance to. */}
                     <button
-                      disabled={!canHold}
-                      title={canHold
-                        ? `Mirror march heading ${HEADING_ARROWS[order?.heading ?? 0]} → ${HEADING_ARROWS[(3 - (order?.heading ?? 0) + 6) % 6]} (shortcut: A)`
-                        : 'No active order'}
+                      disabled={!canEdit}
+                      title={
+                        committed ? '🔒 Group committed — retreat to redeploy'
+                        : canEdit ? `Cycle heading ${HEADING_ARROWS[order?.heading ?? 0]} → ${HEADING_ARROWS[cycleConeHeading(selectedTeam, order?.heading ?? 0)]} (shortcut: A)`
+                        : 'No active order'
+                      }
                       onClick={() => {
-                        if (!canHold) return;
+                        if (!canEdit) return;
                         const cur = groupOrdersRef.current.get(formationKey);
-                        if (cur?.attackTarget) issueOrder(selectedTeam, gid, { heading: (3 - cur.heading + 6) % 6 });
+                        if (cur?.attackTarget) issueOrder(selectedTeam, gid, { heading: cycleConeHeading(selectedTeam, cur.heading) });
                       }}
                       style={{
                         ...btnBase, fontSize: '12px',
                         background: 'rgba(255,255,255,0.04)',
-                        color: !canHold ? '#475569' : '#facc15',
+                        color: !canEdit ? '#475569' : '#facc15',
                         border: '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canHold ? 'not-allowed' : 'pointer',
-                        opacity: !canHold ? 0.5 : 1,
+                        cursor: !canEdit ? 'not-allowed' : 'pointer',
+                        opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      {HEADING_ARROWS[(3 - (order?.heading ?? 0) + 6) % 6]} (A)
+                      {HEADING_ARROWS[cycleConeHeading(selectedTeam, order?.heading ?? 0)]} (A)
                     </button>
-                    {/* S — DEFEND */}
+                    {/* S — IDLE: stand still, no defensive bonus accrual. Mutually
+                        exclusive with HOLD (toggleMode auto-replaces). */}
                     <button
-                      disabled={!canHold}
-                      title={canHold
-                        ? (defendActive
-                            ? `Defending ${order?.defendTerrain ?? 'terrain'}${order?.defendFrom ? ` from ${order.defendFrom}` : ''} — click to cancel (shortcut: S)`
-                            : defendInputActive
-                              ? 'Defend mode active: double-click a hex (omnidirectional) or drag terrain→threat. Click again to cancel. (shortcut: S)'
-                              : 'Defend: enter defend mode, then double-click a hex, or drag from your terrain to the threat terrain (shortcut: S)')
-                        : 'No active order'}
-                      onClick={() => { if (canHold) toggleDefend(); }}
+                      disabled={!canEdit}
+                      title={
+                        committed ? '🔒 Group committed — retreat to redeploy'
+                        : !canHold ? 'No active order'
+                        : idleActive ? 'Idle — standing by. Click to resume advance (shortcut: S)'
+                        : 'Idle: stand still, no movement, no defensive bonus (shortcut: S)'
+                      }
+                      onClick={() => { if (canEdit) toggleMode('idle'); }}
                       style={{
                         ...btnBase,
-                        background: defendShown ? '#16a34a' : 'rgba(255,255,255,0.04)',
-                        color: !canHold ? '#475569' : defendShown ? 'white' : '#94a3b8',
-                        border: defendShown ? '1px solid #16a34a' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canHold ? 'not-allowed' : 'pointer',
-                        opacity: !canHold ? 0.5 : 1,
+                        background: idleActive ? '#64748b' : 'rgba(255,255,255,0.04)',
+                        color: !canEdit ? '#475569' : idleActive ? 'white' : '#94a3b8',
+                        border: idleActive ? '1px solid #64748b' : '1px solid rgba(255,255,255,0.1)',
+                        cursor: !canEdit ? 'not-allowed' : 'pointer',
+                        opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      {defendInputActive && !defendActive ? 'DEF? (S)' : 'DEFEND (S)'}
+                      IDLE (S)
                     </button>
                     {/* D — Cycle formation */}
                     <button
@@ -2656,46 +2653,35 @@ export const GameCanvas: React.FC = () => {
                     >
                       {FORMATION_LABELS[formation]} (D)
                     </button>
-                    {/* F — RETREAT */}
-                    <button
-                      disabled={!canHold}
-                      title={canHold ? (retreatActive ? 'Retreat active — falling back (shortcut: F)' : 'Retreat: march backwards, disengage from combat (shortcut: F)') : 'No active order to retreat'}
-                      onClick={() => { if (canHold) toggleMode('retreat'); }}
-                      style={{
-                        ...btnBase,
-                        background: retreatActive ? '#3b82f6' : 'rgba(255,255,255,0.04)',
-                        color: !canHold ? '#475569' : retreatActive ? 'white' : '#94a3b8',
-                        border: retreatActive ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canHold ? 'not-allowed' : 'pointer',
-                        opacity: !canHold ? 0.5 : 1,
-                      }}
-                    >
-                      RETREAT (F)
-                    </button>
-                    {/* V — Cycle depth */}
-                    <button
-                      disabled={isBattleRunning}
-                      title={isBattleRunning ? 'Depth locked during battle' : `Depth: ${depth} (click to cycle, shortcut: V)`}
-                      onClick={() => {
-                        setGroupDepths(prev => {
-                          const next = new Map(prev);
-                          const cur = next.get(formationKey) ?? 1;
-                          const idx = DEPTH_CYCLE.indexOf(cur);
-                          next.set(formationKey, DEPTH_CYCLE[(idx + 1) % DEPTH_CYCLE.length]);
-                          return next;
-                        });
-                      }}
-                      style={{
-                        ...btnBase,
-                        background: isBattleRunning ? 'rgba(255,255,255,0.02)' : depthIsDefault ? 'rgba(255,255,255,0.04)' : 'rgba(148,163,184,0.18)',
-                        color: isBattleRunning ? '#475569' : depthIsDefault ? '#94a3b8' : '#e2e8f0',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        cursor: isBattleRunning ? 'not-allowed' : 'pointer',
-                        opacity: isBattleRunning ? 0.5 : 1,
-                      }}
-                    >
-                      D{depth} (V)
-                    </button>
+                    {/* F — RETREAT (one-way commit, like UNLEASH). Once engaged, the
+                        group is locked until the sim clears the order on deploy-zone
+                        arrival. Button stays enabled to ENTER retreat (overriding a
+                        prior unleash commit too); becomes disabled once already in retreat. */}
+                    {(() => {
+                      const retreatLocked = retreatActive && committed;
+                      const retreatGate = canHold && !retreatLocked;
+                      return (
+                        <button
+                          disabled={!retreatGate}
+                          title={
+                            !canHold ? 'No active order to retreat'
+                            : retreatLocked ? '🔒 Retreating — wait until group reaches its deploy zone'
+                            : 'Retreat: ONE-WAY commit — group falls back toward your deploy zone (shortcut: F)'
+                          }
+                          onClick={() => { if (retreatGate) toggleMode('retreat'); }}
+                          style={{
+                            ...btnBase,
+                            background: retreatActive ? '#3b82f6' : 'rgba(255,255,255,0.04)',
+                            color: !retreatGate ? '#475569' : retreatActive ? 'white' : '#94a3b8',
+                            border: retreatActive ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
+                            cursor: !retreatGate ? 'not-allowed' : 'pointer',
+                            opacity: !retreatGate ? 0.5 : 1,
+                          }}
+                        >
+                          {retreatLocked ? '🔒 RETREAT' : 'RETREAT (F)'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -2724,6 +2710,7 @@ export const GameCanvas: React.FC = () => {
             setGroupOrders(new Map());
             setGroupFormations(new Map());
             setGroupDepths(new Map());
+            setRosters(makeInitialRosters());
             setWinBanner(null);
             lastTickHadBothTeamsRef.current = false;
             tickCounterRef.current = 0;
@@ -2740,6 +2727,7 @@ export const GameCanvas: React.FC = () => {
           setGroupOrders(new Map());
           setGroupFormations(new Map());
           setGroupDepths(new Map());
+          setRosters(makeInitialRosters());
           setWinBanner(null);
           lastTickHadBothTeamsRef.current = false;
           tickCounterRef.current = 0;
