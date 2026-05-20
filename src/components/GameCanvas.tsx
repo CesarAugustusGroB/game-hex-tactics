@@ -6,6 +6,7 @@ import { createNoise2D } from 'simplex-noise';
 import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeLineSlotAssignmentsByType, computeDefendFormation, CHARGE_DURATION_TICKS, MAX_HP_BY_TYPE } from '../battle/simulate';
 import type { Unit, GroupOrder, OrderMode, Team, GroupId, FormationType, MapApi, UnitType } from '../battle/simulate';
 import { TERRAIN_MODS, getTerrainMods } from '../battle/terrain';
+import { getAiController, type OrderChange } from '../battle/ai';
 
 const DRAG_THRESHOLD_PX = 24;
 
@@ -92,18 +93,33 @@ const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${group
 // Used in upcoming tasks; intentionally referenced.
 void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
 
-// --- Terrain detail sprites (grass tufts / flowers / rocks) ---
-// Cutout PNGs sit in public/details/{grass,flower,rock}/. Each category has 4 variants.
+// --- Terrain detail sprites (grass tufts / flowers / rocks / forest undergrowth) ---
+// Cutout PNGs sit in public/details/{grass,flower,rock,forest}/.
 // Old higher-volume catalogue lives in public/details/_archive for reference.
 const numKeys = (prefix: string, count: number) =>
   Array.from({ length: count }, (_, i) => `${prefix}_${String(i + 1).padStart(2, '0')}`);
 const GRASS_KEYS = numKeys('grass', 4);
 const FLOWER_KEYS = numKeys('flower', 4);
 const ROCK_KEYS = numKeys('rock', 4);
-const ALL_DETAIL_KEYS = [...GRASS_KEYS, ...FLOWER_KEYS, ...ROCK_KEYS];
+const TINY_PINE_CLUSTER_KEYS = numKeys('tiny_pine_cluster', 10);
+const LOW_SHRUB_CLUSTER_KEYS = numKeys('low_shrub_cluster', 10);
+const DARK_LEAF_PATCH_KEYS = numKeys('dark_leaf_patch', 10);
+const DARK_UNDERGROWTH_KEYS = numKeys('dark_undergrowth', 10);
+const MOSS_CLUMP_KEYS = numKeys('moss_clump', 10);
+const FALLEN_NEEDLES_KEYS = numKeys('fallen_needles', 10);
+const FOREST_DETAIL_KEYS = [
+  ...TINY_PINE_CLUSTER_KEYS,
+  ...LOW_SHRUB_CLUSTER_KEYS,
+  ...DARK_LEAF_PATCH_KEYS,
+  ...DARK_UNDERGROWTH_KEYS,
+  ...MOSS_CLUMP_KEYS,
+  ...FALLEN_NEEDLES_KEYS,
+];
+const ALL_DETAIL_KEYS = [...GRASS_KEYS, ...FLOWER_KEYS, ...ROCK_KEYS, ...FOREST_DETAIL_KEYS];
 const detailAssetPath = (key: string): string => {
   if (key.startsWith('grass_')) return `/details/grass/${key}.png`;
   if (key.startsWith('flower_')) return `/details/flower/${key}.png`;
+  if (FOREST_DETAIL_KEYS.includes(key)) return `/details/forest/${key}.png`;
   return `/details/rock/${key}.png`;
 };
 
@@ -134,8 +150,10 @@ interface TerrainDetailRules {
   landmark?: DetailLayerConfig;
   /** Per-sprite-category tint, looked up by sprite-key prefix. Alpha/scale belong to
    *  the layer; only tint varies by category to keep this table small. */
-  categoryStyle: Record<'grass' | 'flower' | 'rock', CategoryStyle>;
+  categoryStyle: Partial<Record<DetailCategory, CategoryStyle>>;
 }
+
+type DetailCategory = 'grass' | 'flower' | 'rock' | 'pine' | 'shrub' | 'leafPatch' | 'undergrowth' | 'moss' | 'needles';
 
 // Per-terrain scatter rules. New asset set (4 grass + 4 flower + 4 rock variants) used
 // at full opacity. Sizes deliberately tiny across all three layers — the user asked for
@@ -195,10 +213,43 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
       rock:   { tint: 0xFFFFFF },
     },
   },
+  FOREST: {
+    small: {
+      density: 0.16,
+      maxPerHex: 1,
+      scaleRange: [0.07, 0.16],
+      alphaRange: [0.40, 0.70],
+      sprites: [
+        ...TINY_PINE_CLUSTER_KEYS.map(k => ({ key: k, weight: 35 })),
+        ...LOW_SHRUB_CLUSTER_KEYS.map(k => ({ key: k, weight: 25 })),
+        ...DARK_LEAF_PATCH_KEYS.map(k => ({ key: k, weight: 12 })),
+        ...DARK_UNDERGROWTH_KEYS.map(k => ({ key: k, weight: 8 })),
+        ...MOSS_CLUMP_KEYS.map(k => ({ key: k, weight: 12 })),
+        ...FALLEN_NEEDLES_KEYS.map(k => ({ key: k, weight: 8 })),
+      ],
+    },
+    categoryStyle: {
+      pine:        { tint: 0xFFFFFF },
+      shrub:       { tint: 0xFFFFFF },
+      leafPatch:   { tint: 0xFFFFFF },
+      undergrowth: { tint: 0xFFFFFF },
+      moss:        { tint: 0xFFFFFF },
+      needles:     { tint: 0xFFFFFF },
+    },
+  },
 };
 
-const spriteCategory = (key: string): 'grass' | 'flower' | 'rock' =>
-  key.startsWith('flower_') ? 'flower' : key.startsWith('rock_') ? 'rock' : 'grass';
+const spriteCategory = (key: string): DetailCategory => {
+  if (key.startsWith('flower_')) return 'flower';
+  if (key.startsWith('rock_')) return 'rock';
+  if (key.startsWith('tiny_pine_cluster_')) return 'pine';
+  if (key.startsWith('low_shrub_cluster_')) return 'shrub';
+  if (key.startsWith('dark_leaf_patch_')) return 'leafPatch';
+  if (key.startsWith('dark_undergrowth_')) return 'undergrowth';
+  if (key.startsWith('moss_clump_')) return 'moss';
+  if (key.startsWith('fallen_needles_')) return 'needles';
+  return 'grass';
+};
 
 const pickWeighted = (pool: WeightedSprite[], rng: number): string => {
   let total = 0;
@@ -448,7 +499,7 @@ export const GameCanvas: React.FC = () => {
     const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
     const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
     const isTexturedBiome = (t: string): boolean =>
-      t === 'GRASSLAND' || t === 'FOREST' || t === 'HILL' || t === 'MOUNTAIN' || t === 'SNOW';
+      t === 'RIVER' || t === 'GRASSLAND' || t === 'FOREST' || t === 'HILL' || t === 'MOUNTAIN' || t === 'SNOW';
     // Shorter terrain first so taller hexes draw on top of their shorter neighbours.
     const renderOrder = [...gridData].sort((a, b) => {
       const ha = TERRAINS[a.type]?.height ?? 0;
@@ -490,14 +541,11 @@ export const GameCanvas: React.FC = () => {
         if (h > seH) drawSide(1, 0, 0.55);
         if (h > swH) drawSide(2, 3, 0.55);
       };
-      const riverTex = riverTextureRef.current;
       const sandTex = sandTextureRef.current;
       const seaTex = seaTextureRef.current;
       const deepSeaTex = deepSeaTextureRef.current;
       let fillStyle: { texture?: PIXI.Texture; matrix?: PIXI.Matrix; color: number };
-      if (item.type === 'RIVER' && riverTex) {
-        fillStyle = { texture: riverTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
-      } else if (item.type === 'SAND' && sandTex) {
+      if (item.type === 'SAND' && sandTex) {
         fillStyle = { texture: sandTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
       } else if (item.type === 'SEA' && seaTex) {
         fillStyle = { texture: seaTex, matrix: terrainUvMatrix, color: 0x506070 };
@@ -510,7 +558,7 @@ export const GameCanvas: React.FC = () => {
       for (let i = 0; i < 6; i++) { topPoints.push(top[i].x, top[i].y); }
       tGfx.poly(topPoints).fill(fillStyle);
       // Walls in tGfx only for non-textured biomes. Textured biomes (GRASSLAND, FOREST,
-      // HILL, MOUNTAIN, SNOW) instead paint their cliff faces as part of the overlay mask
+      // RIVER, HILL, MOUNTAIN, SNOW) instead paint their cliff faces as part of the overlay mask
       // below, so the cliff continues the biome texture instead of showing a dark shade.
       if (!isTexturedBiome(item.type)) drawWalls();
     });
@@ -539,6 +587,7 @@ export const GameCanvas: React.FC = () => {
     // Array order = z-order. Sorted by ascending TERRAINS height so taller biomes paint
     // over shorter ones at the shared edges.
     const globalUvOverlays: OverlayLayer[] = [
+      { type: 'RIVER', texture: riverTextureRef.current, tint: 0xFFFFFF, tilePx: 120 },
       { type: 'GRASSLAND', texture: grassTextureRef.current, tint: 0xFFFFFF, tilePx: 200 },
       {
         type: 'GRASSLAND',
@@ -583,7 +632,7 @@ export const GameCanvas: React.FC = () => {
         texture: forestMacroVariationTextureRef.current,
         tint: 0xFFFFFF,
         tilePx: 300,
-        alpha: 0.50,
+        alpha: 0.20,
         blendMode: 'overlay',
       },
       {
@@ -801,11 +850,16 @@ export const GameCanvas: React.FC = () => {
           const alpha = alphaLo + seededRandom(hexSeed + i * 60 + 7) * (alphaHi - alphaLo);
 
           const category = spriteCategory(spriteKey);
-          const tint = rules.categoryStyle[category].tint;
-          const isRock = category === 'rock';
+          const tint = rules.categoryStyle[category]?.tint ?? 0xFFFFFF;
+          const isFreelyRotatable =
+            category === 'rock' ||
+            category === 'leafPatch' ||
+            category === 'undergrowth' ||
+            category === 'moss' ||
+            category === 'needles';
           const rotRng = seededRandom(hexSeed + i * 50 + 6);
           // Plants and flowers only get a small tilt — full rotation flips them upside-down.
-          const rotation = isRock ? rotRng * Math.PI * 2 : (rotRng - 0.5) * (Math.PI / 6);
+          const rotation = isFreelyRotatable ? rotRng * Math.PI * 2 : (rotRng - 0.5) * (Math.PI / 6);
 
           const sprite = new PIXI.Sprite(tex);
           sprite.anchor.set(0.5, 0.85);
@@ -1086,6 +1140,42 @@ export const GameCanvas: React.FC = () => {
       c.addChild(ring);
     });
   }, [armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam]);
+
+  // Order mutation helpers declared up here (before the mount useEffect / interval useEffect
+  // that capture them) so the closures inside those long-lived handlers can resolve the
+  // identifiers in source order without lint complaints. `groupOrdersRef` is hoisted here for
+  // the same reason; its mirror useEffect stays with the other ref mirrors below.
+  const groupOrdersRef = useRef<GroupOrders>(new Map());
+
+  // Single-entry order mutation. Both the UI handlers and the AI controllers go through
+  // here. Mutates `groupOrdersRef.current` synchronously AND calls `setGroupOrders`, so
+  // - back-to-back calls in the same handler each see the prior call's write,
+  // - the very next `simulateTick` in the tick loop sees AI-issued orders (no 1-tick
+  //   delay waiting for React to flush),
+  // - React still gets a new Map reference and re-renders the HUD as before.
+  // When the order doesn't exist yet, a default skeleton is created — `change` only
+  // needs to specify the fields it cares about.
+  const issueOrder = useCallback((team: Team, groupId: GroupId, change: OrderChange) => {
+    const key = groupOrderKey(team, groupId);
+    const next = new Map(groupOrdersRef.current);
+    const existing = next.get(key);
+    next.set(key, {
+      team, groupId, attackTarget: null, heading: 0,
+      ...existing,
+      ...change,
+    });
+    groupOrdersRef.current = next;
+    setGroupOrders(next);
+  }, []);
+
+  const clearOrder = useCallback((team: Team, groupId: GroupId) => {
+    const key = groupOrderKey(team, groupId);
+    if (!groupOrdersRef.current.has(key)) return;
+    const next = new Map(groupOrdersRef.current);
+    next.delete(key);
+    groupOrdersRef.current = next;
+    setGroupOrders(next);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -1496,7 +1586,6 @@ export const GameCanvas: React.FC = () => {
       const commitDefend = (homeHex: Hex, fromHex: Hex | null) => {
         const team = selectedTeamRef.current;
         const groupId = selectedGroupRef.current;
-        const key = groupOrderKey(team, groupId);
         const grid = gridDataRef.current;
         const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
         const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
@@ -1538,21 +1627,16 @@ export const GameCanvas: React.FC = () => {
           ? Object.fromEntries(formation.assignment)
           : undefined;
 
-        setGroupOrders(prev => {
-          const cur = prev.get(key);
-          if (!cur?.attackTarget) return prev;
-          const next = new Map(prev);
-          next.set(key, {
-            ...cur,
-            mode: 'defendHeight',
-            defendTerrain,
-            defendFrom,
-            defendAnchor: homeHex,
-            defendAssignments,
-            chargeTicksRemaining: undefined,
-            chargeDamagedIds: undefined,
-          });
-          return next;
+        const cur = groupOrdersRef.current.get(groupOrderKey(team, groupId));
+        if (!cur?.attackTarget) return;
+        issueOrder(team, groupId, {
+          mode: 'defendHeight',
+          defendTerrain,
+          defendFrom,
+          defendAnchor: homeHex,
+          defendAssignments,
+          chargeTicksRemaining: undefined,
+          chargeDamagedIds: undefined,
         });
       };
 
@@ -1696,13 +1780,7 @@ export const GameCanvas: React.FC = () => {
               updated.set(HexUtils.key(strategic), arr);
               return updated;
             });
-            setGroupOrders(prev => {
-              const next = new Map(prev);
-              next.set(groupOrderKey(drag.team, drag.groupId), {
-                team: drag.team, groupId: drag.groupId, attackTarget: drag.targetHex, heading,
-              });
-              return next;
-            });
+            issueOrder(drag.team, drag.groupId, { attackTarget: drag.targetHex, heading });
           }
           setInputMode(null);
           cancelOrderDrag();
@@ -1845,6 +1923,31 @@ export const GameCanvas: React.FC = () => {
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
       tickCounterRef.current += 1;
+      // AI phase. Each registered controller writes its team's orders via `issueOrder`,
+      // which mutates the orders ref synchronously — so the `simulateTick` call below
+      // reads the post-AI order map, no one-tick lag.
+      for (const team of (['red', 'blue'] as const)) {
+        const fn = getAiController(team);
+        if (!fn) continue;
+        const myUnits = units.filter(u => u.team === team);
+        const enemyUnits = units.filter(u => u.team !== team);
+        const myOrders = Array.from(groupOrdersRef.current.values()).filter(o => o.team === team);
+        try {
+          fn({
+            team,
+            tick: tickCounterRef.current,
+            myUnits,
+            enemyUnits,
+            myOrders,
+            allOrders: groupOrdersRef.current,
+            gridData: grid,
+            issueOrder: (gid, change) => issueOrder(team, gid, change),
+            clearOrder: (gid) => clearOrder(team, gid),
+          });
+        } catch (err) {
+          console.error(`[ai] controller for team ${team} threw:`, err);
+        }
+      }
       const result = simulateTick(units, groupOrdersRef.current, {
         damagePerTick: DAMAGE_PER_TICK,
         currentTick: tickCounterRef.current,
@@ -1917,7 +2020,7 @@ export const GameCanvas: React.FC = () => {
       if (result.orders !== groupOrdersRef.current) setGroupOrders(result.orders);
     }, TICK_MS);
     return () => window.clearInterval(id);
-  }, [isBattleRunning]);
+  }, [isBattleRunning, issueOrder, clearOrder]);
 
   // Mirror state into refs so the long-lived PIXI handlers (registered once at mount) read current values without re-registration.
   /* eslint-disable react-hooks/immutability */
@@ -1930,7 +2033,8 @@ export const GameCanvas: React.FC = () => {
   const selectedTeamRef = useRef<Team>('red');
   const selectedGroupRef = useRef<GroupId>(1);
   const selectedUnitTypeRef = useRef<UnitType>('infantry');
-  const groupOrdersRef = useRef<GroupOrders>(new Map());
+  // groupOrdersRef is declared above (near the mount useEffect) so issueOrder/clearOrder
+  // can be defined before the long-lived handlers that capture them.
   const groupFormationsRef = useRef<GroupFormations>(new Map());
   const groupDepthsRef = useRef<GroupDepths>(new Map());
   const armiesRef = useRef<Armies>(new Map());
@@ -1971,25 +2075,17 @@ export const GameCanvas: React.FC = () => {
   const toggleMode = useCallback((mode: Exclude<OrderMode, 'march' | 'defendHeight'>) => {
     const gid = selectedGroupRef.current;
     const team = selectedTeamRef.current;
-    const key = groupOrderKey(team, gid);
-
-    setGroupOrders(prev => {
-      const cur = prev.get(key);
-      if (!cur?.attackTarget) return prev;
-      const isActive = (cur.mode ?? 'march') === mode;
-      const nextOrder: GroupOrder = isActive
-        ? { ...cur, mode: 'march', chargeTicksRemaining: undefined, chargeDamagedIds: undefined }
-        : {
-            ...cur,
-            mode,
-            chargeTicksRemaining: mode === 'charge' ? CHARGE_DURATION_TICKS : undefined,
-            chargeDamagedIds: undefined,
-          };
-      const next = new Map(prev);
-      next.set(key, nextOrder);
-      return next;
-    });
-  }, []);
+    const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
+    if (!cur?.attackTarget) return;
+    const isActive = (cur.mode ?? 'march') === mode;
+    issueOrder(team, gid, isActive
+      ? { mode: 'march', chargeTicksRemaining: undefined, chargeDamagedIds: undefined }
+      : {
+          mode,
+          chargeTicksRemaining: mode === 'charge' ? CHARGE_DURATION_TICKS : undefined,
+          chargeDamagedIds: undefined,
+        });
+  }, [issueOrder]);
 
   // Three-state toggle for DEFEND:
   //   1. Order already in defendHeight → click cancels (revert to march, clear sticky fields).
@@ -2000,17 +2096,17 @@ export const GameCanvas: React.FC = () => {
   const toggleDefend = useCallback(() => {
     const gid = selectedGroupRef.current;
     const team = selectedTeamRef.current;
-    const key = groupOrderKey(team, gid);
-    const cur = groupOrdersRef.current.get(key);
+    const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
     const isDefending = (cur?.mode ?? 'march') === 'defendHeight';
 
     if (isDefending) {
-      setGroupOrders(prev => {
-        const c = prev.get(key);
-        if (!c?.attackTarget) return prev;
-        const next = new Map(prev);
-        next.set(key, { ...c, mode: 'march', defendTerrain: undefined, defendFrom: undefined, defendAnchor: undefined, defendAssignments: undefined });
-        return next;
+      if (!cur?.attackTarget) return;
+      issueOrder(team, gid, {
+        mode: 'march',
+        defendTerrain: undefined,
+        defendFrom: undefined,
+        defendAnchor: undefined,
+        defendAssignments: undefined,
       });
       return;
     }
@@ -2023,7 +2119,7 @@ export const GameCanvas: React.FC = () => {
     if (!cur?.attackTarget) return;
     setInputMode('defend');
     setIsScanning(false);
-  }, []);
+  }, [issueOrder]);
 
   // Order-related shortcuts for the currently selected group. Layout — top row:
   //   T Q W E R  →  Assign / Attack / Hold / Charge / Unleash
@@ -2053,26 +2149,16 @@ export const GameCanvas: React.FC = () => {
         setInputMode(prev => (prev === 'order' ? null : 'order'));
         setIsScanning(false);
       } else if (k === 'w') {
-        setGroupOrders(prev => {
-          const cur = prev.get(key);
-          if (!cur?.attackTarget) return prev;
-          const next = new Map(prev);
-          next.set(key, { ...cur, hold: !cur.hold });
-          return next;
-        });
+        const cur = groupOrdersRef.current.get(key);
+        if (cur?.attackTarget) issueOrder(team, gid, { hold: !cur.hold });
       } else if (k === 'e') {
         toggleMode('charge');
       } else if (k === 'r') {
         toggleMode('unleash');
       } else if (k === 'a') {
         // Mirror heading horizontally: NE↔NW, SE↔SW, N↔N, S↔S.
-        setGroupOrders(prev => {
-          const cur = prev.get(key);
-          if (!cur?.attackTarget) return prev;
-          const next = new Map(prev);
-          next.set(key, { ...cur, heading: (3 - cur.heading + 6) % 6 });
-          return next;
-        });
+        const cur = groupOrdersRef.current.get(key);
+        if (cur?.attackTarget) issueOrder(team, gid, { heading: (3 - cur.heading + 6) % 6 });
       } else if (k === 's') {
         toggleDefend();
       } else if (k === 'd') {
@@ -2099,7 +2185,7 @@ export const GameCanvas: React.FC = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, toggleDefend]);
+  }, [viewMode, toggleMode, toggleDefend, issueOrder]);
 
   // Global shortcuts:
   //   SPACE         → start/pause battle (preventDefault to suppress page scroll)
@@ -2155,19 +2241,13 @@ export const GameCanvas: React.FC = () => {
           next.set(key, survivors);
           return next;
         });
-        setGroupOrders(prev => {
-          const k = groupOrderKey(team, gid);
-          if (!prev.has(k)) return prev;
-          const next = new Map(prev);
-          next.delete(k);
-          return next;
-        });
+        clearOrder(team, gid);
         return;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode]);
+  }, [viewMode, clearOrder]);
 
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
@@ -2440,12 +2520,8 @@ export const GameCanvas: React.FC = () => {
                       title={canHold ? (holdActive ? 'Hold active — block will not march (shortcut: W)' : 'Hold block in place (shortcut: W)') : 'No active order to hold'}
                       onClick={() => {
                         if (!canHold) return;
-                        setGroupOrders(prev => {
-                          const next = new Map(prev);
-                          const cur = next.get(formationKey);
-                          if (cur) next.set(formationKey, { ...cur, hold: !cur.hold });
-                          return next;
-                        });
+                        const cur = groupOrdersRef.current.get(formationKey);
+                        if (cur) issueOrder(selectedTeam, gid, { hold: !cur.hold });
                       }}
                       style={{
                         ...btnBase,
@@ -2520,13 +2596,8 @@ export const GameCanvas: React.FC = () => {
                         : 'No active order'}
                       onClick={() => {
                         if (!canHold) return;
-                        setGroupOrders(prev => {
-                          const cur = prev.get(formationKey);
-                          if (!cur?.attackTarget) return prev;
-                          const next = new Map(prev);
-                          next.set(formationKey, { ...cur, heading: (3 - cur.heading + 6) % 6 });
-                          return next;
-                        });
+                        const cur = groupOrdersRef.current.get(formationKey);
+                        if (cur?.attackTarget) issueOrder(selectedTeam, gid, { heading: (3 - cur.heading + 6) % 6 });
                       }}
                       style={{
                         ...btnBase, fontSize: '12px',
