@@ -186,6 +186,11 @@ export const SKIRMISHER_MISSILE_RANGE = 3;
 /** Damage of one javelin hit. Defender's `defenseMult` still applies (terrain cover
  *  works against missiles). One throw per skirmisher per tick, ONLY when not in melee. */
 export const SKIRMISHER_MISSILE_DAMAGE = 5;
+/** Hit-and-run trigger distance. In `unleash`, a skirmisher within this many hexes of
+ *  its closest enemy switches from "approach in cone" to "kite (any direction, max
+ *  distance)". At MISSILE_RANGE - 1 step beyond this, the skirmisher stands still and
+ *  the combat phase throws the javelin. */
+export const SKIRMISHER_KITE_THRESHOLD = 2;
 
 /** Resolve a fractional per-tick speed (e.g. 1.5) to integer hexes for THIS tick using a
  *  difference-of-floors. Guarantees the long-run average equals `speed` while staying
@@ -1109,9 +1114,42 @@ export const simulateTick = (
           // the cone won't reach them — by design, the player committed direction at
           // deploy time and can't take it back without retreating.
           const cone = forwardCone(u.team);
-          // Best neighbor minimizing distance to target.
           let bestNext: Hex | null = null;
           let bestNextD = bestD;
+
+          // Skirmisher hit-and-run: at missile range with no immediate threat, stand
+          // still and let the combat phase fire. Inside the kite threshold, scatter ANY
+          // direction (cone-exempt) to maximise distance to the closest enemy. Above
+          // missile range, fall through to the cone-bounded approach (same as infantry
+          // and cavalry).
+          const isSkirm = (u.unitType ?? 'infantry') === 'skirmisher';
+          if (isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
+            break; // stand still — combat phase throws the javelin.
+          }
+          if (isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
+            const prev = u.prevTacticalHex;
+            let bestRunD = bestD;
+            for (const dir of HexUtils.directions) {
+              const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+              if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+              if (occupancy.get(HexUtils.key(next))) continue;
+              if (prev && next.q === prev.q && next.r === prev.r) continue;
+              const d = HexUtils.distance(next, target.tacticalHex);
+              if (d <= bestRunD) continue;
+              bestNext = next;
+              bestRunD = d;
+            }
+            if (!bestNext) break; // surrounded — hold position, eat the melee.
+            occupancy.delete(HexUtils.key(u.tacticalHex));
+            u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
+            u.tacticalHex = bestNext;
+            u.state = 'moving';
+            applyEntryCooldown(u, bestNext, false);
+            occupancy.set(HexUtils.key(bestNext), u);
+            continue; // skip the rest of the sub-step (cone scan, commit)
+          }
+
+          // Approach (default): best neighbor minimizing distance to target, cone-bound.
           for (const idx of cone) {
             const dir = HexUtils.directions[idx];
             const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };

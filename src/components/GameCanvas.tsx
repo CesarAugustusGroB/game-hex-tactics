@@ -60,8 +60,21 @@ type GroupDepths = Map<string, number>;
 // and return-to-strategic.
 type Roster = Record<UnitType, number>;
 type Rosters = Map<Team, Roster>;
-const INITIAL_ROSTER: Roster = { infantry: 20, cavalry: 6, skirmisher: 4 };
+const INITIAL_ROSTER: Roster = { infantry: 50, cavalry: 50, skirmisher: 50 };
 const COHORT_SIZE = 4;
+
+// Capture-the-flag win condition. A team holds the central 7-hex flower (centre + 6
+// neighbours) UNCONTESTED to gain a tick of progress; contested or enemy-held ticks
+// decay -1 per tick; empty zone leaves both counters alone. Hits `CAPTURE_TICKS_TO_WIN`
+// → that team wins. Annihilation still applies as a fallback.
+const CAPTURE_TICKS_TO_WIN = 20;
+const CAPTURE_CENTER: Hex = { q: 0, r: 0 };
+const captureZoneKeys = (): Set<string> => {
+  const z = new Set<string>([HexUtils.key(CAPTURE_CENTER)]);
+  for (const n of HexUtils.getNeighbors(CAPTURE_CENTER)) z.add(HexUtils.key(n));
+  return z;
+};
+
 const makeInitialRosters = (): Rosters =>
   new Map<Team, Roster>([
     ['red', { ...INITIAL_ROSTER }],
@@ -137,6 +150,11 @@ const DARK_LEAF_PATCH_KEYS = numKeys('dark_leaf_patch', 10);
 const DARK_UNDERGROWTH_KEYS = numKeys('dark_undergrowth', 10);
 const MOSS_CLUMP_KEYS = numKeys('moss_clump', 10);
 const FALLEN_NEEDLES_KEYS = numKeys('fallen_needles', 10);
+const CYAN_RIPPLE_KEYS = numKeys('cyan_ripple', 10);
+const SHIMMER_GLINT_KEYS = numKeys('shimmer_glint', 10);
+const CURRENT_MARK_KEYS = numKeys('current_mark', 10);
+const FOAM_FLECK_KEYS = numKeys('foam_fleck', 10);
+const DEPTH_WISP_KEYS = numKeys('depth_wisp', 10);
 const FOREST_DETAIL_KEYS = [
   ...TINY_PINE_CLUSTER_KEYS,
   ...LOW_SHRUB_CLUSTER_KEYS,
@@ -145,11 +163,25 @@ const FOREST_DETAIL_KEYS = [
   ...MOSS_CLUMP_KEYS,
   ...FALLEN_NEEDLES_KEYS,
 ];
-const ALL_DETAIL_KEYS = [...GRASS_KEYS, ...FLOWER_KEYS, ...ROCK_KEYS, ...FOREST_DETAIL_KEYS];
+const RIVER_DETAIL_KEYS = [
+  ...CYAN_RIPPLE_KEYS,
+  ...SHIMMER_GLINT_KEYS,
+  ...CURRENT_MARK_KEYS,
+  ...FOAM_FLECK_KEYS,
+  ...DEPTH_WISP_KEYS,
+];
+const ALL_DETAIL_KEYS = [
+  ...GRASS_KEYS,
+  ...FLOWER_KEYS,
+  ...ROCK_KEYS,
+  ...FOREST_DETAIL_KEYS,
+  ...RIVER_DETAIL_KEYS,
+];
 const detailAssetPath = (key: string): string => {
   if (key.startsWith('grass_')) return `/details/grass/${key}.png`;
   if (key.startsWith('flower_')) return `/details/flower/${key}.png`;
   if (FOREST_DETAIL_KEYS.includes(key)) return `/details/forest/${key}.png`;
+  if (RIVER_DETAIL_KEYS.includes(key)) return `/details/river/${key}.png`;
   return `/details/rock/${key}.png`;
 };
 
@@ -166,6 +198,8 @@ interface DetailLayerConfig {
   alphaRange: [number, number];
   /** Pool the per-hex sprite is drawn from, by weight (higher = more likely). */
   sprites: WeightedSprite[];
+  /** Draw at hex center instead of sampling a small random offset. */
+  centered?: boolean;
 }
 
 interface CategoryStyle {
@@ -183,7 +217,10 @@ interface TerrainDetailRules {
   categoryStyle: Partial<Record<DetailCategory, CategoryStyle>>;
 }
 
-type DetailCategory = 'grass' | 'flower' | 'rock' | 'pine' | 'shrub' | 'leafPatch' | 'undergrowth' | 'moss' | 'needles';
+type DetailCategory =
+  | 'grass' | 'flower' | 'rock'
+  | 'pine' | 'shrub' | 'leafPatch' | 'undergrowth' | 'moss' | 'needles'
+  | 'ripple' | 'shimmer' | 'current' | 'foam' | 'depthWisp';
 
 // Per-terrain scatter rules. New asset set (4 grass + 4 flower + 4 rock variants) used
 // at full opacity. Sizes deliberately tiny across all three layers — the user asked for
@@ -274,6 +311,28 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
       needles:     { tint: 0xFFFFFF },
     },
   },
+  RIVER: {
+    small: {
+      density: 0.12,
+      maxPerHex: 1,
+      scaleRange: [0.06, 0.14],
+      alphaRange: [0.45, 0.85],
+      sprites: [
+        ...CYAN_RIPPLE_KEYS.map(k => ({ key: k, weight: 34 })),
+        ...CURRENT_MARK_KEYS.map(k => ({ key: k, weight: 26 })),
+        ...SHIMMER_GLINT_KEYS.map(k => ({ key: k, weight: 18 })),
+        ...DEPTH_WISP_KEYS.map(k => ({ key: k, weight: 14 })),
+        ...FOAM_FLECK_KEYS.map(k => ({ key: k, weight: 8 })),
+      ],
+    },
+    categoryStyle: {
+      ripple:    { tint: 0xFFFFFF },
+      shimmer:   { tint: 0xFFFFFF },
+      current:   { tint: 0xFFFFFF },
+      foam:      { tint: 0xFFFFFF },
+      depthWisp: { tint: 0xFFFFFF },
+    },
+  },
 };
 
 const spriteCategory = (key: string): DetailCategory => {
@@ -285,6 +344,11 @@ const spriteCategory = (key: string): DetailCategory => {
   if (key.startsWith('dark_undergrowth_')) return 'undergrowth';
   if (key.startsWith('moss_clump_')) return 'moss';
   if (key.startsWith('fallen_needles_')) return 'needles';
+  if (key.startsWith('cyan_ripple_')) return 'ripple';
+  if (key.startsWith('shimmer_glint_')) return 'shimmer';
+  if (key.startsWith('current_mark_')) return 'current';
+  if (key.startsWith('foam_fleck_')) return 'foam';
+  if (key.startsWith('depth_wisp_')) return 'depthWisp';
   return 'grass';
 };
 
@@ -330,7 +394,7 @@ const TERRAINS: Record<string, TerrainDef> = {
   HILL: { color: 0x6b5d44, label: 'Ridgeline', height: 35, walkable: true, ...TERRAIN_MODS.HILL },
   ROCKY: { color: 0x4a4a4a, label: 'Plateau', height: 55, walkable: true, ...TERRAIN_MODS.ROCKY },
   MOUNTAIN: { color: 0x6a6a72, label: 'Summit', height: 85, walkable: true, ...TERRAIN_MODS.MOUNTAIN },
-  SNOW: { color: 0xf0f0f0, label: 'Glacier', height: 110, walkable: false },
+  SNOW: { color: 0xf0f0f0, label: 'Glacier', height: 110, walkable: true, ...TERRAIN_MODS.SNOW },
   RIVER: { color: 0x3a8fb7, label: 'Waterway', height: 10, walkable: true, ...TERRAIN_MODS.RIVER },
 };
 
@@ -346,6 +410,11 @@ export const GameCanvas: React.FC = () => {
   // Tinted deploy-zone strips. Repainted by `drawMap` alongside the grid; no separate
   // visibility toggle for now (always on in TACTICAL view).
   const deployZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
+  // Capture zone (central 7-hex flower) — gold outline + soft fill. Sprite for the flag
+  // sits inside the same container so it tweens with the world pan/zoom.
+  const captureZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
+  const captureFlagSpriteRef = useRef<PIXI.Sprite | null>(null);
+  const captureFlagTextureRef = useRef<PIXI.Texture | null>(null);
   const highlightGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const unitsGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Per-unit containers keyed by unit.id. Persist across drawUnits calls so we can
@@ -380,6 +449,7 @@ export const GameCanvas: React.FC = () => {
   const riverTextureRef = useRef<PIXI.Texture | null>(null);
   const riverFlowVariationTextureRef = useRef<PIXI.Texture | null>(null);
   const riverDepthPatchTextureRef = useRef<PIXI.Texture | null>(null);
+  const riverEdgeSoftnessTextureRef = useRef<PIXI.Texture | null>(null);
   const riverShimmerHighlightTextureRef = useRef<PIXI.Texture | null>(null);
   const hillTextureRef = useRef<PIXI.Texture | null>(null);
   const hillMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
@@ -542,6 +612,8 @@ export const GameCanvas: React.FC = () => {
     gGfx.clear();
     const dzGfx = deployZoneGfx.current;
     dzGfx.clear();
+    const czGfx = captureZoneGfx.current;
+    czGfx.clear();
     const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
     const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
     const isTexturedBiome = (t: string): boolean =>
@@ -653,6 +725,14 @@ export const GameCanvas: React.FC = () => {
       },
       {
         type: 'RIVER',
+        texture: riverEdgeSoftnessTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 168,
+        alpha: 0.16,
+        blendMode: 'soft-light',
+      },
+      {
+        type: 'RIVER',
         texture: riverShimmerHighlightTextureRef.current,
         tint: 0xFFFFFF,
         tilePx: 192,
@@ -728,7 +808,7 @@ export const GameCanvas: React.FC = () => {
         type: 'HILL',
         texture: hillTextureRef.current,
         tint: 0xE0E0E0,
-        tilePx: 360,
+        tilePx: 900,
         includeCliffs: false,
         paintCliffsBefore: 'HILL',
       },
@@ -763,10 +843,18 @@ export const GameCanvas: React.FC = () => {
         type: 'MOUNTAIN',
         texture: mountainTextureRef.current,
         tint: 0xC8C8C8,
+        tilePx: viewMode === 'TACTICAL' ? 2100 : 700,
         includeCliffs: false,
         paintCliffsBefore: 'MOUNTAIN',
       },
-      { type: 'SNOW', texture: snowTextureRef.current, tint: 0xFFFFFF },
+      {
+        type: 'SNOW',
+        texture: snowTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: viewMode === 'TACTICAL' ? 2100 : 700,
+        includeCliffs: false,
+        paintCliffsBefore: 'SNOW',
+      },
     ];
     // Cliff edges (taller hex → shorter neighbour). vertex pair + axial direction. Only
     // S / SE / SW — the other three would render inside the hex top in 2.5D.
@@ -814,12 +902,12 @@ export const GameCanvas: React.FC = () => {
       }
     };
     for (const layer of globalUvOverlays) {
-      if (!layer.texture) continue;
       if (layer.paintCliffsBefore) {
         const terrainCliffs = new PIXI.Graphics();
         drawTerrainCliffs(terrainCliffs, layer.paintCliffsBefore);
         overlay.addChild(terrainCliffs);
       }
+      if (!layer.texture) continue;
       const hexes = gridData.filter(d =>
         d.type === layer.type && (!layer.hexFilter || layer.hexFilter(d.hex)),
       );
@@ -894,8 +982,9 @@ export const GameCanvas: React.FC = () => {
     // Deploy zone frontier — for each zone hex, stroke only the edges that face a
     // non-zone neighbour (or the map edge). Produces one bold line along each side's
     // front, no fill clutter inside the zones. Vertex pair → axial dir mapping is the
-    // same as `gridEdges` below (flat-top, vertex i at angle 60°·i).
-    {
+    // same as `gridEdges` below (flat-top, vertex i at angle 60·i). TACTICAL-only —
+    // the strategic overview shows world terrain, not battle overlays.
+    if (viewMode === 'TACTICAL') {
       const redZone = deployZoneFor('red', gridData);
       const blueZone = deployZoneFor('blue', gridData);
       const sz = HexUtils.size;
@@ -923,6 +1012,54 @@ export const GameCanvas: React.FC = () => {
                .lineTo(topV[v2].x, topV[v2].y)
                .stroke({ width: 3, color, alpha: 0.9 });
         }
+      }
+    }
+
+    // Capture zone — the central 7-hex flower. Soft gold fill on each hex top + a bold
+    // gold frontier stroke on the outer edges. Also reposition the flag sprite atop the
+    // centre hex now that terrain height is known. TACTICAL-only — strategic overview
+    // hides the flag (it's a battle objective, not a world feature).
+    const flagSprite = captureFlagSpriteRef.current;
+    if (flagSprite) flagSprite.visible = viewMode === 'TACTICAL';
+    if (viewMode === 'TACTICAL') {
+      const zone = captureZoneKeys();
+      const sz = HexUtils.size;
+      const zoneEdges: [number, number, number][] = [
+        [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
+      ];
+      for (const item of gridData) {
+        const k = HexUtils.key(item.hex);
+        if (!zone.has(k)) continue;
+        const tDef = TERRAINS[item.type] || TERRAINS.SEA;
+        const hh = tDef.height;
+        const pos = HexUtils.hexToPixel(item.hex);
+        const pts: number[] = [];
+        const topV: { x: number; y: number }[] = [];
+        for (let i = 0; i < 6; i++) {
+          const r = Math.PI / 180 * (60 * i);
+          const vx = pos.x + sz * Math.cos(r);
+          const vy = pos.y + sz * Math.sin(r) - hh;
+          topV.push({ x: vx, y: vy });
+          pts.push(vx, vy);
+        }
+        czGfx.poly(pts).fill({ color: 0xfacc15, alpha: 0.10 });
+        for (const [v1, v2, dirIdx] of zoneEdges) {
+          const dir = HexUtils.directions[dirIdx];
+          const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
+          if (zone.has(nKey)) continue;
+          czGfx.moveTo(topV[v1].x, topV[v1].y)
+               .lineTo(topV[v2].x, topV[v2].y)
+               .stroke({ width: 3, color: 0xfacc15, alpha: 0.95 });
+        }
+      }
+      // Flag sprite sits on the centre hex top — y offset by that hex's terrain height.
+      const flag = captureFlagSpriteRef.current;
+      if (flag) {
+        const centerTile = gridData.find(d => d.hex.q === CAPTURE_CENTER.q && d.hex.r === CAPTURE_CENTER.r);
+        const hh = centerTile ? (TERRAINS[centerTile.type]?.height ?? 0) : 0;
+        const pos = HexUtils.hexToPixel(CAPTURE_CENTER);
+        flag.x = pos.x;
+        flag.y = pos.y - hh;
       }
     }
 
@@ -958,7 +1095,7 @@ export const GameCanvas: React.FC = () => {
         }
       }
     }
-  }, [gridData, showGrid, terrainTexturesLoaded]);
+  }, [gridData, showGrid, terrainTexturesLoaded, viewMode]);
 
   // Three-layer scatter (embedded / small / landmark), deterministic per hex via seeded
   // RNG, with density modulated by a 2D simplex noise.
@@ -1005,7 +1142,7 @@ export const GameCanvas: React.FC = () => {
           if (!tex) continue;
 
           const angle = seededRandom(hexSeed + i * 20 + 3) * Math.PI * 2;
-          const radius = seededRandom(hexSeed + i * 30 + 4) * hexR * 0.35;
+          const radius = layer.centered ? 0 : seededRandom(hexSeed + i * 30 + 4) * hexR * 0.35;
           const xOff = Math.cos(angle) * radius;
           const yOff = Math.sin(angle) * radius;
 
@@ -1016,10 +1153,11 @@ export const GameCanvas: React.FC = () => {
 
           const category = spriteCategory(spriteKey);
           const tint = rules.categoryStyle[category]?.tint ?? 0xFFFFFF;
+          const isWaterDetail = item.type === 'RIVER';
           const rotation = 0;
 
           const sprite = new PIXI.Sprite(tex);
-          sprite.anchor.set(0.5, 0.85);
+          sprite.anchor.set(0.5, isWaterDetail ? 0.5 : 0.85);
           sprite.x = pos.x + xOff;
           sprite.y = topY + yOff;
           sprite.scale.set(scale, scale);
@@ -1370,7 +1508,7 @@ export const GameCanvas: React.FC = () => {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
+      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/roman_soldier.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/hoplite.png'),
@@ -1392,6 +1530,7 @@ export const GameCanvas: React.FC = () => {
         PIXI.Assets.load<PIXI.Texture>('/terrain/river.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/river-flow-variation.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/river-depth-patch.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/river-edge-softness.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/river-shimmer-highlight.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/hill-macro-noise.png'),
@@ -1405,7 +1544,7 @@ export const GameCanvas: React.FC = () => {
       ]);
       if (!isMounted) return;
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
+      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -1424,6 +1563,7 @@ export const GameCanvas: React.FC = () => {
       riverTex.source.addressMode = 'repeat';
       riverFlowVariationTex.source.addressMode = 'repeat';
       riverDepthPatchTex.source.addressMode = 'repeat';
+      riverEdgeSoftnessTex.source.addressMode = 'repeat';
       riverShimmerHighlightTex.source.addressMode = 'repeat';
       hillTex.source.addressMode = 'repeat';
       hillMacroNoiseTex.source.addressMode = 'repeat';
@@ -1442,6 +1582,24 @@ export const GameCanvas: React.FC = () => {
       unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
       unitTextureBlueSkirmisherRef.current = skirmisherTex;
       javelinTextureRef.current = javelinTex;
+      // Capture-the-flag marker — loaded once at mount, positioned at hex (0,0).
+      const winFlagTex = await PIXI.Assets.load<PIXI.Texture>('/assets/win-flag.png');
+      if (!isMounted) return;
+      winFlagTex.source.scaleMode = 'linear';
+      winFlagTex.source.autoGenerateMipmaps = true;
+      winFlagTex.source.updateMipmaps();
+      captureFlagTextureRef.current = winFlagTex;
+      const flagSprite = new PIXI.Sprite(winFlagTex);
+      flagSprite.anchor.set(0.5, 1.0); // bottom-centre so the pole base sits on the hex top
+      const flagPos = HexUtils.hexToPixel(CAPTURE_CENTER);
+      const flagScale = (HexUtils.size * 1.4) / winFlagTex.width;
+      flagSprite.scale.set(flagScale);
+      flagSprite.x = flagPos.x;
+      flagSprite.y = flagPos.y - 8; // sit on the hex top (terrain height applied in drawMap, this is OK as a default)
+      captureFlagSpriteRef.current = flagSprite;
+      // Note: world tree is built below — flag is added to `world` there alongside its
+      // graphics layer so it ends up at a deterministic z-order (above the zone outline
+      // but below grid/units).
       const detailTexs = await Promise.all(
         ALL_DETAIL_KEYS.map(k => PIXI.Assets.load<PIXI.Texture>(detailAssetPath(k))),
       );
@@ -1466,6 +1624,7 @@ export const GameCanvas: React.FC = () => {
       riverTextureRef.current = riverTex;
       riverFlowVariationTextureRef.current = riverFlowVariationTex;
       riverDepthPatchTextureRef.current = riverDepthPatchTex;
+      riverEdgeSoftnessTextureRef.current = riverEdgeSoftnessTex;
       riverShimmerHighlightTextureRef.current = riverShimmerHighlightTex;
       hillTextureRef.current = hillTex;
       hillMacroNoiseTextureRef.current = hillMacroNoiseTex;
@@ -1489,6 +1648,8 @@ export const GameCanvas: React.FC = () => {
       world.addChild(terrainOverlayRef.current);
       world.addChild(detailsGfx.current);
       world.addChild(deployZoneGfx.current);
+      world.addChild(captureZoneGfx.current);
+      if (captureFlagSpriteRef.current) world.addChild(captureFlagSpriteRef.current);
       world.addChild(gridGfx.current);
       world.addChild(unitsGfx.current);
       world.addChild(projectilesGfx.current);
@@ -1903,6 +2064,9 @@ export const GameCanvas: React.FC = () => {
 
   const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
+  const [captureProgress, setCaptureProgress] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  const captureProgressRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  useEffect(() => { captureProgressRef.current = captureProgress; }, [captureProgress]);
   // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
@@ -2008,6 +2172,49 @@ export const GameCanvas: React.FC = () => {
       }
 
       const next = result.units;
+
+      // Capture-the-flag tick. Count living units per team in the central 7-hex flower;
+      // apply uncontested-progress / contested-decay; trigger win at threshold. Annihilation
+      // check below still applies as a fallback.
+      {
+        const zone = captureZoneKeys();
+        let redInZone = 0, blueInZone = 0;
+        for (const u of next) {
+          if (u.hp <= 0) continue;
+          if (!zone.has(HexUtils.key(u.tacticalHex))) continue;
+          if (u.team === 'red') redInZone++;
+          else blueInZone++;
+        }
+        const cur = captureProgressRef.current;
+        const redUncontested  = redInZone  > 0 && blueInZone === 0;
+        const blueUncontested = blueInZone > 0 && redInZone  === 0;
+        const contested = redInZone > 0 && blueInZone > 0;
+        let nextRed = cur.red, nextBlue = cur.blue;
+        if (redUncontested) {
+          nextRed  = Math.min(CAPTURE_TICKS_TO_WIN, cur.red + 1);
+          nextBlue = Math.max(0, cur.blue - 1);
+        } else if (blueUncontested) {
+          nextBlue = Math.min(CAPTURE_TICKS_TO_WIN, cur.blue + 1);
+          nextRed  = Math.max(0, cur.red - 1);
+        } else if (contested) {
+          nextRed  = Math.max(0, cur.red - 1);
+          nextBlue = Math.max(0, cur.blue - 1);
+        }
+        if (nextRed !== cur.red || nextBlue !== cur.blue) {
+          captureProgressRef.current = { red: nextRed, blue: nextBlue };
+          setCaptureProgress({ red: nextRed, blue: nextBlue });
+        }
+        if (nextRed >= CAPTURE_TICKS_TO_WIN) {
+          setWinBanner('red');
+          setIsBattleRunning(false);
+          window.setTimeout(() => setWinBanner(null), 3000);
+        } else if (nextBlue >= CAPTURE_TICKS_TO_WIN) {
+          setWinBanner('blue');
+          setIsBattleRunning(false);
+          window.setTimeout(() => setWinBanner(null), 3000);
+        }
+      }
+
       const teamsAfter = new Set(next.map(u => u.team));
       if (teamsAfter.size === 1 && lastTickHadBothTeamsRef.current) {
         const winner = next[0]?.team ?? null;
@@ -2279,6 +2486,53 @@ export const GameCanvas: React.FC = () => {
           pointerEvents: 'none',
         }}>
           {winBanner.toUpperCase()} VICTORY
+        </div>
+      )}
+
+      {/* Capture progress strip — top-centre. Two bars race to CAPTURE_TICKS_TO_WIN.
+          Only visible once a battle is in progress (currentStrategicHex is set). */}
+      {viewMode === 'TACTICAL' && currentStrategicHex && (
+        <div style={{
+          position: 'absolute',
+          top: '12px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          padding: '10px 18px',
+          background: 'rgba(0,0,0,0.55)',
+          border: '1px solid rgba(250,204,21,0.5)',
+          borderRadius: '12px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+          zIndex: 150,
+          minWidth: '280px',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            fontSize: '10px', color: '#facc15', fontWeight: 800, letterSpacing: '2px',
+            marginBottom: '8px', textAlign: 'center',
+          }}>
+            HOLD THE CENTRE — {CAPTURE_TICKS_TO_WIN} TICKS
+          </div>
+          {(['red', 'blue'] as const).map(team => {
+            const v = captureProgress[team];
+            const pct = (v / CAPTURE_TICKS_TO_WIN) * 100;
+            const color = team === 'red' ? '#ef4444' : '#3b82f6';
+            return (
+              <div key={team} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: team === 'red' ? '6px' : 0 }}>
+                <span style={{ fontSize: '10px', color, fontWeight: 800, width: '38px', letterSpacing: '1px' }}>
+                  {team.toUpperCase()}
+                </span>
+                <div style={{
+                  flex: 1, height: '8px', background: 'rgba(255,255,255,0.08)',
+                  borderRadius: '4px', overflow: 'hidden',
+                }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 0.3s ease' }} />
+                </div>
+                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '34px', textAlign: 'right' }}>
+                  {v}/{CAPTURE_TICKS_TO_WIN}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -2700,6 +2954,29 @@ export const GameCanvas: React.FC = () => {
           </div>
         )}
 
+        {/* RESET BATTLE — wipe all units on the current tactical map, restore both
+            rosters, clear orders + capture progress + winBanner. Keeps the world and
+            view; for replaying the same map without regenerating terrain. */}
+        {viewMode === 'TACTICAL' && (
+          <button
+            onClick={() => {
+              setArmies(new Map());
+              setInputMode(null);
+              setIsBattleRunning(false);
+              setGroupOrders(new Map());
+              setGroupFormations(new Map());
+              setGroupDepths(new Map());
+              setRosters(makeInitialRosters());
+              setCaptureProgress({ red: 0, blue: 0 });
+              captureProgressRef.current = { red: 0, blue: 0 };
+              setWinBanner(null);
+              lastTickHadBothTeamsRef.current = false;
+              tickCounterRef.current = 0;
+            }}
+            style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px' }}
+          >RESET BATTLE</button>
+        )}
+
         <button
           onClick={() => {
             setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
@@ -2711,6 +2988,8 @@ export const GameCanvas: React.FC = () => {
             setGroupFormations(new Map());
             setGroupDepths(new Map());
             setRosters(makeInitialRosters());
+            setCaptureProgress({ red: 0, blue: 0 });
+            captureProgressRef.current = { red: 0, blue: 0 };
             setWinBanner(null);
             lastTickHadBothTeamsRef.current = false;
             tickCounterRef.current = 0;
@@ -2728,6 +3007,8 @@ export const GameCanvas: React.FC = () => {
           setGroupFormations(new Map());
           setGroupDepths(new Map());
           setRosters(makeInitialRosters());
+          setCaptureProgress({ red: 0, blue: 0 });
+          captureProgressRef.current = { red: 0, blue: 0 };
           setWinBanner(null);
           lastTickHadBothTeamsRef.current = false;
           tickCounterRef.current = 0;

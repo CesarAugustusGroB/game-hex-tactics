@@ -53,6 +53,7 @@ export const TERRAIN_MODS: Record<string, Partial<TerrainMods>> = {
   HILL:      { defenseMult: 1.25, moveCost: 1, attritionPerTick: 0.05, visionRadius: 6 },
   ROCKY:     { defenseMult: 1.40, moveCost: 2, attritionPerTick: 0.20, visionRadius: 5 },
   MOUNTAIN:  { defenseMult: 1.50, moveCost: 3, attritionPerTick: 0.30, visionRadius: 7 },
+  SNOW:      { defenseMult: 1.20, moveCost: 4, attritionPerTick: 0.60, visionRadius: 5 },
   RIVER:     { defenseMult: 0.80, moveCost: 2, attritionPerTick: 0.25, visionRadius: 3 },
 };
 
