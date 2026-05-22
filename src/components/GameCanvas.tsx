@@ -1042,14 +1042,17 @@ export const GameCanvas: React.FC = () => {
           topV.push({ x: vx, y: vy });
           pts.push(vx, vy);
         }
-        czGfx.poly(pts).fill({ color: 0xfacc15, alpha: 0.10 });
+        czGfx.poly(pts).fill({ color: 0xfacc15, alpha: 0.28 });
         for (const [v1, v2, dirIdx] of zoneEdges) {
           const dir = HexUtils.directions[dirIdx];
           const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
           if (zone.has(nKey)) continue;
           czGfx.moveTo(topV[v1].x, topV[v1].y)
                .lineTo(topV[v2].x, topV[v2].y)
-               .stroke({ width: 3, color: 0xfacc15, alpha: 0.95 });
+               .stroke({ width: 10, color: 0xfde047, alpha: 0.55 });
+          czGfx.moveTo(topV[v1].x, topV[v1].y)
+               .lineTo(topV[v2].x, topV[v2].y)
+               .stroke({ width: 5, color: 0xfacc15, alpha: 1.0 });
         }
       }
       // Flag sprite sits on the centre hex top — y offset by that hex's terrain height.
