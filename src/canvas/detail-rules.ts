@@ -61,7 +61,6 @@ export interface DetailLayerConfig {
   maxPerHex: number;
   /** Source-PNG scale range. The sprite's `scale.set` is sampled from this. */
   scaleRange: [number, number];
-  /** Sprite alpha range. */
   alphaRange: [number, number];
   /** Pool the per-hex sprite is drawn from, by weight (higher = more likely). */
   sprites: WeightedSprite[];

@@ -80,7 +80,7 @@ export const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:
 // measured from its edge inward. 0.22 ≈ "bottom 22% of the visible map is red's zone, top
 // 22% is blue's." Computed in pixel-y (not axial-r) so the strips read as HORIZONTAL — in
 // flat-top hexes the axial-r rows are slanted diagonally and look wrong as a zone marker.
-export const DEPLOY_ZONE_FRAC = 0.28;
+const DEPLOY_ZONE_FRAC = 0.28;
 
 /** Hex keys belonging to a team's deployment zone, derived from the screen-y extent of
  *  `gridData`. Red gets the bottom strip, blue the top. */
