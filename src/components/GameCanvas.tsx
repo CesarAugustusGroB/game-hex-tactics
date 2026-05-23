@@ -63,6 +63,11 @@ type Rosters = Map<Team, Roster>;
 const INITIAL_ROSTER: Roster = { infantry: 50, cavalry: 50, skirmisher: 50 };
 const COHORT_SIZE = 4;
 
+// RETREAT: pressing retreat on a disengaged group vanishes them from the field and
+// refunds this fraction of each unit type back to the team's roster. Engaged groups
+// (any unit with an enemy in an adjacent hex) get a no-op — they have to fight.
+const RETREAT_REFUND_FRAC = 0.80;
+
 // Capture-the-flag win condition. A team holds the central 7-hex flower (centre + 6
 // neighbours) UNCONTESTED to gain a tick of progress; contested or enemy-held ticks
 // decay -1 per tick; empty zone leaves both counters alone. Hits `CAPTURE_TICKS_TO_WIN`
@@ -74,6 +79,7 @@ const captureZoneKeys = (): Set<string> => {
   for (const n of HexUtils.getNeighbors(CAPTURE_CENTER)) z.add(HexUtils.key(n));
   return z;
 };
+const CAPTURE_ZONE_HEXES: ReadonlyArray<Hex> = [CAPTURE_CENTER, ...HexUtils.getNeighbors(CAPTURE_CENTER)];
 
 const makeInitialRosters = (): Rosters =>
   new Map<Team, Roster>([
@@ -114,7 +120,7 @@ void DAMAGE_PER_TICK; void TICK_MS; void groupOrderKey;
 // measured from its edge inward. 0.22 ≈ "bottom 22% of the visible map is red's zone, top
 // 22% is blue's." Computed in pixel-y (not axial-r) so the strips read as HORIZONTAL — in
 // flat-top hexes the axial-r rows are slanted diagonally and look wrong as a zone marker.
-const DEPLOY_ZONE_FRAC = 0.22;
+const DEPLOY_ZONE_FRAC = 0.28;
 
 /** Hex keys belonging to a team's deployment zone, derived from the screen-y extent of
  *  `gridData`. Red gets the bottom strip, blue the top. */
@@ -137,7 +143,7 @@ const deployZoneFor = (team: Team, gridData: { hex: Hex; type: string }[]): Set<
 };
 
 // --- Terrain detail sprites (grass tufts / flowers / rocks / forest undergrowth) ---
-// Cutout PNGs sit in public/details/{grass,flower,rock,forest}/.
+// Cutout PNGs sit in public/details/{grass,flower,rock,forest,river,sea}/.
 // Old higher-volume catalogue lives in public/details/_archive for reference.
 const numKeys = (prefix: string, count: number) =>
   Array.from({ length: count }, (_, i) => `${prefix}_${String(i + 1).padStart(2, '0')}`);
@@ -155,6 +161,7 @@ const SHIMMER_GLINT_KEYS = numKeys('shimmer_glint', 10);
 const CURRENT_MARK_KEYS = numKeys('current_mark', 10);
 const FOAM_FLECK_KEYS = numKeys('foam_fleck', 10);
 const DEPTH_WISP_KEYS = numKeys('depth_wisp', 10);
+const SEA_SHIMMER_KEYS = numKeys('sea_shimmer', 8);
 const FOREST_DETAIL_KEYS = [
   ...TINY_PINE_CLUSTER_KEYS,
   ...LOW_SHRUB_CLUSTER_KEYS,
@@ -170,18 +177,23 @@ const RIVER_DETAIL_KEYS = [
   ...FOAM_FLECK_KEYS,
   ...DEPTH_WISP_KEYS,
 ];
+const SEA_DETAIL_KEYS = [
+  ...SEA_SHIMMER_KEYS,
+];
 const ALL_DETAIL_KEYS = [
   ...GRASS_KEYS,
   ...FLOWER_KEYS,
   ...ROCK_KEYS,
   ...FOREST_DETAIL_KEYS,
   ...RIVER_DETAIL_KEYS,
+  ...SEA_DETAIL_KEYS,
 ];
 const detailAssetPath = (key: string): string => {
   if (key.startsWith('grass_')) return `/details/grass/${key}.png`;
   if (key.startsWith('flower_')) return `/details/flower/${key}.png`;
   if (FOREST_DETAIL_KEYS.includes(key)) return `/details/forest/${key}.png`;
   if (RIVER_DETAIL_KEYS.includes(key)) return `/details/river/${key}.png`;
+  if (SEA_DETAIL_KEYS.includes(key)) return `/details/sea/${key}.png`;
   return `/details/rock/${key}.png`;
 };
 
@@ -220,7 +232,7 @@ interface TerrainDetailRules {
 type DetailCategory =
   | 'grass' | 'flower' | 'rock'
   | 'pine' | 'shrub' | 'leafPatch' | 'undergrowth' | 'moss' | 'needles'
-  | 'ripple' | 'shimmer' | 'current' | 'foam' | 'depthWisp';
+  | 'ripple' | 'shimmer' | 'current' | 'foam' | 'depthWisp' | 'seaShimmer';
 
 // Per-terrain scatter rules. New asset set (4 grass + 4 flower + 4 rock variants) used
 // at full opacity. Sizes deliberately tiny across all three layers — the user asked for
@@ -264,22 +276,15 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
   },
   HILL: {
     small: {
-      density: 0.12,
+      density: 0.07,
       maxPerHex: 1,
-      scaleRange: [0.05, 0.16],
-      alphaRange: [0.30, 0.65],
+      scaleRange: [0.035, 0.075],
+      alphaRange: [0.22, 0.45],
       sprites: [
-        ...GRASS_KEYS.map(k => ({ key: k, weight: 35 })),
-        ...ROCK_KEYS.map(k => ({ key: k, weight: 60 })),
-        ...FLOWER_KEYS.map(k => ({ key: k, weight: 5 })),
+        ...GRASS_KEYS.map(k => ({ key: k, weight: 50 })),
+        ...ROCK_KEYS.map(k => ({ key: k, weight: 18 })),
+        ...FLOWER_KEYS.map(k => ({ key: k, weight: 2 })),
       ],
-    },
-    landmark: {
-      density: 0.025,
-      maxPerHex: 1,
-      scaleRange: [0.16, 0.24],
-      alphaRange: [0.45, 0.75],
-      sprites: ROCK_KEYS.map(k => ({ key: k, weight: 1 })),
     },
     categoryStyle: {
       grass:  { tint: 0xFFFFFF },
@@ -333,6 +338,18 @@ const DETAIL_RULES: Record<string, TerrainDetailRules> = {
       depthWisp: { tint: 0xFFFFFF },
     },
   },
+  SEA: {
+    small: {
+      density: 0.025,
+      maxPerHex: 1,
+      scaleRange: [0.07, 0.12],
+      alphaRange: [0.18, 0.36],
+      sprites: SEA_SHIMMER_KEYS.map(k => ({ key: k, weight: 1 })),
+    },
+    categoryStyle: {
+      seaShimmer: { tint: 0xFFFFFF },
+    },
+  },
 };
 
 const spriteCategory = (key: string): DetailCategory => {
@@ -349,6 +366,7 @@ const spriteCategory = (key: string): DetailCategory => {
   if (key.startsWith('current_mark_')) return 'current';
   if (key.startsWith('foam_fleck_')) return 'foam';
   if (key.startsWith('depth_wisp_')) return 'depthWisp';
+  if (key.startsWith('sea_shimmer_')) return 'seaShimmer';
   return 'grass';
 };
 
@@ -369,6 +387,85 @@ const seededRandom = (seed: number): number => {
 };
 const getHexSeed = (q: number, r: number, worldSeed: number): number =>
   (q * 73856093) ^ (r * 19349663) ^ worldSeed;
+
+interface WaterFilterConfig {
+  strength: number;
+  speed: number;
+  frequency: number;
+  drift: number;
+}
+
+interface WaterFilterHandle {
+  filter: PIXI.Filter;
+  uniforms: { uTime: number };
+}
+
+const WATER_FILTER_CONFIGS: Record<'deepSea' | 'coastal', WaterFilterConfig> = {
+  deepSea: {
+    strength: 0.0025,
+    speed: 0.18,
+    frequency: 7.0,
+    drift: 0.35,
+  },
+  coastal: {
+    strength: 0.004,
+    speed: 0.32,
+    frequency: 10.0,
+    drift: 0.55,
+  },
+};
+
+const WATER_FILTER_VERTEX = `
+  in vec2 aPosition;
+  out vec2 vTextureCoord;
+
+  void main(void) {
+    gl_Position = vec4(aPosition * 2.0 - 1.0, 0.0, 1.0);
+    vTextureCoord = aPosition;
+  }
+`;
+
+const WATER_FILTER_FRAGMENT = `
+  in vec2 vTextureCoord;
+
+  uniform sampler2D uTexture;
+  uniform float uTime;
+  uniform float uStrength;
+  uniform float uSpeed;
+  uniform float uFrequency;
+  uniform float uDrift;
+
+  void main(void) {
+    vec2 coord = vTextureCoord;
+    float t = uTime * uSpeed;
+    float waveA = sin((coord.y + t * uDrift) * uFrequency + t);
+    float waveB = sin((coord.x - t * 0.37) * (uFrequency * 0.73) - t * 0.8);
+    coord.x += waveA * uStrength;
+    coord.y += waveB * uStrength * 0.6;
+    gl_FragColor = texture(uTexture, coord);
+  }
+`;
+
+const createWaterFilter = (config: WaterFilterConfig): WaterFilterHandle => {
+  const filter = new PIXI.Filter({
+    glProgram: new PIXI.GlProgram({
+      vertex: WATER_FILTER_VERTEX,
+      fragment: WATER_FILTER_FRAGMENT,
+    }),
+    resources: {
+      waterUniforms: {
+        uTime: { value: 0, type: 'f32' },
+        uStrength: { value: config.strength, type: 'f32' },
+        uSpeed: { value: config.speed, type: 'f32' },
+        uFrequency: { value: config.frequency, type: 'f32' },
+        uDrift: { value: config.drift, type: 'f32' },
+      },
+    },
+    padding: 2,
+  });
+  const uniforms = (filter.resources.waterUniforms as { uniforms: { uTime: number } }).uniforms;
+  return { filter, uniforms };
+};
 
 const GRASS_CHUNK_SIZE = 6;
 type GrassPatch = 'NONE' | 'DRY' | 'DENSE' | 'FLOWERY';
@@ -459,6 +556,10 @@ export const GameCanvas: React.FC = () => {
   const snowTextureRef = useRef<PIXI.Texture | null>(null);
   const sandTextureRef = useRef<PIXI.Texture | null>(null);
   const seaTextureRef = useRef<PIXI.Texture | null>(null);
+  const seaMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
+  const seaShallowPatchTextureRef = useRef<PIXI.Texture | null>(null);
+  const seaDepthPatchTextureRef = useRef<PIXI.Texture | null>(null);
+  const seaMicroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const deepSeaTextureRef = useRef<PIXI.Texture | null>(null);
   const projectilesGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Tiled-texture overlay container. Uses world-space UV tiling (TilingSprite + hex mask)
@@ -467,6 +568,7 @@ export const GameCanvas: React.FC = () => {
   const terrainOverlayRef = useRef<PIXI.Container>(new PIXI.Container());
   const detailsGfx = useRef<PIXI.Container>(new PIXI.Container());
   const detailTexturesRef = useRef<Map<string, PIXI.Texture>>(new Map());
+  const waterFilterHandlesRef = useRef<WaterFilterHandle[]>([]);
 
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
@@ -504,6 +606,16 @@ export const GameCanvas: React.FC = () => {
 
   const gridRadius = 35;
 
+  // Tactical battlefield is a wide rectangle (N-S battle axis preserved).
+  // Pixel half-extents centred at (0,0); iteration filters by HexUtils.hexToPixel
+  // because a pure axial-rectangle is sheared into a parallelogram by the flat-top
+  // q→x,y skew. The axial bounding box is intentionally generous to cover the
+  // half-extents after the skew.
+  const TACTICAL_HALF_W = 2000;
+  const TACTICAL_HALF_H = 1000;
+  const TACTICAL_BBOX_Q = 50;
+  const TACTICAL_BBOX_R = 30;
+
   // --- Smooth Tactical Generator ---
   const generateWorldData = useCallback(() => {
     const newMap = new Map<string, string>();
@@ -512,44 +624,58 @@ export const GameCanvas: React.FC = () => {
     const noise = noiseRef.current;
     const elevationCache = new Map<string, number>();
 
+    const w = genSettings.waterLevel;
+    const m = genSettings.mountainLevel;
+    const bucket = (e: number): string => {
+      if (e < w * 0.7) return 'DEEP_SEA';
+      if (e < w) return 'SEA';
+      if (e < w + 0.03) return 'SAND';
+      if (e < m * 0.7) return 'GRASSLAND';
+      if (e < m * 0.9) return 'FOREST';
+      if (e < m) return 'HILL';
+      if (e < m + 0.1) return 'MOUNTAIN';
+      return 'SNOW';
+    };
+    const sampleElevation = (q: number, r: number): number => {
+      const nx = (q + genSettings.noiseOffset.q) / genSettings.resolution;
+      const ny = (r + genSettings.noiseOffset.r) / genSettings.resolution;
+      let e = (noise(nx, ny) + 0.4 * noise(nx * 2.2, ny * 2.2)) / 1.4;
+      e = (e + 1) / 2;
+      if (viewMode === 'STRATEGIC') {
+        const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
+        e *= Math.max(0, 1.1 - Math.pow(d, 2.5));
+      } else {
+        // Anchor tactical elevation to the strategic-island position the dive came
+        // from, so mountain stays mountain-ish at the centre.
+        const scaleBack = STRATEGIC_RESOLUTION / genSettings.resolution;
+        const qe = (q + genSettings.noiseOffset.q) * scaleBack;
+        const re = (r + genSettings.noiseOffset.r) * scaleBack;
+        const d = Math.sqrt(qe*qe + re*re + qe*re) / gridRadius;
+        e *= Math.max(0, 1.1 - Math.pow(d, 4));
+      }
+      return e;
+    };
+
     // 1. Smooth Elevation Sampling
-    for (let q = -gridRadius; q <= gridRadius; q++) {
-      for (let r = Math.max(-gridRadius, -q - gridRadius); r <= Math.min(gridRadius, -q + gridRadius); r++) {
-        const nx = (q + genSettings.noiseOffset.q) / genSettings.resolution;
-        const ny = (r + genSettings.noiseOffset.r) / genSettings.resolution;
-        
-        let e = (noise(nx, ny) + 0.4 * noise(nx * 2.2, ny * 2.2)) / 1.4;
-        e = (e + 1) / 2;
-
-        // Strong island falloff in STRATEGIC; in TACTICAL the dive anchors to the
-        // strategic position so mountain stays mountain-ish at the centre.
-        if (viewMode === 'STRATEGIC') {
-          const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
-          e *= Math.max(0, 1.1 - Math.pow(d, 2.5));
-        } else {
-          const scaleBack = STRATEGIC_RESOLUTION / genSettings.resolution;
-          const qe = (q + genSettings.noiseOffset.q) * scaleBack;
-          const re = (r + genSettings.noiseOffset.r) * scaleBack;
-          const d = Math.sqrt(qe*qe + re*re + qe*re) / gridRadius;
-          e *= Math.max(0, 1.1 - Math.pow(d, 4));
+    if (viewMode === 'STRATEGIC') {
+      for (let q = -gridRadius; q <= gridRadius; q++) {
+        for (let r = Math.max(-gridRadius, -q - gridRadius); r <= Math.min(gridRadius, -q + gridRadius); r++) {
+          const e = sampleElevation(q, r);
+          const key = HexUtils.key({ q, r });
+          newMap.set(key, bucket(e));
+          elevationCache.set(key, e);
         }
-
-        let type = 'SEA';
-        const w = genSettings.waterLevel;
-        const m = genSettings.mountainLevel;
-
-        if (e < w * 0.7) type = 'DEEP_SEA';
-        else if (e < w) type = 'SEA';
-        else if (e < w + 0.03) type = 'SAND';
-        else if (e < m * 0.7) type = 'GRASSLAND';
-        else if (e < m * 0.9) type = 'FOREST';
-        else if (e < m) type = 'HILL';
-        else if (e < m + 0.1) type = 'MOUNTAIN';
-        else type = 'SNOW';
-
-        const key = HexUtils.key({ q, r });
-        newMap.set(key, type);
-        elevationCache.set(key, e);
+      }
+    } else {
+      for (let q = -TACTICAL_BBOX_Q; q <= TACTICAL_BBOX_Q; q++) {
+        for (let r = -TACTICAL_BBOX_R; r <= TACTICAL_BBOX_R; r++) {
+          const p = HexUtils.hexToPixel({ q, r });
+          if (Math.abs(p.x) > TACTICAL_HALF_W || Math.abs(p.y) > TACTICAL_HALF_H) continue;
+          const e = sampleElevation(q, r);
+          const key = HexUtils.key({ q, r });
+          newMap.set(key, bucket(e));
+          elevationCache.set(key, e);
+        }
       }
     }
 
@@ -617,7 +743,7 @@ export const GameCanvas: React.FC = () => {
     const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
     const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
     const isTexturedBiome = (t: string): boolean =>
-      t === 'RIVER' || t === 'GRASSLAND' || t === 'FOREST' || t === 'HILL' || t === 'MOUNTAIN' || t === 'SNOW';
+      t === 'DEEP_SEA' || t === 'SEA' || t === 'RIVER' || t === 'GRASSLAND' || t === 'FOREST' || t === 'HILL' || t === 'MOUNTAIN' || t === 'SNOW';
     // Shorter terrain first so taller hexes draw on top of their shorter neighbours.
     const renderOrder = [...gridData].sort((a, b) => {
       const ha = TERRAINS[a.type]?.height ?? 0;
@@ -639,12 +765,12 @@ export const GameCanvas: React.FC = () => {
       }
       // PIXI v8 gotcha: `Color.multiply(number)` treats the number as a hex int via
       // bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
-      const drawSide = (v1: number, v2: number, shade: number) => {
-        tGfx.beginFill(PIXI.Color.shared.setValue(tDef.color).multiply([shade, shade, shade, 1]).toNumber());
+      const drawSide = (v1: number, v2: number, shade: number, bottomH = 0, color = tDef.color) => {
+        tGfx.beginFill(PIXI.Color.shared.setValue(color).multiply([shade, shade, shade, 1]).toNumber());
         tGfx.moveTo(top[v1].x, top[v1].y)
             .lineTo(top[v2].x, top[v2].y)
-            .lineTo(base[v2].x, base[v2].y)
-            .lineTo(base[v1].x, base[v1].y)
+            .lineTo(base[v2].x, base[v2].y - bottomH)
+            .lineTo(base[v1].x, base[v1].y - bottomH)
             .closePath().endFill();
       };
       // S / SE / SW only — N / NE / NW are hidden inside the hex top from top-down view.
@@ -654,21 +780,24 @@ export const GameCanvas: React.FC = () => {
       const sH  = sType  ? (TERRAINS[sType]?.height  ?? 0) : 0;
       const seH = seType ? (TERRAINS[seType]?.height ?? 0) : 0;
       const swH = swType ? (TERRAINS[swType]?.height ?? 0) : 0;
+      const isCoastalWater = (type: string | undefined): boolean => type === 'SEA' || type === 'DEEP_SEA';
+      const drawWall = (v1: number, v2: number, shade: number, nType: string | undefined, nH: number) => {
+        if (h <= nH) return;
+        if (item.type === 'SAND' && isCoastalWater(nType)) {
+          drawSide(v1, v2, 1, nH, 0xc8b98f);
+          return;
+        }
+        drawSide(v1, v2, shade);
+      };
       const drawWalls = () => {
-        if (h > sH)  drawSide(2, 1, 0.7);
-        if (h > seH) drawSide(1, 0, 0.55);
-        if (h > swH) drawSide(2, 3, 0.55);
+        drawWall(2, 1, 0.7, sType, sH);
+        drawWall(1, 0, 0.55, seType, seH);
+        drawWall(2, 3, 0.55, swType, swH);
       };
       const sandTex = sandTextureRef.current;
-      const seaTex = seaTextureRef.current;
-      const deepSeaTex = deepSeaTextureRef.current;
       let fillStyle: { texture?: PIXI.Texture; matrix?: PIXI.Matrix; color: number };
       if (item.type === 'SAND' && sandTex) {
         fillStyle = { texture: sandTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
-      } else if (item.type === 'SEA' && seaTex) {
-        fillStyle = { texture: seaTex, matrix: terrainUvMatrix, color: 0x506070 };
-      } else if (item.type === 'DEEP_SEA' && deepSeaTex) {
-        fillStyle = { texture: deepSeaTex, matrix: terrainUvMatrix, color: 0xC8C8C8 };
       } else {
         fillStyle = { color: tDef.color };
       }
@@ -682,8 +811,9 @@ export const GameCanvas: React.FC = () => {
     // biome's hex tops. The sprite tiles in its own local space (not per-polygon bbox),
     // so neighbouring hexes see different continuous patches of the texture.
     const overlay = terrainOverlayRef.current;
+    waterFilterHandlesRef.current = [];
     for (const child of overlay.children.slice()) {
-      if ('mask' in child) (child as PIXI.Sprite).mask = null;
+      if ('mask' in child) (child as PIXI.Container).mask = null;
       overlay.removeChild(child);
       child.destroy({ children: true, texture: false });
     }
@@ -701,11 +831,76 @@ export const GameCanvas: React.FC = () => {
       paintCliffsBefore?: string;
       /** Splits hexes of the same `type` across multiple layers (e.g. chunked patches). */
       hexFilter?: (hex: Hex) => boolean;
+      /** Optional animated water filter for tiled water layers. */
+      waterFilter?: 'deepSea' | 'coastal';
     }
     const grassWorldSeed = 1;
+    const isSeaNextToSand = (hex: Hex): boolean =>
+      HexUtils.directions.some(dir =>
+        terrainAt.get(HexUtils.key({ q: hex.q + dir.q, r: hex.r + dir.r })) === 'SAND',
+      );
+    const isSeaNotNextToSand = (hex: Hex): boolean => !isSeaNextToSand(hex);
     // Array order = z-order. Sorted by ascending TERRAINS height so taller biomes paint
     // over shorter ones at the shared edges.
     const globalUvOverlays: OverlayLayer[] = [
+      {
+        type: 'DEEP_SEA',
+        texture: deepSeaTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 420,
+        includeCliffs: false,
+        waterFilter: 'deepSea',
+      },
+      {
+        type: 'SEA',
+        texture: seaTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 360,
+        includeCliffs: false,
+        waterFilter: 'coastal',
+      },
+      {
+        type: 'SEA',
+        texture: seaMacroNoiseTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 1800,
+        alpha: 0.18,
+        blendMode: 'soft-light',
+        includeCliffs: false,
+        waterFilter: 'coastal',
+      },
+      {
+        type: 'SEA',
+        texture: seaShallowPatchTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 900,
+        alpha: 0.18,
+        blendMode: 'soft-light',
+        includeCliffs: false,
+        hexFilter: isSeaNextToSand,
+        waterFilter: 'coastal',
+      },
+      {
+        type: 'SEA',
+        texture: seaDepthPatchTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 1300,
+        alpha: 0.16,
+        blendMode: 'multiply',
+        includeCliffs: false,
+        hexFilter: isSeaNotNextToSand,
+        waterFilter: 'coastal',
+      },
+      {
+        type: 'SEA',
+        texture: seaMicroNoiseTextureRef.current,
+        tint: 0xFFFFFF,
+        tilePx: 260,
+        alpha: 0.10,
+        blendMode: 'soft-light',
+        includeCliffs: false,
+        waterFilter: 'coastal',
+      },
       { type: 'RIVER', texture: riverTextureRef.current, tint: 0xFFFFFF, tilePx: 120 },
       {
         type: 'RIVER',
@@ -936,14 +1131,21 @@ export const GameCanvas: React.FC = () => {
       const w = maxX - minX;
       const h = maxY - minY;
       const tile = new PIXI.TilingSprite({ texture: layer.texture, width: w, height: h });
-      tile.x = minX;
-      tile.y = minY;
       const tilePx = layer.tilePx ?? 110;
       const tileScale = tilePx / layer.texture.width;
       tile.tileScale.set(tileScale, tileScale);
       tile.tint = layer.tint;
       if (layer.alpha !== undefined) tile.alpha = layer.alpha;
       if (layer.blendMode !== undefined) tile.blendMode = layer.blendMode;
+      const layerContainer = new PIXI.Container();
+      layerContainer.x = minX;
+      layerContainer.y = minY;
+      layerContainer.addChild(tile);
+      if (layer.waterFilter) {
+        const handle = createWaterFilter(WATER_FILTER_CONFIGS[layer.waterFilter]);
+        layerContainer.filters = [handle.filter];
+        waterFilterHandlesRef.current.push(handle);
+      }
       const mask = new PIXI.Graphics();
       for (const d of hexes) {
         const p = HexUtils.hexToPixel(d.hex);
@@ -974,10 +1176,93 @@ export const GameCanvas: React.FC = () => {
           ]).fill({ color: 0xffffff });
         }
       }
-      overlay.addChild(tile);
+      overlay.addChild(layerContainer);
       overlay.addChild(mask);
-      tile.mask = mask;
+      layerContainer.mask = mask;
     }
+    const riverSeaCliffs = new PIXI.Graphics();
+    for (const item of gridData) {
+      if (item.type !== 'RIVER') continue;
+      const riverH = TERRAINS.RIVER.height;
+      const pos = HexUtils.hexToPixel(item.hex);
+      const topV: { x: number; y: number }[] = [];
+      for (let i = 0; i < 6; i++) {
+        const r = Math.PI / 180 * (60 * i);
+        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - riverH });
+      }
+      for (const [v1, v2, dirIdx] of cliffEdges) {
+        const dir = HexUtils.directions[dirIdx];
+        const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
+        if (nType !== 'SEA' && nType !== 'DEEP_SEA') continue;
+        const nH = TERRAINS[nType]?.height ?? 0;
+        if (riverH <= nH) continue;
+        const dh = riverH - nH;
+        riverSeaCliffs
+          .poly([
+            topV[v1].x, topV[v1].y,
+            topV[v2].x, topV[v2].y,
+            topV[v2].x, topV[v2].y + dh,
+            topV[v1].x, topV[v1].y + dh,
+          ])
+          .fill({ color: 0xeafcff, alpha: 0.78 })
+          .stroke({ width: 1, color: 0xffffff, alpha: 0.85 });
+      }
+    }
+    overlay.addChild(riverSeaCliffs);
+    const grassEarthCliffs = new PIXI.Graphics();
+    for (const item of gridData) {
+      if (item.type !== 'GRASSLAND') continue;
+      const grassH = TERRAINS.GRASSLAND.height;
+      const pos = HexUtils.hexToPixel(item.hex);
+      const topV: { x: number; y: number }[] = [];
+      for (let i = 0; i < 6; i++) {
+        const r = Math.PI / 180 * (60 * i);
+        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - grassH });
+      }
+      for (const [v1, v2, dirIdx] of cliffEdges) {
+        const dir = HexUtils.directions[dirIdx];
+        const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
+        const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
+        if (grassH <= nH) continue;
+        const dh = grassH - nH;
+        grassEarthCliffs
+          .poly([
+            topV[v1].x, topV[v1].y,
+            topV[v2].x, topV[v2].y,
+            topV[v2].x, topV[v2].y + dh,
+            topV[v1].x, topV[v1].y + dh,
+          ])
+          .fill({ color: 0x8a6a3f, alpha: 0.82 });
+      }
+    }
+    overlay.addChild(grassEarthCliffs);
+    const forestEarthCliffs = new PIXI.Graphics();
+    for (const item of gridData) {
+      if (item.type !== 'FOREST') continue;
+      const forestH = TERRAINS.FOREST.height;
+      const pos = HexUtils.hexToPixel(item.hex);
+      const topV: { x: number; y: number }[] = [];
+      for (let i = 0; i < 6; i++) {
+        const r = Math.PI / 180 * (60 * i);
+        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - forestH });
+      }
+      for (const [v1, v2, dirIdx] of cliffEdges) {
+        const dir = HexUtils.directions[dirIdx];
+        const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
+        const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
+        if (forestH <= nH) continue;
+        const dh = forestH - nH;
+        forestEarthCliffs
+          .poly([
+            topV[v1].x, topV[v1].y,
+            topV[v2].x, topV[v2].y,
+            topV[v2].x, topV[v2].y + dh,
+            topV[v1].x, topV[v1].y + dh,
+          ])
+          .fill({ color: 0x4f3824, alpha: 0.86 });
+      }
+    }
+    overlay.addChild(forestEarthCliffs);
 
     // Deploy zone frontier — for each zone hex, stroke only the edges that face a
     // non-zone neighbour (or the map edge). Produces one bold line along each side's
@@ -1156,7 +1441,7 @@ export const GameCanvas: React.FC = () => {
 
           const category = spriteCategory(spriteKey);
           const tint = rules.categoryStyle[category]?.tint ?? 0xFFFFFF;
-          const isWaterDetail = item.type === 'RIVER';
+          const isWaterDetail = item.type === 'RIVER' || item.type === 'SEA';
           const rotation = 0;
 
           const sprite = new PIXI.Sprite(tex);
@@ -1511,7 +1796,7 @@ export const GameCanvas: React.FC = () => {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex] = await Promise.all([
+      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/roman_soldier.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/hoplite.png'),
@@ -1543,11 +1828,15 @@ export const GameCanvas: React.FC = () => {
         PIXI.Assets.load<PIXI.Texture>('/terrain/snow.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/sand.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/sea.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-macro-noise.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-shallow-patch.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-depth-patch.png'),
+        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-micro-noise.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/deep-sea.png'),
       ]);
       if (!isMounted) return;
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, deepSeaTex]) {
+      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -1576,6 +1865,10 @@ export const GameCanvas: React.FC = () => {
       snowTex.source.addressMode = 'repeat';
       sandTex.source.addressMode = 'repeat';
       seaTex.source.addressMode = 'repeat';
+      seaMacroNoiseTex.source.addressMode = 'repeat';
+      seaShallowPatchTex.source.addressMode = 'repeat';
+      seaDepthPatchTex.source.addressMode = 'repeat';
+      seaMicroNoiseTex.source.addressMode = 'repeat';
       deepSeaTex.source.addressMode = 'repeat';
       armyTextureRef.current = armyTex;
       unitTextureRef.current = romanSoldierTex;
@@ -1637,6 +1930,10 @@ export const GameCanvas: React.FC = () => {
       snowTextureRef.current = snowTex;
       sandTextureRef.current = sandTex;
       seaTextureRef.current = seaTex;
+      seaMacroNoiseTextureRef.current = seaMacroNoiseTex;
+      seaShallowPatchTextureRef.current = seaShallowPatchTex;
+      seaDepthPatchTextureRef.current = seaDepthPatchTex;
+      seaMicroNoiseTextureRef.current = seaMicroNoiseTex;
       deepSeaTextureRef.current = deepSeaTex;
       setTerrainTexturesLoaded(true);
       if (!containerRef.current) return;
@@ -1968,7 +2265,15 @@ export const GameCanvas: React.FC = () => {
               updated.set(HexUtils.key(strategic), arr);
               return updated;
             });
-            issueOrder(drag.team, drag.groupId, { attackTarget: drag.targetHex, heading: snapToForwardCone(drag.team, heading) });
+            // New orders default to 'idle' (units stand at the deploy with heading set but
+            // don't auto-march); re-drag while marching/holding/etc. preserves the mode so
+            // the player can redirect mid-flight. Press A to start (or cycle) the march.
+            {
+              const prior = groupOrdersRef.current.get(groupOrderKey(drag.team, drag.groupId));
+              const change: OrderChange = { attackTarget: drag.targetHex, heading: snapToForwardCone(drag.team, heading) };
+              if (!prior?.mode) change.mode = 'idle';
+              issueOrder(drag.team, drag.groupId, change);
+            }
           }
           setInputMode(null);
           cancelOrderDrag();
@@ -2016,9 +2321,14 @@ export const GameCanvas: React.FC = () => {
       // Read world.scale.x (not zoom.current) — GSAP mutates scale directly during the
       // dive animation. Iterate children only on threshold crossings.
       let lastLodFar: boolean | null = null;
+      let waterFilterTime = 0;
       // eslint-disable-next-line react-hooks/immutability
-      app.ticker.add(() => {
+      app.ticker.add((ticker) => {
         updateHighlights();
+        waterFilterTime += ticker.deltaMS / 1000;
+        for (const handle of waterFilterHandlesRef.current) {
+          handle.uniforms.uTime = waterFilterTime;
+        }
         gridGfx.current.alpha = world.scale.x < 0.6 ? 0.15 : 0.30;
         const isFar = world.scale.x < LOD_THRESHOLD;
         if (isFar === lastLodFar) return;
@@ -2124,6 +2434,7 @@ export const GameCanvas: React.FC = () => {
       const result = simulateTick(units, groupOrdersRef.current, {
         damagePerTick: DAMAGE_PER_TICK,
         currentTick: tickCounterRef.current,
+        captureZone: CAPTURE_ZONE_HEXES,
         mapApi: {
           isInside: (h: Hex) => gridSet.has(HexUtils.key(h)),
           isWalkable: (h: Hex) => {
@@ -2281,22 +2592,63 @@ export const GameCanvas: React.FC = () => {
   /* eslint-enable react-hooks/immutability */
 
   // Shared toggle for CHARGE / RETREAT / UNLEASH shortcuts and HUD buttons. Toggling the
-  // active mode reverts the group to 'march'; CHARGE additionally arms / clears the
-  // duration counter so re-entering charge starts a fresh window.
+  // active mode reverts the group to 'idle' (the rest default); CHARGE additionally arms
+  // / clears the duration counter so re-entering charge starts a fresh window.
+  // RETREAT is a special case: it vanishes a disengaged group from the field and
+  // refunds RETREAT_REFUND_FRAC of each unit type to the team's roster. If any unit in
+  // the group has an enemy adjacent, the press is a no-op.
   const toggleMode = useCallback((mode: Exclude<OrderMode, 'march'>) => {
     const gid = selectedGroupRef.current;
     const team = selectedTeamRef.current;
     const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
+    if (mode === 'retreat') {
+      const strategic = currentStrategicHexRef.current;
+      if (!strategic) return;
+      const sKey = HexUtils.key(strategic);
+      const all = armiesRef.current.get(sKey) ?? [];
+      const groupUnits = all.filter(u => u.team === team && u.groupId === gid && u.hp > 0);
+      if (groupUnits.length === 0) return;
+      const enemyHexes = new Set(
+        all.filter(u => u.team !== team && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
+      );
+      const engaged = groupUnits.some(u =>
+        HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
+      );
+      if (engaged) return; // melee locks the retreat — no-op
+      const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
+      for (const u of groupUnits) {
+        refund[u.unitType ?? 'infantry']++;
+      }
+      setArmies(prev => {
+        const next = new Map(prev);
+        const arr = next.get(sKey) ?? [];
+        next.set(sKey, arr.filter(u => !(u.team === team && u.groupId === gid)));
+        return next;
+      });
+      setRosters(prev => {
+        const next = new Map(prev);
+        const r = next.get(team) ?? { ...INITIAL_ROSTER };
+        next.set(team, {
+          infantry: r.infantry + Math.floor(refund.infantry * RETREAT_REFUND_FRAC),
+          cavalry: r.cavalry + Math.floor(refund.cavalry * RETREAT_REFUND_FRAC),
+          skirmisher: r.skirmisher + Math.floor(refund.skirmisher * RETREAT_REFUND_FRAC),
+        });
+        return next;
+      });
+      clearOrder(team, gid);
+      return;
+    }
     if (!cur?.attackTarget) return;
-    // Once committed (post-unleash), only RETREAT is allowed. The HUD button is also
-    // disabled but the keyboard could still fire — short-circuit here for symmetry.
-    if (cur.committed && mode !== 'retreat') return;
-    const isActive = (cur.mode ?? 'march') === mode;
+    // Once committed (post-unleash), no further mode changes — RETREAT was handled
+    // above and is the only escape. The HUD button is also disabled but the keyboard
+    // could still fire — short-circuit here for symmetry.
+    if (cur.committed) return;
+    const isActive = (cur.mode ?? 'idle') === mode;
     if (isActive) {
-      // Toggle off — unleash is one-way (never toggled off here; HUD/key disabled when
-      // committed). Hold/idle/charge toggle back to march normally; clear all
-      // mode-specific scratch fields so the new march starts clean.
-      issueOrder(team, gid, { mode: 'march', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined });
+      // Toggle off → idle. Unleash never reaches here (one-way commit). Idle→idle is a
+      // visual no-op but harmless. Clear all mode-specific scratch fields so prior
+      // state doesn't bleed in if the player later re-enables a mode.
+      issueOrder(team, gid, { mode: 'idle', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined });
       return;
     }
     issueOrder(team, gid, {
@@ -2306,16 +2658,57 @@ export const GameCanvas: React.FC = () => {
       // Hold starts the defensive-reduction counter; idle clears it; anything else
       // leaves it undefined (no bonus).
       holdTicks: mode === 'hold' ? 0 : undefined,
-      // Both unleash AND retreat are one-way commits: once engaged, no further orders
-      // until the sim clears the order on deploy-zone arrival. Charge stays editable.
-      committed: (mode === 'unleash' || mode === 'retreat') ? true : undefined,
+      // Unleash is the only remaining one-way commit (retreat is handled separately above).
+      committed: mode === 'unleash' ? true : undefined,
+    });
+  }, [issueOrder, clearOrder]);
+
+  // A / MARCH: dual-purpose action on the selected group.
+  //   - If currently marching: cycle heading within the team's forward cone.
+  //   - Otherwise (idle, hold, charge, or no order yet): switch to march. Preserve
+  //     existing heading/attackTarget if the player previously dragged one; otherwise
+  //     default to the team's straight-forward direction (red→N, blue→S) with an
+  //     attackTarget ~15 hexes ahead of the group's centroid.
+  const marchForward = useCallback(() => {
+    const gid = selectedGroupRef.current;
+    const team = selectedTeamRef.current;
+    const strategic = currentStrategicHexRef.current;
+    if (!strategic) return;
+    const units = armiesRef.current.get(HexUtils.key(strategic)) ?? [];
+    const groupUnits = units.filter(u => u.team === team && u.groupId === gid);
+    if (groupUnits.length === 0) return;
+    const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
+    if (cur?.committed) return;
+    const isMarching = cur?.mode === 'march' && !!cur.attackTarget;
+    if (isMarching) {
+      issueOrder(team, gid, { heading: cycleConeHeading(team, cur!.heading) });
+      return;
+    }
+    const heading = cur?.heading ?? (team === 'red' ? 2 : 5);
+    let attackTarget = cur?.attackTarget ?? null;
+    if (!attackTarget) {
+      const dir = HexUtils.directions[heading];
+      const avgQ = groupUnits.reduce((s, u) => s + u.tacticalHex.q, 0) / groupUnits.length;
+      const avgR = groupUnits.reduce((s, u) => s + u.tacticalHex.r, 0) / groupUnits.length;
+      attackTarget = HexUtils.hexRound({
+        q: avgQ + dir.q * 15,
+        r: avgR + dir.r * 15,
+      });
+    }
+    issueOrder(team, gid, {
+      mode: 'march',
+      attackTarget,
+      heading,
+      chargeTicksRemaining: undefined,
+      chargeDamagedIds: undefined,
+      holdTicks: undefined,
     });
   }, [issueOrder]);
 
   // Order-related shortcuts for the currently selected group. Layout — top row:
   //   T Q W E R  →  Assign / Deploy / Hold / Charge / Unleash
   // Bottom row:
-  //   A S D F    →  Cycle heading / Idle / Cycle formation / Retreat
+  //   A S D F    →  March (start / cycle heading) / Idle / Cycle formation / Retreat
   // All TACTICAL-only; ignored while typing in inputs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2348,11 +2741,10 @@ export const GameCanvas: React.FC = () => {
       } else if (k === 's') {
         toggleMode('idle');
       } else if (k === 'a') {
-        // Cycle heading within the team's forward cone (NW → N → NE → NW for red,
-        // SW → S → SE → SW for blue). Replaces the old horizontal-mirror semantics
-        // since only 3 directions are legal under the forward-cone movement model.
-        const cur = groupOrdersRef.current.get(key);
-        if (cur?.attackTarget) issueOrder(team, gid, { heading: cycleConeHeading(team, cur.heading) });
+        // A is the MARCH key. From idle/hold/charge/no-order → start marching (uses
+        // existing heading if set by a prior drag, else team-forward). From march →
+        // cycle heading within the team's forward cone.
+        marchForward();
       } else if (k === 'd') {
         setGroupFormations(prev => {
           const cur = prev.get(key) ?? 'line';
@@ -2368,7 +2760,7 @@ export const GameCanvas: React.FC = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, issueOrder]);
+  }, [viewMode, toggleMode, marchForward]);
 
   // Global shortcuts:
   //   SPACE         → start/pause battle (preventDefault to suppress page scroll)
@@ -2695,7 +3087,6 @@ export const GameCanvas: React.FC = () => {
               const canEdit = canHold && !committed;
               const orderMode: OrderMode = order?.mode ?? 'march';
               const chargeActive = orderMode === 'charge';
-              const retreatActive = orderMode === 'retreat';
               const unleashActive = orderMode === 'unleash';
               const holdActive = orderMode === 'hold';
               const idleActive = orderMode === 'idle';
@@ -2839,31 +3230,36 @@ export const GameCanvas: React.FC = () => {
                   </div>
                   {/* Row 2 ──────── A  S  D  F ──────── */}
                   <div style={{ ...rowStyle, paddingLeft: '54px' /* aligns under the QWER cluster, past the G label */ }}>
-                    {/* A — CYCLE heading within forward cone. Button face shows the next
-                        cone heading the cycle would advance to. */}
-                    <button
-                      disabled={!canEdit}
-                      title={
-                        committed ? '🔒 Group committed — retreat to redeploy'
-                        : canEdit ? `Cycle heading ${HEADING_ARROWS[order?.heading ?? 0]} → ${HEADING_ARROWS[cycleConeHeading(selectedTeam, order?.heading ?? 0)]} (shortcut: A)`
-                        : 'No active order'
-                      }
-                      onClick={() => {
-                        if (!canEdit) return;
-                        const cur = groupOrdersRef.current.get(formationKey);
-                        if (cur?.attackTarget) issueOrder(selectedTeam, gid, { heading: cycleConeHeading(selectedTeam, cur.heading) });
-                      }}
-                      style={{
-                        ...btnBase, fontSize: '12px',
-                        background: 'rgba(255,255,255,0.04)',
-                        color: !canEdit ? '#475569' : '#facc15',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canEdit ? 'not-allowed' : 'pointer',
-                        opacity: !canEdit ? 0.5 : 1,
-                      }}
-                    >
-                      {HEADING_ARROWS[cycleConeHeading(selectedTeam, order?.heading ?? 0)]} (A)
-                    </button>
+                    {/* A — MARCH / cycle heading. Idle/no-order → starts forward march.
+                        Already marching → cycles heading within the forward cone. Button
+                        face shows the next heading when marching, "MARCH" otherwise. */}
+                    {(() => {
+                      const isMarching = orderMode === 'march' && !!order?.attackTarget;
+                      const nextHeading = cycleConeHeading(selectedTeam, order?.heading ?? (selectedTeam === 'red' ? 2 : 5));
+                      const marchDisabled = count === 0 || committed;
+                      return (
+                        <button
+                          disabled={marchDisabled}
+                          title={
+                            committed ? '🔒 Group committed — retreat to redeploy'
+                            : count === 0 ? 'No units in this group'
+                            : isMarching ? `Cycle heading ${HEADING_ARROWS[order!.heading]} → ${HEADING_ARROWS[nextHeading]} (shortcut: A)`
+                            : 'March: start advancing forward (shortcut: A)'
+                          }
+                          onClick={() => { if (!marchDisabled) marchForward(); }}
+                          style={{
+                            ...btnBase, fontSize: '12px',
+                            background: isMarching ? '#10b981' : 'rgba(255,255,255,0.04)',
+                            color: marchDisabled ? '#475569' : isMarching ? 'white' : '#94a3b8',
+                            border: isMarching ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                            cursor: marchDisabled ? 'not-allowed' : 'pointer',
+                            opacity: marchDisabled ? 0.5 : 1,
+                          }}
+                        >
+                          {isMarching ? `${HEADING_ARROWS[nextHeading]} (A)` : 'MARCH (A)'}
+                        </button>
+                      );
+                    })()}
                     {/* S — IDLE: stand still, no defensive bonus accrual. Mutually
                         exclusive with HOLD (toggleMode auto-replaces). */}
                     <button
@@ -2871,7 +3267,7 @@ export const GameCanvas: React.FC = () => {
                       title={
                         committed ? '🔒 Group committed — retreat to redeploy'
                         : !canHold ? 'No active order'
-                        : idleActive ? 'Idle — standing by. Click to resume advance (shortcut: S)'
+                        : idleActive ? 'Idle — standing by. Press A to march (shortcut: S)'
                         : 'Idle: stand still, no movement, no defensive bonus (shortcut: S)'
                       }
                       onClick={() => { if (canEdit) toggleMode('idle'); }}
@@ -2910,32 +3306,39 @@ export const GameCanvas: React.FC = () => {
                     >
                       {FORMATION_LABELS[formation]} (D)
                     </button>
-                    {/* F — RETREAT (one-way commit, like UNLEASH). Once engaged, the
-                        group is locked until the sim clears the order on deploy-zone
-                        arrival. Button stays enabled to ENTER retreat (overriding a
-                        prior unleash commit too); becomes disabled once already in retreat. */}
+                    {/* F — RETREAT: vanish from field + refund 80% of each unit type
+                        to roster. Blocked if any unit in the group has an enemy hex
+                        adjacent (must fight out of melee). */}
                     {(() => {
-                      const retreatLocked = retreatActive && committed;
-                      const retreatGate = canHold && !retreatLocked;
+                      const allUnitsHere = currentStrategicHex ? armies.get(HexUtils.key(currentStrategicHex)) ?? [] : [];
+                      const groupUnitsHere = allUnitsHere.filter(u => u.team === selectedTeam && u.groupId === gid && u.hp > 0);
+                      const enemyHexes = new Set(
+                        allUnitsHere.filter(u => u.team !== selectedTeam && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
+                      );
+                      const engaged = groupUnitsHere.some(u =>
+                        HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
+                      );
+                      const retreatDisabled = count === 0 || engaged;
+                      const refundPct = Math.round(RETREAT_REFUND_FRAC * 100);
                       return (
                         <button
-                          disabled={!retreatGate}
+                          disabled={retreatDisabled}
                           title={
-                            !canHold ? 'No active order to retreat'
-                            : retreatLocked ? '🔒 Retreating — wait until group reaches its deploy zone'
-                            : 'Retreat: ONE-WAY commit — group falls back toward your deploy zone (shortcut: F)'
+                            count === 0 ? 'No units in this group'
+                            : engaged ? '⚔ In melee — break contact first'
+                            : `Retreat: vanish from field + ${refundPct}% refund (shortcut: F)`
                           }
-                          onClick={() => { if (retreatGate) toggleMode('retreat'); }}
+                          onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
                           style={{
                             ...btnBase,
-                            background: retreatActive ? '#3b82f6' : 'rgba(255,255,255,0.04)',
-                            color: !retreatGate ? '#475569' : retreatActive ? 'white' : '#94a3b8',
-                            border: retreatActive ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
-                            cursor: !retreatGate ? 'not-allowed' : 'pointer',
-                            opacity: !retreatGate ? 0.5 : 1,
+                            background: 'rgba(255,255,255,0.04)',
+                            color: retreatDisabled ? '#475569' : '#3b82f6',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            cursor: retreatDisabled ? 'not-allowed' : 'pointer',
+                            opacity: retreatDisabled ? 0.5 : 1,
                           }}
                         >
-                          {retreatLocked ? '🔒 RETREAT' : 'RETREAT (F)'}
+                          {engaged ? '⚔ RETREAT' : 'RETREAT (F)'}
                         </button>
                       );
                     })()}

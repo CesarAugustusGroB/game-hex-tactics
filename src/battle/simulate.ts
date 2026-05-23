@@ -42,6 +42,13 @@ export interface Unit {
    *  on. Data-only this pass: nothing reads it yet. Defaults to 4 on newly-placed units
    *  (matches `DEFAULT_TERRAIN_MODS.visionRadius`). */
   visionRadius: number;
+  /** Persistent unleash lock. Set the first sub-step a target is acquired; cleared when
+   *  resolved (enemy `hp <= 0` for `kind: 'enemy'`; any ally occupying the hex for
+   *  `kind: 'hex'`). Survives across ticks via the unit object identity, so a charging
+   *  cavalry stays committed instead of flip-flopping between equidistant enemies. */
+  unleashTarget?:
+    | { kind: 'enemy'; id: string }
+    | { kind: 'hex'; q: number; r: number };
 }
 
 /**
@@ -119,6 +126,11 @@ export interface SimulationConfig {
    *  harness loop). Used by movement to compare against each unit's `nextMoveTick`
    *  cooldown. Callers must increment this each tick; the sim itself is stateless. */
   currentTick: number;
+  /** Capture-zone hexes (the 7-hex flower at the centre of the tactical map). When
+   *  provided, units in `unleash` mode consider unoccupied-by-friendly capture hexes
+   *  alongside enemies when picking a target. Omitted in the harness → unleash falls
+   *  back to enemies-only behaviour, preserving existing regression scenarios. */
+  captureZone?: ReadonlyArray<Hex>;
 }
 
 /** A projectile thrown during this tick, surfaced to the renderer for animation. The sim
@@ -1042,15 +1054,18 @@ export const simulateTick = (
         });
       }
     } else if (mode === 'unleash') {
-      // Per-unit greedy step toward an enemy, with engagement spreading and a lateral
-      // fallback that breaks ally jams. Combat phase already handled adjacency damage;
-      // here we only do movement.
+      // Each unit holds a persistent lock (`u.unleashTarget`) on either an enemy unit
+      // (released when that enemy dies) or a capture-zone hex (released when any ally
+      // lands there). When no lock is set, a fresh target is acquired as the closest
+      // of (engagement-cap-aware closest enemy) vs (closest unoccupied-by-friendly
+      // capture hex). Smaller HexUtils.distance wins; ties → enemy.
       const enemies = working.filter(u => u.hp > 0 && u.team !== groupUnits[0].team);
-      if (enemies.length === 0) continue;
+      const captureHexes = config.captureZone ?? [];
+      if (enemies.length === 0 && captureHexes.length === 0) continue;
 
-      // Base engagement: allies of this group already adjacent to each enemy at the
-      // start of the tick. Cap-aware target pick subtracts this from the slots
-      // available, so a heavily-engaged enemy doesn't keep attracting new attackers.
+      // Engagement-cap accounting (enemy targets only): allies of this group already
+      // adjacent to each enemy at the start of the tick. New attackers spread across
+      // less-crowded enemies instead of piling on the nearest.
       const groupTeam = groupUnits[0].team;
       const baseEngagement = new Map<string, number>();
       for (const e of enemies) {
@@ -1072,61 +1087,82 @@ export const simulateTick = (
         if (u.hp <= 0) continue;
         if (unleashStartBlocked.has(u.id)) continue;
 
-        // Per-unit sub-step count: resolved via `stepsForTick` so cavalry's 2/tick,
-        // skirmisher's 1.5/tick (alternating), and infantry's 1/tick all work the same
-        // way. Each sub-step re-evaluates the best target.
         const unitSpeed = MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry'];
         const unitSteps = stepsForTick(unitSpeed, config.currentTick);
         for (let step = 0; step < unitSteps; step++) {
-          // First pass: pick the closest enemy whose engagement (baseline + already-
-          // claimed-this-tick) is still below the cap. Spreads new attackers across
-          // less-crowded enemies instead of piling on the nearest one.
-          let target: Unit | null = null;
-          let bestD = Infinity;
-          for (const e of enemies) {
-            const total = (baseEngagement.get(e.id) ?? 0) + (claimsThisTick.get(e.id) ?? 0);
-            if (total >= UNLEASH_MAX_ENGAGERS) continue;
-            const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
-            if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
-              target = e;
-              bestD = d;
-            }
+          // 1. Validate the existing lock — clear it if the target has resolved.
+          if (u.unleashTarget?.kind === 'enemy') {
+            const lockedEnemy = byId.get(u.unleashTarget.id);
+            if (!lockedEnemy || lockedEnemy.hp <= 0) u.unleashTarget = undefined;
+          } else if (u.unleashTarget?.kind === 'hex') {
+            const occ = occupancy.get(HexUtils.key({ q: u.unleashTarget.q, r: u.unleashTarget.r }));
+            if (occ && occ.team === u.team) u.unleashTarget = undefined;
           }
-          // Fallback: every enemy is at the cap → take absolute closest. The unit still
-          // engages and helps absorb attention; better than freezing.
-          if (!target) {
+
+          // 2. Acquire a fresh lock if missing. Closest enemy (cap-aware) vs closest
+          //    non-friendly-occupied capture hex; ties broken in favour of enemies.
+          if (!u.unleashTarget) {
+            let bestEnemy: Unit | null = null;
+            let bestEnemyD = Infinity;
             for (const e of enemies) {
+              const total = (baseEngagement.get(e.id) ?? 0) + (claimsThisTick.get(e.id) ?? 0);
+              if (total >= UNLEASH_MAX_ENGAGERS) continue;
               const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
-              if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
-                target = e;
-                bestD = d;
+              if (d < bestEnemyD || (d === bestEnemyD && (bestEnemy === null || e.id < bestEnemy.id))) {
+                bestEnemy = e;
+                bestEnemyD = d;
               }
             }
+            // Cap-saturated fallback: every enemy is at the cap → take absolute closest.
+            // Better to engage at the cap than to freeze.
+            if (!bestEnemy) {
+              for (const e of enemies) {
+                const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
+                if (d < bestEnemyD || (d === bestEnemyD && (bestEnemy === null || e.id < bestEnemy.id))) {
+                  bestEnemy = e;
+                  bestEnemyD = d;
+                }
+              }
+            }
+            let bestHex: Hex | null = null;
+            let bestHexD = Infinity;
+            for (const h of captureHexes) {
+              const occ = occupancy.get(HexUtils.key(h));
+              if (occ && occ.team === u.team) continue;
+              const d = HexUtils.distance(u.tacticalHex, h);
+              if (d < bestHexD) {
+                bestHex = { q: h.q, r: h.r };
+                bestHexD = d;
+              }
+            }
+            if (bestEnemy && (!bestHex || bestEnemyD <= bestHexD)) {
+              u.unleashTarget = { kind: 'enemy', id: bestEnemy.id };
+              if (step === 0) claimsThisTick.set(bestEnemy.id, (claimsThisTick.get(bestEnemy.id) ?? 0) + 1);
+            } else if (bestHex) {
+              u.unleashTarget = { kind: 'hex', q: bestHex.q, r: bestHex.r };
+            } else {
+              break; // nothing to do this tick.
+            }
           }
-          if (!target) break;
-          // Only the FIRST sub-step counts as a new attacker (the unit's "intent" for
-          // this tick). Subsequent sub-steps may re-target but don't double-claim — keeps
-          // engagement-cap accounting consistent with infantry's one-step behavior.
-          if (step === 0) claimsThisTick.set(target.id, (claimsThisTick.get(target.id) ?? 0) + 1);
 
-          // Forward-only constraint: per-unit movement candidates are restricted to the
-          // team's 3-direction forward cone. A unit unleashed toward an enemy "behind"
-          // the cone won't reach them — by design, the player committed direction at
-          // deploy time and can't take it back without retreating.
+          // 3. Build a concrete target hex from the lock, used by the movement step.
+          const lock = u.unleashTarget!;
+          const targetHex: Hex = lock.kind === 'enemy'
+            ? byId.get(lock.id)!.tacticalHex
+            : { q: lock.q, r: lock.r };
+          const bestD = HexUtils.distance(u.tacticalHex, targetHex);
+
+          // 4. Movement. Skirmisher hit-and-run only against an enemy lock (no kite vs
+          //    a capture hex — there's no projectile thrower-and-runner target).
           const cone = forwardCone(u.team);
           let bestNext: Hex | null = null;
           let bestNextD = bestD;
 
-          // Skirmisher hit-and-run: at missile range with no immediate threat, stand
-          // still and let the combat phase fire. Inside the kite threshold, scatter ANY
-          // direction (cone-exempt) to maximise distance to the closest enemy. Above
-          // missile range, fall through to the cone-bounded approach (same as infantry
-          // and cavalry).
           const isSkirm = (u.unitType ?? 'infantry') === 'skirmisher';
-          if (isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
+          if (lock.kind === 'enemy' && isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
             break; // stand still — combat phase throws the javelin.
           }
-          if (isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
+          if (lock.kind === 'enemy' && isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
             const prev = u.prevTacticalHex;
             let bestRunD = bestD;
             for (const dir of HexUtils.directions) {
@@ -1134,36 +1170,33 @@ export const simulateTick = (
               if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
               if (occupancy.get(HexUtils.key(next))) continue;
               if (prev && next.q === prev.q && next.r === prev.r) continue;
-              const d = HexUtils.distance(next, target.tacticalHex);
+              const d = HexUtils.distance(next, targetHex);
               if (d <= bestRunD) continue;
               bestNext = next;
               bestRunD = d;
             }
-            if (!bestNext) break; // surrounded — hold position, eat the melee.
+            if (!bestNext) break;
             occupancy.delete(HexUtils.key(u.tacticalHex));
             u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
             u.tacticalHex = bestNext;
             u.state = 'moving';
             applyEntryCooldown(u, bestNext, false);
             occupancy.set(HexUtils.key(bestNext), u);
-            continue; // skip the rest of the sub-step (cone scan, commit)
+            continue;
           }
 
-          // Approach (default): best neighbor minimizing distance to target, cone-bound.
+          // Cone-bounded approach: best neighbor that strictly decreases distance.
           for (const idx of cone) {
             const dir = HexUtils.directions[idx];
             const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
-            const d = HexUtils.distance(next, target.tacticalHex);
+            const d = HexUtils.distance(next, targetHex);
             if (d >= bestNextD) continue;
             if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
-            const occupant = occupancy.get(HexUtils.key(next));
-            if (occupant) continue;
+            if (occupancy.get(HexUtils.key(next))) continue;
             bestNext = next;
             bestNextD = d;
           }
-          // Lateral fallback: if no strict-decrease neighbor (blocked by allies, usually),
-          // try equal-distance neighbors that aren't the unit's previous hex (anti-
-          // backtrack). Lowest-key tiebreak for determinism. Cone-bounded.
+          // Lateral fallback: equal-distance neighbor (anti-backtrack, deterministic).
           if (!bestNext) {
             const prev = u.prevTacticalHex;
             let bestLat: Hex | null = null;
@@ -1174,7 +1207,7 @@ export const simulateTick = (
               if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
               if (occupancy.get(HexUtils.key(next))) continue;
               if (prev && next.q === prev.q && next.r === prev.r) continue;
-              const d = HexUtils.distance(next, target.tacticalHex);
+              const d = HexUtils.distance(next, targetHex);
               if (d !== bestD) continue;
               const nk = HexUtils.key(next);
               if (bestLatKey === null || nk < bestLatKey) {

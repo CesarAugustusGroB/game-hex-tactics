@@ -13,6 +13,145 @@ The branch grew beyond unit mechanics into a full terrain-rendering rework:
 - **Macro noise overlay.** Low-frequency luminance variation across grassland to break up the tile repetition without per-hex work.
 - **Three-layer scatter sprites.** `embedded`/`small`/`landmark` per biome (grass/flower/rock sets), density modulated by a simplex zone field, deterministic per hex via seeded RNG.
 
+## Visual target: beautiful continuous hex terrain
+
+Core rule: a hex should not look like an individually decorated cell. The map should read as continuous terrain with a subtle hex grid on top. If each hex screams "tile," the whole map turns into a visible honeycomb.
+
+Do **not** restart texture sampling inside every hex:
+
+```ts
+drawTextureInsideEachHex(hex);
+```
+
+Do render a continuous world-space texture, clipped by hex masks:
+
+```ts
+drawContinuousTextureWithHexMask(hex);
+textureU = worldX * textureScale;
+textureV = worldY * textureScale;
+```
+
+Recommended visual order:
+
+```ts
+renderTerrainBase();          // grass, forest, hills, sand, water
+renderTerrainNoiseLarge();    // readable at zoom-out
+renderTerrainPatches();       // dry, dense, floral, moss, etc.
+renderTerrainNoiseSmall();    // fine microdetail
+renderSmallDetails();         // sparse grass, flowers, rocks
+renderBiomeBorders();         // soft terrain transitions
+renderCoastlineDetails();     // sand/wet sand/water blending
+renderHexGrid();              // subtle, never dominant
+renderUnits();
+renderSelection();
+renderUI();
+```
+
+Terrain formulas:
+
+- **Grass:** base texture + macro variation + dry patch + dense patch + flower speck patch + very few small details. The grass should feel alive from texture and large patches, not from oversized decorative flowers.
+- **Hills:** base texture + macro variation + dry patch + dense patch + micro noise + a few rocks / dry grass. Read as terrain mass and elevation, not repeated little mountains. Ratio: 80% base + macro variation, 15% patches, 5% small details.
+- **Forest:** base texture + macro variation + dense forest patch + moss patch + small dark foliage details. Density should come from mass and colour, not hundreds of pasted shrubs.
+- **Sand / coast:** sand base + dry/wet sand variation + coastline detail + shallow water transition. Coast should blend `sand -> wet sand -> shallow water -> deep water`; avoid hard cuts unless intentionally stylized.
+- **Water:** coastal water is clear cyan/turquoise, deep water is darker blue, river water is medium blue with subtle flow. Water needs continuous texture and visible depth variation.
+
+Zoom-out priorities: small details disappear first, so rely on macro variation, large patches, biome shapes, and controlled colour contrast. Use LOD:
+
+```ts
+if (zoom > 0.85) renderSmallDetails();
+if (zoom <= 0.85) renderEmbeddedDetailsOnly();
+if (zoom <= 0.55) {
+  hideSmallDetails();
+  renderMacroPatches();
+}
+```
+
+Small details are final decoration, not the base look. Good starting config:
+
+```ts
+const grassSmallDetailsConfig = {
+  chancePerHex: 0.16,
+  maxPerHex: 1,
+  grassWeight: 80,
+  flowerWeight: 12,
+  rockWeight: 8,
+  scale: {
+    grass: [0.08, 0.18],
+    flower: [0.05, 0.10],
+    rock: [0.06, 0.13],
+  },
+  alpha: {
+    grass: [0.35, 0.60],
+    flower: [0.30, 0.50],
+    rock: [0.35, 0.55],
+  },
+};
+```
+
+Natural scatter rules:
+
+- Details should be smaller, less saturated, lower alpha, integrated into the terrain, and not present on every hex.
+- Do not place detail sprites at exact hex centres. Offset inside the hex footprint:
+
+```ts
+x = hex.centerX + randomRange(-hexRadius * 0.35, hexRadius * 0.35);
+y = hex.centerY + randomRange(-hexRadius * 0.35, hexRadius * 0.35);
+```
+
+- Prefer density by zones/chunks instead of `forEach(hex) spawnFlower()`:
+
+```ts
+function getDetailDensity(hex) {
+  const patchNoise = noise2D(hex.q * 0.08, hex.r * 0.08);
+  if (patchNoise > 0.65) return 0.28; // rich zone
+  if (patchNoise < 0.30) return 0.08; // clean zone
+  return 0.16;
+}
+```
+
+- Use fixed seeds, never `Math.random()` per frame:
+
+```ts
+function getHexSeed(q: number, r: number, worldSeed: number) {
+  return q * 73856093 ^ r * 19349663 ^ worldSeed;
+}
+```
+
+Hex grid guidance:
+
+```ts
+renderHexGrid({
+  color: "#1b2a13",
+  alpha: zoom < 0.6 ? 0.08 : 0.15,
+  lineWidth: 1,
+});
+```
+
+The grid should help orientation, not dominate the art.
+
+Biome borders are required to avoid ugly cuts:
+
+```ts
+if (hex.terrain !== neighbor.terrain) {
+  drawBorderEdge(hex, dir, hex.terrain, neighbor.terrain);
+}
+```
+
+Useful border rules:
+
+```ts
+const biomeBorderRules = {
+  "grass-forest": "soft_dark_green_edge",
+  "grass-sand": "dry_grass_to_sand_edge",
+  "sand-water": "wet_sand_coast_edge",
+  "grass-water": "muddy_water_edge",
+  "hill-grass": "soft_hill_blend_edge",
+  "forest-hill": "dark_forest_hill_edge",
+};
+```
+
+Final formula for every terrain: continuous base texture + macro variation + patches + micro noise + sparse small details + biome borders + subtle grid.
+
 ## More patterns that paid off
 
 ### Z-sort by `TERRAINS[type].height` instead of per-vertex push
