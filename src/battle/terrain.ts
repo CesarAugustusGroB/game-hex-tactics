@@ -9,11 +9,12 @@
  *   - `heightDamageBonus` is the downhill attack bonus, capped to keep ridiculous
  *     elevation deltas from one-shotting defenders.
  *
- * The values live here (not in `TERRAINS` in `GameCanvas.tsx`) so the sim layer doesn't
- * import the rendering layer. `GameCanvas.tsx` extends its own `TerrainDef` with the
- * same optional fields for in-engine tooling/HUD; the sim reads through this module.
+ * Mechanical values live in src/data/terrain.json (projected by terrain-mods.ts) so the
+ * sim layer doesn't import the rendering layer. The canvas side reads the same JSON via
+ * src/data/terrain.ts, which also carries visual fields (color, label, height, walkable).
  */
 import { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP } from '../data/combat';
+import { TERRAIN_MODS } from '../data/terrain-mods';
 
 /** Mechanical fields a terrain may carry. All optional in the source table; missing
  *  fields fall through to `DEFAULT_TERRAIN_MODS` when resolved by `getTerrainMods`. */
@@ -35,28 +36,12 @@ export const DEFAULT_TERRAIN_MODS: TerrainMods = {
   visionRadius: 4,
 };
 
-/**
- * Per-terrain mod overrides. Only walkable terrains with non-default values are listed —
- * any terrain key not present here resolves to `DEFAULT_TERRAIN_MODS` via `getTerrainMods`.
- * Balance intent (per plan):
- *   - MOUNTAIN: harshest walkable terrain — best cover and vision, brutal movement cost, heavy bleed.
- *   - ROCKY:    strong cover; punishes movement; slowly bleeds.
- *   - HILL:     strong cover; great vision; mild attrition.
- *   - FOREST:   strong cover; low sight; slow.
- *   - RIVER:    bad cover; slow; high attrition.
- *   - SAND:     mildly bad cover; slow; low vision; no bleed.
- *   - GRASSLAND: neutral baseline (no entry — falls through to defaults).
- */
-export const TERRAIN_MODS: Record<string, Partial<TerrainMods>> = {
-  SAND:      { defenseMult: 0.95, moveCost: 1, attritionPerTick: 0.00, visionRadius: 3 },
-  GRASSLAND: { defenseMult: 1.00, moveCost: 0, attritionPerTick: 0.00, visionRadius: 4 },
-  FOREST:    { defenseMult: 1.30, moveCost: 1, attritionPerTick: 0.00, visionRadius: 2 },
-  HILL:      { defenseMult: 1.25, moveCost: 1, attritionPerTick: 0.05, visionRadius: 6 },
-  ROCKY:     { defenseMult: 1.40, moveCost: 2, attritionPerTick: 0.20, visionRadius: 5 },
-  MOUNTAIN:  { defenseMult: 1.50, moveCost: 3, attritionPerTick: 0.30, visionRadius: 7 },
-  SNOW:      { defenseMult: 1.20, moveCost: 4, attritionPerTick: 0.60, visionRadius: 5 },
-  RIVER:     { defenseMult: 0.80, moveCost: 2, attritionPerTick: 0.25, visionRadius: 3 },
-};
+// Per-terrain mod overrides sourced from src/data/terrain.json (via terrain-mods.ts).
+// Balance intent: MOUNTAIN harshest (best cover/vision, brutal move cost, heavy bleed);
+// ROCKY strong cover/slow bleed; HILL strong cover/great vision/mild attrition;
+// FOREST strong cover/low sight/slow; RIVER bad cover/slow/high attrition;
+// SAND mildly bad cover/slow/low vision; GRASSLAND neutral (falls to defaults).
+export { TERRAIN_MODS } from '../data/terrain-mods';
 
 /**
  * Resolve a terrain key to its full mod set. Unknown / undefined types and missing

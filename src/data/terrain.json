@@ -1,0 +1,20 @@
+{
+  "DEEP_SEA":  { "color": "#1a2a3a", "label": "Deep Water", "height":   2, "walkable": false },
+  "SEA":       { "color": "#2a3a4a", "label": "Shallows",   "height":   5, "walkable": false },
+  "SAND":      { "color": "#bdaa8a", "label": "Shoreline",  "height":   8, "walkable": true,
+                 "defenseMult": 0.95, "moveCost": 1, "attritionPerTick": 0.00, "visionRadius": 3 },
+  "GRASSLAND": { "color": "#5a7a4a", "label": "Lowlands",   "height":  12, "walkable": true,
+                 "defenseMult": 1.00, "moveCost": 0, "attritionPerTick": 0.00, "visionRadius": 4 },
+  "FOREST":    { "color": "#3a5a3a", "label": "Thicket",    "height":  18, "walkable": true,
+                 "defenseMult": 1.30, "moveCost": 1, "attritionPerTick": 0.00, "visionRadius": 2 },
+  "HILL":      { "color": "#6b5d44", "label": "Ridgeline",  "height":  35, "walkable": true,
+                 "defenseMult": 1.25, "moveCost": 1, "attritionPerTick": 0.05, "visionRadius": 6 },
+  "ROCKY":     { "color": "#4a4a4a", "label": "Plateau",    "height":  55, "walkable": true,
+                 "defenseMult": 1.40, "moveCost": 2, "attritionPerTick": 0.20, "visionRadius": 5 },
+  "MOUNTAIN":  { "color": "#6a6a72", "label": "Summit",     "height":  85, "walkable": true,
+                 "defenseMult": 1.50, "moveCost": 3, "attritionPerTick": 0.30, "visionRadius": 7 },
+  "SNOW":      { "color": "#f0f0f0", "label": "Glacier",    "height": 110, "walkable": true,
+                 "defenseMult": 1.20, "moveCost": 4, "attritionPerTick": 0.60, "visionRadius": 5 },
+  "RIVER":     { "color": "#3a8fb7", "label": "Waterway",   "height":  10, "walkable": true,
+                 "defenseMult": 0.80, "moveCost": 2, "attritionPerTick": 0.25, "visionRadius": 3 }
+}
