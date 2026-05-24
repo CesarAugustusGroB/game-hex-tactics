@@ -26,14 +26,31 @@ There is no test runner configured.
 
 ## Architecture
 
-Single-canvas PIXI.js application with a thin React HUD. Logic lives in:
+Single-canvas PIXI.js application with a thin React HUD. The canvas layer lives under `src/canvas/` decomposed by responsibility:
 
-- `src/main.tsx` — React root.
-- `src/App.tsx` — renders only `<GameCanvas />`.
-- `src/components/GameCanvas.tsx` — the entire app: world generation, rendering, input, HUD.
-- `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (flat-top, `size = 40`).
+- `src/main.tsx` / `src/App.tsx` — trivial React bootstrap.
+- `src/components/GameCanvas.tsx` — composition root: owns React state, allocates refs, wires hooks and render callbacks, renders `<HUD>`.
+- `src/canvas/HUD.tsx` — pure React HUD panel (buttons, status, capture progress, win banner).
+- `src/canvas/PixiApp.ts` — `usePixiApp` hook: PIXI Application lifecycle, texture loading, container hierarchy, pointer/wheel/ticker wiring, cleanup.
+- `src/canvas/useBattleTick.ts` — `useBattleTick` hook: setInterval driving `simulateTick` + projectile animation + capture/win detection.
+- `src/canvas/world-gen.ts` — pure `generateWorldData()` (noise + cohesion + rivers).
+- `src/canvas/constants.ts` — module-level constants and type aliases (tick rate, deploy zone, formation cycle, capture config).
+- `src/canvas/terrain-defs.ts` — `TERRAINS` table (spreads `TERRAIN_MODS` from `src/battle/terrain.ts`).
+- `src/canvas/detail-rules.ts` — decoration sprite catalog and weighted spawn rules.
+- `src/canvas/water-filter.ts` — animated water filter (GLSL + factory).
+- `src/canvas/render/` — pure render functions:
+  - `drawTerrain.ts` — two-pass terrain pipeline (hex tops + cliff walls + textured overlays + grid + deploy/capture zones).
+  - `drawDetails.ts` — three-layer decoration scatter.
+  - `drawUnits.ts` — units, HP bars, badges, attack rings, strategic-view army icons.
+- `src/canvas/input/` — input handlers:
+  - `useTacticalKeyboard.ts` — per-group commands (t/q/w/e/r/s/a/d/f).
+  - `useGlobalShortcuts.ts` — SPACE/`<`/`,`/1-3/Z/X/C/Backspace.
+  - `orderDrag.ts` — order-mode drag flow (begin/update/commit/cancel/render-preview helpers).
+  - `paintMode.ts` — place/assign paint flow.
 - `src/battle/simulate.ts` — pure battle simulator (no React/PIXI). Exports `simulateTick`, unit/order types, and per-type tunables (`MARCH_HEXES_PER_TICK`, `MAX_HP_BY_TYPE`, etc.).
 - `src/battle/terrain.ts` — pure terrain modifier table (defense/moveCost/attrition/vision) and downhill damage bonus. Sole owner of mechanical terrain values.
+- `src/battle/ai.ts` — per-tick enemy AI hook.
+- `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (flat-top, `size = 40`).
 - `scripts/sim-formations.ts` — Node harness that drives `simulateTick` against scripted scenarios. Mirrors map state via a fake `MapApi`. Treat as a regression check.
 
 ### Two coordinate systems
@@ -41,9 +58,9 @@ Single-canvas PIXI.js application with a thin React HUD. Logic lives in:
 1. **Axial hex coordinates** (`q`, `r`) — the logical grid. Convert with `HexUtils.hexToPixel` / `pixelToHex`. `HexUtils.key({q,r})` is the canonical `Map` key — always use it instead of stringifying ad-hoc.
 2. **PIXI world coordinates** — the `worldRef` container is panned/zoomed; its children (`terrainGfx`, `highlightGfx`) are drawn in world space. Convert screen → world with `world.toLocal(...)` before doing hex lookups.
 
-### Rendering pipeline (`GameCanvas.tsx`)
+### Rendering pipeline (`drawTerrain.ts`)
 
-`gridData` → `drawMap()` rebuilds the terrain in two passes:
+`gridData` → `drawTerrain()` rebuilds the terrain in two passes:
 
 1. **`terrainGfx` (Pass 1, per-hex Graphics)** — top polygon fill (flat colour or `Texture` for `RIVER`/`SAND`/`SEA`/`DEEP_SEA`) plus shaded S/SE/SW side walls. Walls are drawn **only for non-textured biomes** (`SAND`, `RIVER`, `SEA`, `DEEP_SEA`, `ROCKY`); textured biomes get their cliff faces from Pass 2 instead. Hexes iterate in ascending `TERRAINS[type].height` so taller terrain renders after — and thus over — its shorter neighbours.
 2. **`terrainOverlayRef` (Pass 2, `TilingSprite` + hex-mask per biome)** — `GRASSLAND` / `FOREST` / `HILL` / `MOUNTAIN` / `SNOW` each get a world-space tiled texture clipped to a mask. The base mask of each biome is **the union of its hex top polygons _plus_ the visible cliff face against each shorter neighbour** (a `(hexH − nH)`-tall quad along the S/SE/SW shared edge). Result: the biome texture paints continuously over both the hex top and the cliff slope — no dark shaded wall and no protrusion into the shorter neighbour's territory. Decoration layers (grass-macro, dry/dense/flowery patches) reuse the same per-biome filter but stay top-only.
@@ -82,12 +99,12 @@ Three unit types (`infantry` / `cavalry` / `skirmisher`) with per-type records f
 
 Five order modes (`march` / `charge` / `retreat` / `unleash` / `defendHeight`). March, charge, retreat are rigid-block — every unit waits on the slowest cooldown. Unleash is per-unit greedy. DefendHeight spreads to the perimeter of a sticky home-terrain blob. Multi-step modes snapshot `startBlocked` at tick start so step N doesn't re-block step N+1 via `applyEntryCooldown` writes from step N.
 
-**Critical invariant:** `tickCounterRef.current` in `GameCanvas.tsx` is monotonic. Reset it ONLY on regenerate-world and return-to-strategic. **Never** reset it when a battle starts — every unit's `nextMoveTick` is an absolute tick number, so a reset puts the whole army on a multi-hundred-tick cooldown.
+**Critical invariant:** `tickCounterRef.current` (owned by `GameCanvas.tsx`, passed into `useBattleTick`) is monotonic. Reset it ONLY on regenerate-world and return-to-strategic. **Never** reset it when a battle starts — every unit's `nextMoveTick` is an absolute tick number, so a reset puts the whole army on a multi-hundred-tick cooldown.
 
 ### Terrain mods
 
-`src/battle/terrain.ts` owns the mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) — kept React/PIXI-free so the harness can import it. `GameCanvas.tsx` spreads `TERRAIN_MODS[KEY]` into its own `TerrainDef` for HUD/tooltips; do **not** define a parallel mod table inside the component file.
+`src/battle/terrain.ts` owns the mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) — kept React/PIXI-free so the harness can import it. `src/canvas/terrain-defs.ts` spreads `TERRAIN_MODS[KEY]` into its `TerrainDef` table for HUD/tooltips; do **not** define a parallel mod table anywhere else.
 
 ## Worktree note
 
-This is a `git worktree` at `.worktrees/feature-terrain-modifiers` on branch `feature/terrain-modifiers`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+This is a `git worktree` at `.worktrees/feature-refactor-gamecanvas` on branch `feature/refactor-gamecanvas`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.

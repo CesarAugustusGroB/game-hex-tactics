@@ -299,8 +299,6 @@ export const GameCanvas: React.FC = () => {
   const armiesRef = useRef<Armies>(new Map());
   const orderDragRef = useRef<OrderDrag | null>(null);
   const gridDataRef = useRef<{ hex: Hex; type: string }[]>([]);
-  const isBattleRunningRef = useRef(false);
-  const fogOfWarRef = useRef(false);
   useEffect(() => {
     inputModeRef.current = inputMode;
     if (inputMode !== 'order') {
@@ -318,8 +316,6 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { rostersRef.current = rosters; }, [rosters]);
   useEffect(() => { armiesRef.current = armies; }, [armies]);
   useEffect(() => { gridDataRef.current = gridData; }, [gridData]);
-  useEffect(() => { isBattleRunningRef.current = isBattleRunning; }, [isBattleRunning]);
-  useEffect(() => { fogOfWarRef.current = fogOfWar; }, [fogOfWar]);
    
 
   const lastTickHadBothTeamsRef = useRef(false);
