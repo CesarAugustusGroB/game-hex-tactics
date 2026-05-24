@@ -1,0 +1,29 @@
+{
+  "tickMs":            500,
+  "lodThreshold":      0.25,
+  "dragThresholdPx":   24,
+  "deployZoneFrac":    0.28,
+  "retreatRefundFrac": 0.80,
+  "initialRoster":     { "infantry": 50, "cavalry": 50, "skirmisher": 50 },
+  "cohortSize":        4,
+  "capture": {
+    "ticksToWin": 20,
+    "center":     { "q": 0, "r": 0 }
+  },
+  "teams": {
+    "red":  { "tint": "#ef4444" },
+    "blue": { "tint": "#3b82f6" }
+  },
+  "formations": {
+    "cycle":  ["line", "wedge", "column", "hex"],
+    "labels": {
+      "hex":    "⬢ HEX",
+      "line":   "─ LINE",
+      "wedge":  "△ WDGE",
+      "column": "│ COL"
+    }
+  },
+  "headingArrows": {
+    "0": "↘", "1": "↗", "2": "↑", "3": "↖", "4": "↙", "5": "↓"
+  }
+}

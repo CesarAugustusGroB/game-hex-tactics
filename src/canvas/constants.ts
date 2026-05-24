@@ -1,13 +1,49 @@
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import type { Unit, UnitType, Team, GroupId, GroupOrder, FormationType } from '../battle/simulate';
+import {
+  HEADING_ARROWS,
+  INITIAL_ROSTER,
+  COHORT_SIZE,
+  RETREAT_REFUND_FRAC,
+  CAPTURE_TICKS_TO_WIN,
+  CAPTURE_CENTER,
+  FORMATION_CYCLE,
+  FORMATION_LABELS,
+  TEAM_TINTS,
+  TICK_MS,
+  LOD_THRESHOLD,
+  DRAG_THRESHOLD_PX,
+  DEPLOY_ZONE_FRAC,
+} from '../data/game';
 
-export const DRAG_THRESHOLD_PX = 24;
-
-// Flat-top axial→visual mapping:
-//   dir 0 (1, 0) = SE, dir 1 (1,-1) = NE, dir 2 (0,-1) = N,
-//   dir 3 (-1, 0) = NW, dir 4 (-1, 1) = SW, dir 5 (0, 1) = S.
-export const HEADING_ARROWS: Record<number, string> = {
-  0: '↘', 1: '↗', 2: '↑', 3: '↖', 4: '↙', 5: '↓',
+// Re-export under their legacy paths so existing consumers (HUD, render, input handlers,
+// GameCanvas composition root) don't need to migrate import paths. Values live in
+// src/data/game.json; this file owns only the canvas-side derived helpers (factories,
+// deploy-zone computation, key formatters).
+export {
+  HEADING_ARROWS,
+  INITIAL_ROSTER,
+  COHORT_SIZE,
+  // RETREAT: pressing retreat on a disengaged group vanishes them from the field and
+  // refunds this fraction of each unit type back to the team's roster. Engaged groups
+  // (any unit with an enemy in an adjacent hex) get a no-op — they have to fight.
+  RETREAT_REFUND_FRAC,
+  // Capture-the-flag win condition. A team holds the central 7-hex flower (centre + 6
+  // neighbours) UNCONTESTED to gain a tick of progress; contested or enemy-held ticks
+  // decay -1 per tick; empty zone leaves both counters alone. Hits CAPTURE_TICKS_TO_WIN
+  // → that team wins. Annihilation still applies as a fallback.
+  CAPTURE_TICKS_TO_WIN,
+  CAPTURE_CENTER,
+  FORMATION_CYCLE,
+  FORMATION_LABELS,
+  TEAM_TINTS,
+  TICK_MS,
+  // Below this world.scale, swap each unit's soldier sprite for a stylized strategic
+  // marker (filled team-tinted hex top). At far zoom individual soldier features are
+  // unreadable anyway, and a clean colored token reads like an army-position marker
+  // instead of a smear of tiny pixelated sprites.
+  LOD_THRESHOLD,
+  DRAG_THRESHOLD_PX,
 };
 
 export const STRATEGIC_RESOLUTION = 40;
@@ -24,20 +60,7 @@ export type GroupDepths = Map<string, number>;
 // and return-to-strategic.
 export type Roster = Record<UnitType, number>;
 export type Rosters = Map<Team, Roster>;
-export const INITIAL_ROSTER: Roster = { infantry: 50, cavalry: 50, skirmisher: 50 };
-export const COHORT_SIZE = 4;
 
-// RETREAT: pressing retreat on a disengaged group vanishes them from the field and
-// refunds this fraction of each unit type back to the team's roster. Engaged groups
-// (any unit with an enemy in an adjacent hex) get a no-op — they have to fight.
-export const RETREAT_REFUND_FRAC = 0.80;
-
-// Capture-the-flag win condition. A team holds the central 7-hex flower (centre + 6
-// neighbours) UNCONTESTED to gain a tick of progress; contested or enemy-held ticks
-// decay -1 per tick; empty zone leaves both counters alone. Hits `CAPTURE_TICKS_TO_WIN`
-// → that team wins. Annihilation still applies as a fallback.
-export const CAPTURE_TICKS_TO_WIN = 20;
-export const CAPTURE_CENTER: Hex = { q: 0, r: 0 };
 export const captureZoneKeys = (): Set<string> => {
   const z = new Set<string>([HexUtils.key(CAPTURE_CENTER)]);
   for (const n of HexUtils.getNeighbors(CAPTURE_CENTER)) z.add(HexUtils.key(n));
@@ -51,37 +74,12 @@ export const makeInitialRosters = (): Rosters =>
     ['blue', { ...INITIAL_ROSTER }],
   ]);
 
-export const FORMATION_CYCLE: FormationType[] = ['line', 'wedge', 'column', 'hex'];
-export const FORMATION_LABELS: Record<FormationType, string> = {
-  hex: '⬢ HEX',
-  line: '─ LINE',
-  wedge: '△ WDGE',
-  column: '│ COL',
-};
-
-export const TEAM_TINTS: Record<Team, number> = {
-  red: 0xef4444,
-  blue: 0x3b82f6,
-};
-
 export { DAMAGE_PER_TICK } from '../data/combat';
-export const TICK_MS = 500;
-
-// Below this world.scale, swap each unit's soldier sprite for a stylized strategic
-// marker (filled team-tinted hex top). At far zoom individual soldier features are
-// unreadable anyway, and a clean colored token reads like an army-position marker
-// instead of a smear of tiny pixelated sprites. The ticker watches world.scale
-// directly and toggles visibility when the threshold is crossed.
-export const LOD_THRESHOLD = 0.25;
 
 export const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
 
-// Fraction of the tactical map's screen-y span that each side's deployment zone occupies,
-// measured from its edge inward. 0.22 ≈ "bottom 22% of the visible map is red's zone, top
-// 22% is blue's." Computed in pixel-y (not axial-r) so the strips read as HORIZONTAL — in
-// flat-top hexes the axial-r rows are slanted diagonally and look wrong as a zone marker.
-const DEPLOY_ZONE_FRAC = 0.28;
-
+// 0.28 ≈ bottom 28% strip of the visible map. Computed in pixel-y (not axial-r) so
+// the strips read as HORIZONTAL — flat-top axial-r rows are slanted diagonally.
 /** Hex keys belonging to a team's deployment zone, derived from the screen-y extent of
  *  `gridData`. Red gets the bottom strip, blue the top. */
 export const deployZoneFor = (team: Team, gridData: { hex: Hex; type: string }[]): Set<string> => {
