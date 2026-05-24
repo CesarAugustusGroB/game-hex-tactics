@@ -9,6 +9,7 @@ import {
   FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
+import { CP_CAP } from '../battle/command-points';
 
 export interface HUDProps {
   // ref
@@ -32,6 +33,9 @@ export interface HUDProps {
   selectedTeam: Team;
   selectedGroup: GroupId;
   selectedUnitType: UnitType;
+  // command points
+  commandPoints: { red: number; blue: number };
+  brokeFlash: { red: boolean; blue: boolean };
   // computed
   curT: TerrainDef | null;
   // setters
@@ -71,6 +75,8 @@ export const HUD: React.FC<HUDProps> = ({
   selectedTeam,
   selectedGroup,
   selectedUnitType,
+  commandPoints,
+  brokeFlash,
   curT,
   setIsScanning,
   setShowGrid,
@@ -167,6 +173,61 @@ export const HUD: React.FC<HUDProps> = ({
                 <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '34px', textAlign: 'right' }}>
                   {v}/{CAPTURE_TICKS_TO_WIN}
                 </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {viewMode === 'TACTICAL' && currentStrategicHex && (
+        <div style={{
+          position: 'absolute',
+          bottom: '12px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          padding: '10px 20px',
+          background: 'rgba(15,23,42,0.92)',
+          border: '1px solid rgba(250,204,21,0.5)',
+          borderRadius: '12px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+          backdropFilter: 'blur(12px)',
+          zIndex: 150,
+          minWidth: '300px',
+          color: '#f8fafc',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            textAlign: 'center', fontSize: '10px', letterSpacing: '2px',
+            color: '#facc15', fontWeight: 800, marginBottom: '6px',
+          }}>COMMAND POINTS</div>
+          {(['red', 'blue'] as const).map(team => {
+            const v = commandPoints[team];
+            const pct = (v / CP_CAP) * 100;
+            const baseColor = team === 'red' ? '#ef4444' : '#3b82f6';
+            const flashing = brokeFlash[team];
+            return (
+              <div key={team} style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                marginBottom: team === 'red' ? '4px' : 0,
+              }}>
+                <span style={{
+                  fontSize: '10px', color: baseColor, fontWeight: 800, width: '38px', letterSpacing: '1px',
+                }}>{team.toUpperCase()}</span>
+                <div style={{
+                  flex: 1, height: '8px',
+                  background: flashing ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.08)',
+                  borderRadius: '4px', overflow: 'hidden',
+                  transition: 'background 80ms',
+                }}>
+                  <div style={{
+                    width: `${pct}%`, height: '100%',
+                    background: baseColor,
+                    transition: 'width 120ms ease',
+                  }} />
+                </div>
+                <span style={{
+                  fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right',
+                }}>{v}/{CP_CAP}</span>
               </div>
             );
           })}

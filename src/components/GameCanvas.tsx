@@ -332,9 +332,7 @@ export const GameCanvas: React.FC = () => {
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
   const tickCounterRef = useRef(0);
   const commandPointsRef = useRef<CommandPoints>(makeInitialCommandPoints());
-  // @ts-expect-error TS6133 -- commandPoints unused until Task 4 wires the HUD bar
   const [commandPoints, setCommandPoints] = useState<CommandPoints>(makeInitialCommandPoints());
-  // @ts-expect-error TS6133 -- TODO Task 4: consumed by HUD broke-flash
   const [brokeFlash, setBrokeFlash] = useState<{ red: boolean; blue: boolean }>({ red: false, blue: false });
 
   // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
@@ -734,6 +732,8 @@ export const GameCanvas: React.FC = () => {
       resetBattle={resetBattle}
       returnToStrategic={returnToStrategic}
       regenerateWorld={regenerateWorld}
+      commandPoints={commandPoints}
+      brokeFlash={brokeFlash}
     />
   );
 };
