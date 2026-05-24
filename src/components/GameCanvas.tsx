@@ -26,6 +26,7 @@ import { useGlobalShortcuts } from '../canvas/input/useGlobalShortcuts';
 import { type OrderDrag } from '../canvas/input/orderDrag';
 import { usePixiApp, type PixiAppCtx } from '../canvas/PixiApp';
 import { useBattleTick, type BattleTickCtx } from '../canvas/useBattleTick';
+import { GRID_RADIUS, DEFAULT_GEN_SETTINGS } from '../data/world-gen';
 
 export const GameCanvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -129,13 +130,12 @@ export const GameCanvas: React.FC = () => {
   const [terrainTexturesLoaded, setTerrainTexturesLoaded] = useState(false);
   const [fogOfWar, setFogOfWar] = useState(false);
   const [genSettings, setSettings] = useState<GenSettings>({
-    waterLevel: 0.4,
-    mountainLevel: 0.85,
+    ...DEFAULT_GEN_SETTINGS,
     noiseOffset: { q: 0, r: 0 },
-    resolution: STRATEGIC_RESOLUTION // Much higher base resolution for smoothness
+    resolution: STRATEGIC_RESOLUTION,
   });
 
-  const gridRadius = 35;
+  const gridRadius = GRID_RADIUS;
 
   // --- Smooth Tactical Generator ---
   const generateWorldData = useCallback(() => {

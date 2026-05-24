@@ -46,8 +46,7 @@ export {
   DRAG_THRESHOLD_PX,
 };
 
-export const STRATEGIC_RESOLUTION = 40;
-export const DIVE_ZOOM = 4.5;
+export { STRATEGIC_RESOLUTION, DIVE_ZOOM } from '../data/world-gen';
 
 export type InputMode = 'place' | 'assign' | 'order';
 

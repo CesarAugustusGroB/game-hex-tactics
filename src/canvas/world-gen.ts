@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import { DIVE_ZOOM } from './constants';
+import { WORLD_GEN, DIVE_ZOOM } from '../data/world-gen';
 
 export interface GenSettings {
   waterLevel: number;
@@ -37,14 +37,15 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
 
   const w = settings.waterLevel;
   const m = settings.mountainLevel;
+  const b = WORLD_GEN.bucket;
   const bucket = (e: number): string => {
-    if (e < w * 0.7) return 'DEEP_SEA';
-    if (e < w) return 'SEA';
-    if (e < w + 0.03) return 'SAND';
-    if (e < m * 0.7) return 'GRASSLAND';
-    if (e < m * 0.9) return 'FOREST';
-    if (e < m) return 'HILL';
-    if (e < m + 0.1) return 'MOUNTAIN';
+    if (e < w * b.deepSeaMult)    return 'DEEP_SEA';
+    if (e < w)                    return 'SEA';
+    if (e < w + b.sandOffset)     return 'SAND';
+    if (e < m * b.forestMult)     return 'GRASSLAND';
+    if (e < m * b.hillMult)       return 'FOREST';
+    if (e < m)                    return 'HILL';
+    if (e < m + b.mountainOffset) return 'MOUNTAIN';
     return 'SNOW';
   };
   // Tactical applies the SAME radial falloff multiplier the strategic island used at
@@ -64,7 +65,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
       diveStrategicR * diveStrategicR +
       diveStrategicQ * diveStrategicR,
     ) / gridRadius;
-    return Math.max(0, 1.1 - Math.pow(d, 2.5));
+    return Math.max(0, WORLD_GEN.falloff.intercept - Math.pow(d, WORLD_GEN.falloff.exponent));
   })();
   const sampleElevation = (q: number, r: number): number => {
     const nx = (q + settings.noiseOffset.q) / settings.resolution;
@@ -73,7 +74,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     e = (e + 1) / 2;
     if (viewMode === 'STRATEGIC') {
       const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
-      e *= Math.max(0, 1.1 - Math.pow(d, 2.5));
+      e *= Math.max(0, WORLD_GEN.falloff.intercept - Math.pow(d, WORLD_GEN.falloff.exponent));
     } else {
       e *= tacticalElevationMult;
     }
