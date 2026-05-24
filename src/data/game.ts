@@ -1,5 +1,6 @@
 import raw from './game.json';
 import type { Team, UnitType, FormationType } from '../battle/simulate';
+import type { Hex } from '../hex-engine/HexUtils';
 
 const hexStr = (c: string): number => parseInt(c.slice(1), 16);
 
@@ -11,7 +12,7 @@ export interface GameConfig {
   retreatRefundFrac: number;
   initialRoster: Record<UnitType, number>;
   cohortSize: number;
-  capture: { ticksToWin: number; center: { q: number; r: number } };
+  capture: { ticksToWin: number; center: Hex };
   teams: Record<Team, { tint: string }>;
   formations: { cycle: FormationType[]; labels: Record<FormationType, string> };
   headingArrows: Record<string, string>;
