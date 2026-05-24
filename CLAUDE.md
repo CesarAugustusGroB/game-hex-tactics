@@ -67,7 +67,7 @@ Single-canvas PIXI.js application with a thin React HUD. The canvas layer lives 
 
 Heights live in `TERRAINS[type].height`. `highlightGfx` and `previewGfx` are redrawn every tick from the ticker (not from React state) so hover/drag updates don't re-run `drawMap`.
 
-A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`). World z-order: `terrainGfx → terrainOverlayRef → detailsGfx → gridGfx → bordersGfx? → unitsGfx → projectilesGfx → previewGfx → highlightGfx`. The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
+A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`) inside `usePixiApp`. World z-order (as attached in `PixiApp.ts`): `terrainGfx → terrainOverlayRef → detailsGfx → deployZoneGfx → captureZoneGfx → captureFlagSprite → gridGfx → unitsGfx → projectilesGfx → previewGfx → highlightGfx`. The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
 
 **PIXI v8 gotcha:** `Color.multiply(number)` treats the number as a hex int via bit-shifts (`0.7 | 0 === 0` → black). Always pass an RGB-normalised array (`[s, s, s, 1]`) when shading. See `LEARNINGS.md` for the full story.
 

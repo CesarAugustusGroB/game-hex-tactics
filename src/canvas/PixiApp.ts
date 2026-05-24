@@ -17,9 +17,11 @@ import { type PaintModeCtx, paintAt } from './input/paintMode';
 import type { OrderDrag } from './input/orderDrag';
 import type { Hex } from '../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../battle/simulate';
+import type { OrderChange } from '../battle/ai';
 import type {
   Armies, GroupFormations, GroupDepths, Rosters, GroupOrders,
 } from './constants';
+import type { GenSettings } from './world-gen';
 
 export interface PixiAppCtx {
   // DOM container
@@ -106,19 +108,14 @@ export interface PixiAppCtx {
   // State setters
   setTerrainTexturesLoaded: Dispatch<SetStateAction<boolean>>;
   setHoveredHex: Dispatch<SetStateAction<Hex | null>>;
-  setSettings: Dispatch<SetStateAction<{
-    waterLevel: number;
-    mountainLevel: number;
-    noiseOffset: { q: number; r: number };
-    resolution: number;
-  }>>;
+  setSettings: Dispatch<SetStateAction<GenSettings>>;
   setViewMode: Dispatch<SetStateAction<'STRATEGIC' | 'TACTICAL'>>;
   setIsScanning: Dispatch<SetStateAction<boolean>>;
   setCurrentStrategicHex: Dispatch<SetStateAction<Hex | null>>;
   setInputMode: Dispatch<SetStateAction<InputMode | null>>;
   setArmies: Dispatch<SetStateAction<Armies>>;
   setRosters: Dispatch<SetStateAction<Rosters>>;
-  issueOrder: (team: Team, groupId: GroupId, change: import('../battle/ai').OrderChange) => void;
+  issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
   generateWorldData: () => void;
 }
 
