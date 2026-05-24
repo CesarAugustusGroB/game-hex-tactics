@@ -13,6 +13,7 @@
  * import the rendering layer. `GameCanvas.tsx` extends its own `TerrainDef` with the
  * same optional fields for in-engine tooling/HUD; the sim reads through this module.
  */
+import { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP } from '../data/combat';
 
 /** Mechanical fields a terrain may carry. All optional in the source table; missing
  *  fields fall through to `DEFAULT_TERRAIN_MODS` when resolved by `getTerrainMods`. */
@@ -73,8 +74,7 @@ export const getTerrainMods = (type: string | undefined): TerrainMods => {
   };
 };
 
-/** +1% damage per height-unit of elevation advantage, capped at +50%. */
-import { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP } from '../data/combat';
+/** +1% damage per height-unit of elevation advantage, capped at +50%. Values in src/data/combat.json. */
 export { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP };
 
 /**

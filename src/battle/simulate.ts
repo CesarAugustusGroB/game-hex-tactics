@@ -161,10 +161,10 @@ export interface SimulationResult {
   projectiles: Projectile[];
 }
 
-/** CHARGE tuning. Duration in ticks; at TICK_MS=500 this is 1.5s real-time. */
-// Combat tunables sourced from src/data/combat.json. Kept as named re-exports here
-// so existing call sites within simulate.ts and downstream consumers don't need to
-// migrate import paths.
+// CHARGE + HOLD + UNLEASH tunables — values in src/data/combat.json. Re-exported
+// here under their legacy names so existing call sites in this file and downstream
+// consumers don't need to migrate import paths. CHARGE_DURATION_TICKS at TICK_MS=500
+// is 1.5s real-time.
 export {
   CHARGE_DURATION_TICKS,
   CHARGE_IMPACT_RANGE,
@@ -226,11 +226,6 @@ export const SKIRMISHER_KITE_THRESHOLD = 2;
  *  integer per tick: 1.5 → 1, 2, 1, 2, ... ; 1.0 → 1, 1, 1, ... ; 2.0 → 2, 2, 2, ... */
 export const stepsForTick = (speed: number, tick: number): number =>
   Math.floor((tick + 1) * speed) - Math.floor(tick * speed);
-
-/** UNLEASH engagement cap: max allies attacking a single enemy at once. Above the cap,
- *  new units pick a less-crowded enemy instead of dogpiling. 3 covers a clean half-arc
- *  (a hex has 6 neighbors, 3 from one side is plenty). If every enemy is at the cap,
- *  units fall back to closest-overall so they still engage. */
 
 /** Hold-mode defensive bonus: each tick spent in `hold` adds `HOLD_REDUCTION_PER_TICK`
  *  to the damage-taken reduction, capped at `HOLD_REDUCTION_CAP`. After
