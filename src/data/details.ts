@@ -65,7 +65,7 @@ const PATH_BY_PREFIX: Record<string, string> = Object.fromEntries(
 // The prefix is everything before the final _NN suffix. The original implementation
 // did chained startsWith() checks; this becomes O(1) lookup via PATH_BY_PREFIX /
 // CATEGORY_BY_PREFIX after stripping the suffix.
-const prefixOf = (key: string): string => key.replace(/_\d{2}$/, '');
+const prefixOf = (key: string): string => key.replace(/_\d+$/, '');
 
 export const detailAssetPath = (key: string): string => {
   const prefix = prefixOf(key);
@@ -88,6 +88,9 @@ const expandLayer = (raw: RawLayer): DetailLayerConfig => ({
     const entry = data.spriteCatalog[category];
     if (!entry) throw new Error(`details.json: unknown sprite category "${category}"`);
     const count = firstN ?? entry.count;
+    if (firstN !== undefined && firstN > entry.count) {
+      throw new Error(`details.json: firstN=${firstN} exceeds count=${entry.count} for "${category}"`);
+    }
     return numKeys(category, count).map(key => ({ key, weight }));
   }),
 });
