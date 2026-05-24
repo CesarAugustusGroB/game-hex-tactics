@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import { STRATEGIC_RESOLUTION } from './constants';
+import { DIVE_ZOOM } from './constants';
 
 export interface GenSettings {
   waterLevel: number;
@@ -47,6 +47,25 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     if (e < m + 0.1) return 'MOUNTAIN';
     return 'SNOW';
   };
+  // Tactical applies the SAME radial falloff multiplier the strategic island used at
+  // the clicked hex, uniformly across every tactical hex. Per-hex variation inside a
+  // dive comes purely from the fine-resolution noise — the island-shape falloff is a
+  // strategic-scale concept and re-evaluating it per tactical hex made the same noise
+  // point bucket higher in tactical than in strategic (because the formerly-used
+  // exponent 4 decays slower than the strategic exponent 2.5 for d ∈ (0,1), so the
+  // mult was always larger). Result: a FOREST in strategic could show up as HILL/
+  // MOUNTAIN in tactical, and the river pass would then spawn rivers from those hills.
+  const tacticalElevationMult = (() => {
+    if (viewMode === 'STRATEGIC') return 1; // unused
+    const diveStrategicQ = settings.noiseOffset.q / DIVE_ZOOM;
+    const diveStrategicR = settings.noiseOffset.r / DIVE_ZOOM;
+    const d = Math.sqrt(
+      diveStrategicQ * diveStrategicQ +
+      diveStrategicR * diveStrategicR +
+      diveStrategicQ * diveStrategicR,
+    ) / gridRadius;
+    return Math.max(0, 1.1 - Math.pow(d, 2.5));
+  })();
   const sampleElevation = (q: number, r: number): number => {
     const nx = (q + settings.noiseOffset.q) / settings.resolution;
     const ny = (r + settings.noiseOffset.r) / settings.resolution;
@@ -56,13 +75,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
       const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
       e *= Math.max(0, 1.1 - Math.pow(d, 2.5));
     } else {
-      // Anchor tactical elevation to the strategic-island position the dive came
-      // from, so mountain stays mountain-ish at the centre.
-      const scaleBack = STRATEGIC_RESOLUTION / settings.resolution;
-      const qe = (q + settings.noiseOffset.q) * scaleBack;
-      const re = (r + settings.noiseOffset.r) * scaleBack;
-      const d = Math.sqrt(qe*qe + re*re + qe*re) / gridRadius;
-      e *= Math.max(0, 1.1 - Math.pow(d, 4));
+      e *= tacticalElevationMult;
     }
     return e;
   };
