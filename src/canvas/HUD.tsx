@@ -329,10 +329,6 @@ export const HUD: React.FC<HUDProps> = ({
               const holdTicks = order?.holdTicks ?? 0;
               const holdPct = Math.round(Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP) * 100);
               const chargeRemaining = order?.chargeTicksRemaining;
-              // AOE-style two-row layout. Each row mirrors a keyboard row so the buttons
-              // sit under the keys that activate them:
-              //   Row 1 (QWERT-ish):  [G] [T-ASSIGN] [Q-ATTACK] [W-HOLD] [E-CHARGE] [R-UNLEASH]
-              //   Row 2 (ASDFV):              [A-MIRROR] [S-DEFEND] [D-FORM] [F-RETREAT] [V-DEPTH]
               const rowStyle: React.CSSProperties = {
                 display: 'flex', alignItems: 'center', gap: '6px',
               };

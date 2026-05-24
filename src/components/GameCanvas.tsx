@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import gsap from 'gsap';
@@ -52,7 +52,7 @@ export const GameCanvas: React.FC = () => {
   // Tinted deploy-zone strips. Repainted by `drawMap` alongside the grid; no separate
   // visibility toggle for now (always on in TACTICAL view).
   const deployZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
-  // Capture zone (central 7-hex flower) â€” gold outline + soft fill. Sprite for the flag
+  // Capture zone (central 7-hex flower) — gold outline + soft fill. Sprite for the flag
   // sits inside the same container so it tweens with the world pan/zoom.
   const captureZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const captureFlagSpriteRef = useRef<PIXI.Sprite | null>(null);
@@ -153,7 +153,7 @@ export const GameCanvas: React.FC = () => {
   // Tactical battlefield is a wide rectangle (N-S battle axis preserved).
   // Pixel half-extents centred at (0,0); iteration filters by HexUtils.hexToPixel
   // because a pure axial-rectangle is sheared into a parallelogram by the flat-top
-  // qâ†’x,y skew. The axial bounding box is intentionally generous to cover the
+  // q→x,y skew. The axial bounding box is intentionally generous to cover the
   // half-extents after the skew.
   const TACTICAL_HALF_W = 2000;
   const TACTICAL_HALF_H = 1000;
@@ -308,7 +308,7 @@ export const GameCanvas: React.FC = () => {
         base.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) });
       }
       // PIXI v8 gotcha: `Color.multiply(number)` treats the number as a hex int via
-      // bit-shifts (0.7 | 0 = 0 â†’ black), so pass an RGB array.
+      // bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
       const drawSide = (v1: number, v2: number, shade: number, bottomH = 0, color = tDef.color) => {
         tGfx.beginFill(PIXI.Color.shared.setValue(color).multiply([shade, shade, shade, 1]).toNumber());
         tGfx.moveTo(top[v1].x, top[v1].y)
@@ -317,7 +317,7 @@ export const GameCanvas: React.FC = () => {
             .lineTo(base[v1].x, base[v1].y - bottomH)
             .closePath().endFill();
       };
-      // S / SE / SW only â€” N / NE / NW are hidden inside the hex top from top-down view.
+      // S / SE / SW only — N / NE / NW are hidden inside the hex top from top-down view.
       const sType  = terrainAt.get(HexUtils.key({ q: item.hex.q,     r: item.hex.r + 1 }));
       const seType = terrainAt.get(HexUtils.key({ q: item.hex.q + 1, r: item.hex.r     }));
       const swType = terrainAt.get(HexUtils.key({ q: item.hex.q - 1, r: item.hex.r + 1 }));
@@ -595,8 +595,8 @@ export const GameCanvas: React.FC = () => {
         paintCliffsBefore: 'SNOW',
       },
     ];
-    // Cliff edges (taller hex â†’ shorter neighbour). vertex pair + axial direction. Only
-    // S / SE / SW â€” the other three would render inside the hex top in 2.5D.
+    // Cliff edges (taller hex → shorter neighbour). vertex pair + axial direction. Only
+    // S / SE / SW — the other three would render inside the hex top in 2.5D.
     const cliffEdges: [number, number, number][] = [
       [1, 2, 5], [0, 1, 0], [2, 3, 4],
     ];
@@ -654,7 +654,7 @@ export const GameCanvas: React.FC = () => {
       const hexH = (TERRAINS[layer.type] ?? TERRAINS.SEA).height;
       const sz = HexUtils.size;
       // Base layers (no hexFilter) extend the mask to the visible cliff faces against
-      // shorter neighbours â€” biome texture continues down the cliff instead of leaving a
+      // shorter neighbours — biome texture continues down the cliff instead of leaving a
       // dark shaded wall. Decoration layers (dry/dense/flowery patches) stay top-only.
       const includeCliffs = layer.includeCliffs ?? !layer.hexFilter;
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -810,10 +810,10 @@ export const GameCanvas: React.FC = () => {
     }
     overlay.addChild(forestEarthCliffs);
 
-    // Deploy zone frontier â€” for each zone hex, stroke only the edges that face a
+    // Deploy zone frontier — for each zone hex, stroke only the edges that face a
     // non-zone neighbour (or the map edge). Produces one bold line along each side's
-    // front, no fill clutter inside the zones. Vertex pair â†’ axial dir mapping is the
-    // same as `gridEdges` below (flat-top, vertex i at angle 60Â·i). TACTICAL-only â€”
+    // front, no fill clutter inside the zones. Vertex pair → axial dir mapping is the
+    // same as `gridEdges` below (flat-top, vertex i at angle 60·i). TACTICAL-only —
     // the strategic overview shows world terrain, not battle overlays.
     if (viewMode === 'TACTICAL') {
       const redZone = deployZoneFor('red', gridData);
@@ -846,9 +846,9 @@ export const GameCanvas: React.FC = () => {
       }
     }
 
-    // Capture zone â€” the central 7-hex flower. Soft gold fill on each hex top + a bold
+    // Capture zone — the central 7-hex flower. Soft gold fill on each hex top + a bold
     // gold frontier stroke on the outer edges. Also reposition the flag sprite atop the
-    // centre hex now that terrain height is known. TACTICAL-only â€” strategic overview
+    // centre hex now that terrain height is known. TACTICAL-only — strategic overview
     // hides the flag (it's a battle objective, not a world feature).
     const flagSprite = captureFlagSpriteRef.current;
     if (flagSprite) flagSprite.visible = viewMode === 'TACTICAL';
@@ -886,7 +886,7 @@ export const GameCanvas: React.FC = () => {
                .stroke({ width: 5, color: 0xfacc15, alpha: 1.0 });
         }
       }
-      // Flag sprite sits on the centre hex top â€” y offset by that hex's terrain height.
+      // Flag sprite sits on the centre hex top — y offset by that hex's terrain height.
       const flag = captureFlagSpriteRef.current;
       if (flag) {
         const centerTile = gridData.find(d => d.hex.q === CAPTURE_CENTER.q && d.hex.r === CAPTURE_CENTER.r);
@@ -897,11 +897,11 @@ export const GameCanvas: React.FC = () => {
       }
     }
 
-    // Each shared edge is stroked ONCE â€” by the taller hex (tiebreak: axial-key compare).
+    // Each shared edge is stroked ONCE — by the taller hex (tiebreak: axial-key compare).
     // Stops double-line artefacts at elevation boundaries where each side would otherwise
     // draw its own outline at its own height.
     if (showGrid) {
-      // Edge â†’ vertex pair â†’ neighbour axial dir (flat-top, r = 60Â·i).
+      // Edge → vertex pair → neighbour axial dir (flat-top, r = 60·i).
       const gridEdges: [number, number, number][] = [
         [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
       ];
@@ -1093,11 +1093,11 @@ export const GameCanvas: React.FC = () => {
 
     // teamByKey is used by the team-outline edge filter below to skip edges shared with
     // a same-team neighbour (so a cluster shows only its outer perimeter). Mapping:
-    // edge k â†” neighbour at HexUtils.directions[(6 - k) % 6].
+    // edge k ↔ neighbour at HexUtils.directions[(6 - k) % 6].
     const teamByKey = new Map<string, Team>();
     for (const u of units) teamByKey.set(HexUtils.key(u.tacticalHex), u.team);
 
-    // Read scale directly â€” zoom.current is stale during a GSAP dive tween.
+    // Read scale directly — zoom.current is stale during a GSAP dive tween.
     const isFar = worldRef.current.scale.x < LOD_THRESHOLD;
 
     const visibleHexes = new Set<string>();
@@ -1140,9 +1140,9 @@ export const GameCanvas: React.FC = () => {
         (container as unknown as { _targetKey: string })._targetKey = targetKey;
         // Stretch the tween over the destination terrain's cooldown so the unit GLIDES
         // across rough hexes instead of teleporting in TICK_MS and then sitting idle for
-        // the moveCost cooldown ticks. The sim's discrete steps remain â€” only the
+        // the moveCost cooldown ticks. The sim's discrete steps remain — only the
         // visual interpolation changes. By the time the tween finishes the cooldown is
-        // also up, so the next step engages immediately â†’ smooth and slow.
+        // also up, so the next step engages immediately → smooth and slow.
         const moveCost = getTerrainMods(tile.type).moveCost;
         gsap.to(container.position, {
           x: pos.x,
@@ -1232,7 +1232,7 @@ export const GameCanvas: React.FC = () => {
 
       if (lieutenantIds.has(u.id)) {
         const star = new PIXI.Text({
-          text: 'â˜…',
+          text: '★',
           style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
         });
         star.anchor.set(0.5);
@@ -1245,7 +1245,7 @@ export const GameCanvas: React.FC = () => {
         const order = groupOrders.get(`${u.team}:${u.groupId}`);
         if (order?.attackTarget) {
           const arrow = new PIXI.Text({
-            text: HEADING_ARROWS[order.heading] ?? 'â†’',
+            text: HEADING_ARROWS[order.heading] ?? '→',
             style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
           });
           arrow.anchor.set(0.5);
@@ -1259,7 +1259,7 @@ export const GameCanvas: React.FC = () => {
     });
 
     // Attack target indicators per group. Tagged 'unit-detail' for LOD hiding.
-    // Fog of war: skip rings owned by the OTHER team â€” they would otherwise leak
+    // Fog of war: skip rings owned by the OTHER team — they would otherwise leak
     // enemy intent through fog (you'd see where they're charging without seeing them).
     groupOrders.forEach(order => {
       if (!order.attackTarget) return;
@@ -1288,7 +1288,7 @@ export const GameCanvas: React.FC = () => {
   // - the very next `simulateTick` in the tick loop sees AI-issued orders (no 1-tick
   //   delay waiting for React to flush),
   // - React still gets a new Map reference and re-renders the HUD as before.
-  // When the order doesn't exist yet, a default skeleton is created â€” `change` only
+  // When the order doesn't exist yet, a default skeleton is created — `change` only
   // needs to specify the fields it cares about.
   const issueOrder = useCallback((team: Team, groupId: GroupId, change: OrderChange) => {
     const key = groupOrderKey(team, groupId);
@@ -1326,7 +1326,7 @@ export const GameCanvas: React.FC = () => {
     const app = new PIXI.Application();
     const start = async () => {
       await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
-      // The army SVG is natively 40Ã—40 â€” too low for high-DPI. Pre-rasterise to a
+      // The army SVG is natively 40×40 — too low for high-DPI. Pre-rasterise to a
       // higher-res canvas so PIXI downsamples instead of upsampling.
       const loadHighResSvgTexture = async (url: string, pixelSize: number): Promise<PIXI.Texture> => {
         const img = new Image();
@@ -1424,7 +1424,7 @@ export const GameCanvas: React.FC = () => {
       unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
       unitTextureBlueSkirmisherRef.current = skirmisherTex;
       javelinTextureRef.current = javelinTex;
-      // Capture-the-flag marker â€” loaded once at mount, positioned at hex (0,0).
+      // Capture-the-flag marker — loaded once at mount, positioned at hex (0,0).
       const winFlagTex = await PIXI.Assets.load<PIXI.Texture>('/assets/win-flag.png');
       if (!isMounted) return;
       winFlagTex.source.scaleMode = 'linear';
@@ -1439,7 +1439,7 @@ export const GameCanvas: React.FC = () => {
       flagSprite.x = flagPos.x;
       flagSprite.y = flagPos.y - 8; // sit on the hex top (terrain height applied in drawMap, this is OK as a default)
       captureFlagSpriteRef.current = flagSprite;
-      // Note: world tree is built below â€” flag is added to `world` there alongside its
+      // Note: world tree is built below — flag is added to `world` there alongside its
       // graphics layer so it ends up at a deterministic z-order (above the zone outline
       // but below grid/units).
       const detailTexs = await Promise.all(
@@ -1488,8 +1488,8 @@ export const GameCanvas: React.FC = () => {
       const world = worldRef.current;
       world.x = app.screen.width / 2; world.y = app.screen.height / 2; world.scale.set(zoom.current);
       app.stage.addChild(world);
-      // World z-order: terrain â†’ painted overlay â†’ scatter details â†’ grid â†’ units â†’
-      // projectiles â†’ drag previews â†’ hover highlights.
+      // World z-order: terrain → painted overlay → scatter details → grid → units →
+      // projectiles → drag previews → hover highlights.
       world.addChild(terrainGfx.current);
       world.addChild(terrainOverlayRef.current);
       world.addChild(detailsGfx.current);
@@ -1659,7 +1659,7 @@ export const GameCanvas: React.FC = () => {
 
           if (isLieutenant) {
             const star = new PIXI.Text({
-              text: 'â˜…',
+              text: '★',
               style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
             });
             star.anchor.set(0.5);
@@ -1668,7 +1668,7 @@ export const GameCanvas: React.FC = () => {
             gfx.addChild(star);
 
             const arrow = new PIXI.Text({
-              text: HEADING_ARROWS[heading] ?? 'â†’',
+              text: HEADING_ARROWS[heading] ?? '→',
               style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
             });
             arrow.anchor.set(0.5);
@@ -1772,7 +1772,7 @@ export const GameCanvas: React.FC = () => {
             );
           }
 
-          // LINE pairs by role (cavâ†’flanks, skirâ†’front-center, infâ†’back); other
+          // LINE pairs by role (cav→flanks, skir→front-center, inf→back); other
           // formations keep the march-projection pairing.
           const pairing = lineFrontWidth > 0
             ? computeLineSlotAssignmentsByType(groupUnits, slots, drag.targetHex, lineFrontWidth)
@@ -1864,7 +1864,7 @@ export const GameCanvas: React.FC = () => {
         setInputMode(null);
       });
 
-      // Read world.scale.x (not zoom.current) â€” GSAP mutates scale directly during the
+      // Read world.scale.x (not zoom.current) — GSAP mutates scale directly during the
       // dive animation. Iterate children only on threshold crossings.
       let lastLodFar: boolean | null = null;
       let waterFilterTime = 0;
@@ -1897,14 +1897,14 @@ export const GameCanvas: React.FC = () => {
       generateWorldData();
     };
     // Capture the unit-containers map for the unmount cleanup. The ref's `.current`
-    // object is created once and never reassigned â€” only mutated by drawUnits via
-    // `.set`/`.delete` â€” so this reference stays valid through the lifetime of the
+    // object is created once and never reassigned — only mutated by drawUnits via
+    // `.set`/`.delete` — so this reference stays valid through the lifetime of the
     // component and points to the same Map at unmount.
     const containers = unitContainersRef.current;
     start();
     return () => {
       isMounted = false;
-      // Kill GSAP tweens before PIXI destroys their targets â€” otherwise GSAP keeps
+      // Kill GSAP tweens before PIXI destroys their targets — otherwise GSAP keeps
       // updating freed objects for up to TICK_MS after unmount.
       containers.forEach(cont => {
         gsap.killTweensOf(cont);
@@ -1926,7 +1926,7 @@ export const GameCanvas: React.FC = () => {
   const [captureProgress, setCaptureProgress] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
   const captureProgressRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
   useEffect(() => { captureProgressRef.current = captureProgress; }, [captureProgress]);
-  // MUST stay monotonic across battle pauses/restarts â€” units carry absolute
+  // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
   const tickCounterRef = useRef(0);
@@ -1939,21 +1939,21 @@ export const GameCanvas: React.FC = () => {
       const strategicKey = HexUtils.key(strategic);
       const units = armiesRef.current.get(strategicKey) ?? [];
       if (units.length === 0) return;
-      // simulateTick BEFORE the setters â€” reading a closure variable written inside a
+      // simulateTick BEFORE the setters — reading a closure variable written inside a
       // setX(prev => ...) on the next line is undefined (the updater hasn't run yet).
       const teamsBefore = new Set(units.map(u => u.team));
       if (teamsBefore.size >= 2) lastTickHadBothTeamsRef.current = true;
       const grid = gridDataRef.current;
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
-      // Precompute deploy zone hex sets â€” the retreat-clear logic queries this per tick.
+      // Precompute deploy zone hex sets — the retreat-clear logic queries this per tick.
       const deployZones: Record<Team, Set<string>> = {
         red:  deployZoneFor('red',  grid),
         blue: deployZoneFor('blue', grid),
       };
       tickCounterRef.current += 1;
       // AI phase. Each registered controller writes its team's orders via `issueOrder`,
-      // which mutates the orders ref synchronously â€” so the `simulateTick` call below
+      // which mutates the orders ref synchronously — so the `simulateTick` call below
       // reads the post-AI order map, no one-tick lag.
       for (const team of (['red', 'blue'] as const)) {
         const fn = getAiController(team);
@@ -1998,7 +1998,7 @@ export const GameCanvas: React.FC = () => {
       });
       const javelinTex = javelinTextureRef.current;
       if (javelinTex && result.projectiles.length > 0) {
-        // Asset's natural tip points up-left (1813Ã—822 diagonal). atan2(-670, -1610) is
+        // Asset's natural tip points up-left (1813×822 diagonal). atan2(-670, -1610) is
         // the from-butt-to-tip angle; subtract to rotate the throw to face the target.
         const assetTipAngle = Math.atan2(-670, -1610);
         const container = projectilesGfx.current;
@@ -2160,7 +2160,7 @@ export const GameCanvas: React.FC = () => {
       const engaged = groupUnits.some(u =>
         HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
       );
-      if (engaged) return; // melee locks the retreat â€” no-op
+      if (engaged) return; // melee locks the retreat — no-op
       const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
       for (const u of groupUnits) {
         refund[u.unitType ?? 'infantry']++;
@@ -2185,13 +2185,13 @@ export const GameCanvas: React.FC = () => {
       return;
     }
     if (!cur?.attackTarget) return;
-    // Once committed (post-unleash), no further mode changes â€” RETREAT was handled
+    // Once committed (post-unleash), no further mode changes — RETREAT was handled
     // above and is the only escape. The HUD button is also disabled but the keyboard
-    // could still fire â€” short-circuit here for symmetry.
+    // could still fire — short-circuit here for symmetry.
     if (cur.committed) return;
     const isActive = (cur.mode ?? 'idle') === mode;
     if (isActive) {
-      // Toggle off â†’ idle. Unleash never reaches here (one-way commit). Idleâ†’idle is a
+      // Toggle off → idle. Unleash never reaches here (one-way commit). Idle→idle is a
       // visual no-op but harmless. Clear all mode-specific scratch fields so prior
       // state doesn't bleed in if the player later re-enables a mode.
       issueOrder(team, gid, { mode: 'idle', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined });
@@ -2213,7 +2213,7 @@ export const GameCanvas: React.FC = () => {
   //   - If currently marching: cycle heading within the team's forward cone.
   //   - Otherwise (idle, hold, charge, or no order yet): switch to march. Preserve
   //     existing heading/attackTarget if the player previously dragged one; otherwise
-  //     default to the team's straight-forward direction (redâ†’N, blueâ†’S) with an
+  //     default to the team's straight-forward direction (red→N, blue→S) with an
   //     attackTarget ~15 hexes ahead of the group's centroid.
   const marchForward = useCallback(() => {
     const gid = selectedGroupRef.current;
@@ -2321,10 +2321,10 @@ export const GameCanvas: React.FC = () => {
     generateWorldData();
   }, [generateWorldData]);
 
-  // Order-related shortcuts for the currently selected group. Layout â€” top row:
-  //   T Q W E R  â†’  Assign / Deploy / Hold / Charge / Unleash
+  // Order-related shortcuts for the currently selected group. Layout — top row:
+  //   T Q W E R  →  Assign / Deploy / Hold / Charge / Unleash
   // Bottom row:
-  //   A S D F    â†’  March (start / cycle heading) / Idle / Cycle formation / Retreat
+  //   A S D F    →  March (start / cycle heading) / Idle / Cycle formation / Retreat
   // All TACTICAL-only; ignored while typing in inputs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2336,7 +2336,6 @@ export const GameCanvas: React.FC = () => {
       if (viewMode !== 'TACTICAL') return;
       const gid = selectedGroupRef.current;
       const team = selectedTeamRef.current;
-      const key = groupOrderKey(team, gid);
 
       if (k === 't') {
         setInputMode(prev => (prev === 'assign' ? null : 'assign'));
@@ -2357,32 +2356,25 @@ export const GameCanvas: React.FC = () => {
       } else if (k === 's') {
         toggleMode('idle');
       } else if (k === 'a') {
-        // A is the MARCH key. From idle/hold/charge/no-order â†’ start marching (uses
-        // existing heading if set by a prior drag, else team-forward). From march â†’
+        // A is the MARCH key. From idle/hold/charge/no-order → start marching (uses
+        // existing heading if set by a prior drag, else team-forward). From march →
         // cycle heading within the team's forward cone.
         marchForward();
       } else if (k === 'd') {
-        setGroupFormations(prev => {
-          const cur = prev.get(key) ?? 'line';
-          const idx = FORMATION_CYCLE.indexOf(cur);
-          const nextFormation = FORMATION_CYCLE[(idx + 1) % FORMATION_CYCLE.length];
-          const next = new Map(prev);
-          next.set(key, nextFormation);
-          return next;
-        });
+        cycleFormation(gid);
       } else if (k === 'f') {
         toggleMode('retreat');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, marchForward]);
+  }, [viewMode, toggleMode, marchForward, cycleFormation]);
 
   // Global shortcuts:
-  //   SPACE         â†’ start/pause battle (preventDefault to suppress page scroll)
-  //   < / ,         â†’ cycle selected team (red â†” blue)
-  //   1 / 2 / 3     â†’ select group
-  //   Z / X / C     â†’ place infantry / cavalry / skirmisher (C reserved â€” skirmisher
+  //   SPACE         → start/pause battle (preventDefault to suppress page scroll)
+  //   < / ,         → cycle selected team (red ↔ blue)
+  //   1 / 2 / 3     → select group
+  //   Z / X / C     → place infantry / cavalry / skirmisher (C reserved — skirmisher
   //                   unit type not yet implemented, so C is a no-op for now). Pressing
   //                   the same key again exits place mode; pressing the OTHER key
   //                   switches type without leaving place mode.
