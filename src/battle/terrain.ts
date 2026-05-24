@@ -14,7 +14,13 @@
  * src/data/terrain.ts, which also carries visual fields (color, label, height, walkable).
  */
 import { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP } from '../data/combat';
+// Per-terrain mod overrides sourced from src/data/terrain.json (via terrain-mods.ts).
+// Balance intent: MOUNTAIN harshest (best cover/vision, brutal move cost, heavy bleed);
+// ROCKY strong cover/slow bleed; HILL strong cover/great vision/mild attrition;
+// FOREST strong cover/low sight/slow; RIVER bad cover/slow/high attrition;
+// SAND mildly bad cover/slow/low vision; GRASSLAND neutral (falls to defaults).
 import { TERRAIN_MODS } from '../data/terrain-mods';
+export { TERRAIN_MODS };
 
 /** Mechanical fields a terrain may carry. All optional in the source table; missing
  *  fields fall through to `DEFAULT_TERRAIN_MODS` when resolved by `getTerrainMods`. */
@@ -35,13 +41,6 @@ export const DEFAULT_TERRAIN_MODS: TerrainMods = {
   attritionPerTick: 0,
   visionRadius: 4,
 };
-
-// Per-terrain mod overrides sourced from src/data/terrain.json (via terrain-mods.ts).
-// Balance intent: MOUNTAIN harshest (best cover/vision, brutal move cost, heavy bleed);
-// ROCKY strong cover/slow bleed; HILL strong cover/great vision/mild attrition;
-// FOREST strong cover/low sight/slow; RIVER bad cover/slow/high attrition;
-// SAND mildly bad cover/slow/low vision; GRASSLAND neutral (falls to defaults).
-export { TERRAIN_MODS } from '../data/terrain-mods';
 
 /**
  * Resolve a terrain key to its full mod set. Unknown / undefined types and missing

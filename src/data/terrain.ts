@@ -8,6 +8,9 @@ export interface TerrainDef {
   label: string;
   height: number;
   walkable: boolean;
+  // Mechanical fields duplicate TerrainMods (src/battle/terrain.ts) intentionally —
+  // extending TerrainMods would force data/ to import battle/, but battle/ already
+  // imports data/ (via the terrain-mods wrapper), creating a cycle.
   defenseMult?: number;
   moveCost?: number;
   attritionPerTick?: number;
