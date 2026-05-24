@@ -62,6 +62,13 @@ function check(name: string, cond: boolean, detail?: string) {
   check('regen no-op on off-cadence tick', t === cp);
 }
 
+// applyRegen — tick 0 never regens (avoid free first-tick bonus)
+{
+  const cp = { red: 5, blue: 5 };
+  const t = applyRegen(cp, 0);
+  check('regen no-op at tick 0 even on partial CP', t === cp);
+}
+
 // applyRegen — on-cadence
 {
   const cp = { red: 5, blue: 5 };
@@ -88,9 +95,13 @@ function check(name: string, cond: boolean, detail?: string) {
   const expected = { assign: 0, idle: 0, meta: 0, debug: 0,
     cycleHeading: 1, cycleFormation: 1, march: 2, placeCohort: 2, orderDrag: 3,
     hold: 4, retreat: 4, charge: 6, unleash: 6 } as const;
-  const ok = (Object.keys(expected) as (keyof typeof expected)[])
+  const expectedKeys = Object.keys(expected);
+  const actualKeys = Object.keys(CP_COSTS);
+  const sameSize = expectedKeys.length === actualKeys.length;
+  const valuesMatch = (expectedKeys as (keyof typeof expected)[])
     .every(k => CP_COSTS[k] === expected[k]);
-  check('CP_COSTS matches spec table', ok);
+  check('CP_COSTS matches spec table (same size + values)', sameSize && valuesMatch,
+    `expected ${expectedKeys.length} keys, got ${actualKeys.length}`);
 }
 
 // Report

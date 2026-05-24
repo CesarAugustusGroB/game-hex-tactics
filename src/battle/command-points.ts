@@ -43,7 +43,7 @@ export function debit(cp: CommandPoints, team: Team, intent: CpIntent): CommandP
 /** Returns new CommandPoints with both teams incremented by 1 (clamped to CP_CAP)
  *  if `tick % CP_REGEN_PER_N_TICKS === 0`. Otherwise returns the input unchanged. */
 export function applyRegen(cp: CommandPoints, tick: number): CommandPoints {
-  if (tick % CP_REGEN_PER_N_TICKS !== 0) return cp;
+  if (tick === 0 || tick % CP_REGEN_PER_N_TICKS !== 0) return cp;
   const r = Math.min(CP_CAP, cp.red + 1);
   const b = Math.min(CP_CAP, cp.blue + 1);
   if (r === cp.red && b === cp.blue) return cp;
