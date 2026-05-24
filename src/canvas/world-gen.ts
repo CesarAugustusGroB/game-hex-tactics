@@ -20,6 +20,11 @@ export interface WorldGenOutput {
   gridData: { hex: Hex; type: string }[];
 }
 
+// Tactical battlefield is a wide rectangle (N-S battle axis preserved).
+// Pixel half-extents centred at (0,0); iteration filters by HexUtils.hexToPixel
+// because a pure axial-rectangle is sheared into a parallelogram by the flat-top
+// q→x,y skew. The axial bounding box is intentionally generous to cover the
+// half-extents after the skew.
 const TACTICAL_HALF_W = 2000;
 const TACTICAL_HALF_H = 1000;
 const TACTICAL_BBOX_Q = 50;
