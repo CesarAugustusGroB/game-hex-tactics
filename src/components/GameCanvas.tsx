@@ -498,6 +498,10 @@ export const GameCanvas: React.FC = () => {
       for (const u of groupUnits) {
         refund[u.unitType ?? 'infantry']++;
       }
+      if (!chargeCP(team, 'retreat')) {
+        triggerBrokeFlash(team);
+        return;
+      }
       setArmies(prev => {
         const next = new Map(prev);
         const arr = next.get(sKey) ?? [];
@@ -530,6 +534,10 @@ export const GameCanvas: React.FC = () => {
       issueOrder(team, gid, { mode: 'idle', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined });
       return;
     }
+    if (!chargeCP(team, mode)) {
+      triggerBrokeFlash(team);
+      return;
+    }
     issueOrder(team, gid, {
       mode,
       chargeTicksRemaining: mode === 'charge' ? CHARGE_DURATION_TICKS : undefined,
@@ -540,7 +548,7 @@ export const GameCanvas: React.FC = () => {
       // Unleash is the only remaining one-way commit (retreat is handled separately above).
       committed: mode === 'unleash' ? true : undefined,
     });
-  }, [issueOrder, clearOrder]);
+  }, [issueOrder, clearOrder, chargeCP, triggerBrokeFlash]);
 
   // A / MARCH: dual-purpose action on the selected group.
   //   - If currently marching: cycle heading within the team's forward cone.
