@@ -203,7 +203,7 @@ export const GameCanvas: React.FC = () => {
   }, [gridData, showGrid, terrainTexturesLoaded, viewMode]);
 
   const drawDetails = useCallback(() => {
-    if (!detailDensityNoiseRef.current) return;
+    if (!detailDensityNoiseRef.current) detailDensityNoiseRef.current = createNoise2D();
     drawDetailsRender({
       detailsGfx: detailsGfx.current,
       detailTextures: detailTexturesRef.current,
@@ -1076,7 +1076,6 @@ export const GameCanvas: React.FC = () => {
       // dive animation. Iterate children only on threshold crossings.
       let lastLodFar: boolean | null = null;
       let waterFilterTime = 0;
-      // eslint-disable-next-line react-hooks/immutability
       app.ticker.add((ticker) => {
         updateHighlights(); // eslint-disable-line react-hooks/immutability
         waterFilterTime += ticker.deltaMS / 1000;
