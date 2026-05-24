@@ -142,14 +142,14 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
+      const [armyTex, redInfantryTex, hopliteTex, redCavalryTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
-        PIXI.Assets.load<PIXI.Texture>('/units/roman_soldier.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/hoplite.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/mounted-knight.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/cavalry-hoplite.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/roman_skirmisher.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/skirmisher.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-infantry.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/hoplite.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-cavalry.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/cavalry-hoplite.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/roman_skirmisher.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/skirmisher.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/javelin.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass-noise.png'),
@@ -183,7 +183,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       if (!isMounted) return;
 
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [romanSoldierTex, hopliteTex, mountedKnightTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
+      for (const tex of [redInfantryTex, hopliteTex, redCavalryTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -220,9 +220,9 @@ export function usePixiApp(ctx: PixiAppCtx): void {
 
       /* eslint-disable react-hooks/immutability */
       ctx.armyTextureRef.current = armyTex;
-      ctx.unitTextureRef.current = romanSoldierTex;
+      ctx.unitTextureRef.current = redInfantryTex;
       ctx.unitTextureBlueRef.current = hopliteTex;
-      ctx.unitTextureRedCavalryRef.current = mountedKnightTex;
+      ctx.unitTextureRedCavalryRef.current = redCavalryTex;
       ctx.unitTextureBlueCavalryRef.current = cavalryHopliteTex;
       ctx.unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
       ctx.unitTextureBlueSkirmisherRef.current = skirmisherTex;
@@ -456,7 +456,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         // Per-unit containers (tactical) and flat sprites (strategic) coexist; descend
         // into 'unit-container' children and apply LOD directly to top-level labels.
         const applyLod = (child: PIXI.Container) => {
-          if (child.label === 'unit-sprite') child.visible = !isFar;
+          if (child.label === 'unit-sprite' || child.label === 'unit-sprite-shadow') child.visible = !isFar;
           else if (child.label === 'unit-marker') child.visible = isFar;
           else if (child.label === 'unit-detail') child.visible = !isFar;
         };

@@ -7,6 +7,12 @@ import { getTerrainMods } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
 import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, type Armies, type GroupOrders } from '../constants';
 
+const UNIT_SPRITE_SIZE = 112;
+const UNIT_SHADOW_OFFSET = { x: 8, y: 18 };
+const UNIT_SHADOW_SCALE = { x: 1.05, y: 0.35 };
+const UNIT_SHADOW_ALPHA = 0.35;
+const UNIT_SHADOW_BLUR = 3;
+
 export interface UnitsRenderContext {
   unitsGfx: PIXI.Container;
   unitContainers: Map<string, PIXI.Container>;
@@ -28,6 +34,33 @@ export interface UnitsRenderContext {
   fogOfWar: boolean;
   // current world scale — read directly so GSAP dive tweens don't cause stale reads
   worldScale: number;
+}
+
+function addUnitSpriteWithShadow(container: PIXI.Container, texture: PIXI.Texture, isFar: boolean): void {
+  const shadow = new PIXI.Sprite(texture);
+  shadow.anchor.set(0.5);
+  shadow.x = UNIT_SHADOW_OFFSET.x;
+  shadow.y = UNIT_SHADOW_OFFSET.y;
+  shadow.scale.set(
+    (UNIT_SPRITE_SIZE * UNIT_SHADOW_SCALE.x) / texture.width,
+    (UNIT_SPRITE_SIZE * UNIT_SHADOW_SCALE.y) / texture.height,
+  );
+  shadow.tint = 0x000000;
+  shadow.alpha = UNIT_SHADOW_ALPHA;
+  shadow.filters = [new PIXI.BlurFilter({ strength: UNIT_SHADOW_BLUR })];
+  shadow.label = 'unit-sprite-shadow';
+  shadow.visible = !isFar;
+  container.addChild(shadow);
+
+  const sprite = new PIXI.Sprite(texture);
+  sprite.anchor.set(0.5);
+  sprite.x = 0;
+  sprite.y = 0;
+  sprite.width = UNIT_SPRITE_SIZE;
+  sprite.height = UNIT_SPRITE_SIZE;
+  sprite.label = 'unit-sprite';
+  sprite.visible = !isFar;
+  container.addChild(sprite);
 }
 
 export function drawUnits(ctx: UnitsRenderContext): void {
@@ -214,19 +247,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     const tex = u.team === 'red'
       ? (unitType === 'skirmisher' ? unitTexRedSkir : unitType === 'cavalry' ? unitTexRedCav : unitTex)
       : (unitType === 'skirmisher' ? unitTexBlueSkir : unitType === 'cavalry' ? unitTexBlueCav : unitTexBlue);
-    const sprite = new PIXI.Sprite(tex);
-    sprite.anchor.set(0.5, 1);
-    sprite.x = 0;
-    sprite.y = 32;
-    // Red cavalry/skirmisher art has more empty bbox margin than the infantry sprite,
-    // so render bigger to match the visible silhouette.
-    const isOversizedRedSprite = u.team === 'red' && (unitType === 'cavalry' || unitType === 'skirmisher');
-    const spriteSize = isOversizedRedSprite ? 100 : 72;
-    sprite.width = spriteSize;
-    sprite.height = spriteSize;
-    sprite.label = 'unit-sprite';
-    sprite.visible = !isFar;
-    container.addChild(sprite);
+    addUnitSpriteWithShadow(container, tex, isFar);
 
     // Per-type denominator so cavalry's 30/60 fills 50% (not the 30% an infantry would).
     const maxHp = MAX_HP_BY_TYPE[unitType];

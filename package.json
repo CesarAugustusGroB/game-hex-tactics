@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "sim": "tsx scripts/sim-formations.ts"
+    "sim": "tsx scripts/sim-formations.ts",
+    "units:normalize": "python scripts/normalize-units.py"
   },
   "dependencies": {
     "gsap": "^3.14.2",
