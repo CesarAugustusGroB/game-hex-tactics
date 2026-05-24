@@ -1138,12 +1138,14 @@ export const GameCanvas: React.FC = () => {
       if (layer.alpha !== undefined) tile.alpha = layer.alpha;
       if (layer.blendMode !== undefined) tile.blendMode = layer.blendMode;
       const layerContainer = new PIXI.Container();
+      const filteredContent = new PIXI.Container();
       layerContainer.x = minX;
       layerContainer.y = minY;
-      layerContainer.addChild(tile);
+      filteredContent.addChild(tile);
+      layerContainer.addChild(filteredContent);
       if (layer.waterFilter) {
         const handle = createWaterFilter(WATER_FILTER_CONFIGS[layer.waterFilter]);
-        layerContainer.filters = [handle.filter];
+        filteredContent.filters = [handle.filter];
         waterFilterHandlesRef.current.push(handle);
       }
       const mask = new PIXI.Graphics();
@@ -1154,8 +1156,8 @@ export const GameCanvas: React.FC = () => {
         const pts: number[] = [];
         for (let i = 0; i < 6; i++) {
           const r = Math.PI / 180 * (60 * i);
-          const vx = p.x + sz * Math.cos(r);
-          const vy = topY + sz * Math.sin(r);
+          const vx = p.x + sz * Math.cos(r) - minX;
+          const vy = topY + sz * Math.sin(r) - minY;
           topV.push({ x: vx, y: vy });
           pts.push(vx, vy);
         }
@@ -1177,7 +1179,7 @@ export const GameCanvas: React.FC = () => {
         }
       }
       overlay.addChild(layerContainer);
-      overlay.addChild(mask);
+      layerContainer.addChild(mask);
       layerContainer.mask = mask;
     }
     const riverSeaCliffs = new PIXI.Graphics();
