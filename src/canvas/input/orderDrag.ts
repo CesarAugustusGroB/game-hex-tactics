@@ -9,8 +9,10 @@ import {
 } from '../../battle/simulate';
 import type { Unit } from '../../battle/simulate';
 import type { OrderChange } from '../../battle/ai';
+import type { CpIntent } from '../../battle/command-points';
 import {
   DRAG_THRESHOLD_PX, HEADING_ARROWS, TEAM_TINTS, groupOrderKey,
+  deployZoneFor,
   type Armies, type GroupOrders, type GroupFormations, type GroupDepths, type InputMode,
 } from '../constants';
 import { TERRAINS } from '../terrain-defs';
@@ -41,6 +43,8 @@ export interface OrderDragCtx {
   setArmies: Dispatch<SetStateAction<Armies>>;
   setInputMode: Dispatch<SetStateAction<InputMode | null>>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
+  chargeCP: (team: Team, intent: CpIntent) => boolean;
+  triggerBrokeFlash: (team: Team) => void;
 }
 
 export function beginOrderDrag(e: PIXI.FederatedPointerEvent, world: PIXI.Container, ctx: OrderDragCtx): void {
@@ -76,6 +80,13 @@ export function updateOrderDrag(localX: number, localY: number, ctx: OrderDragCt
 export function commitOrderDrag(ctx: OrderDragCtx): void {
   const drag = ctx.orderDragRef.current;
   if (!drag) return;
+
+  const zone = deployZoneFor(drag.team, ctx.gridDataRef.current);
+  if (!zone.has(HexUtils.key(drag.targetHex))) {
+    ctx.setInputMode(null);
+    cancelOrderDrag(ctx);
+    return;
+  }
 
   const dx = drag.currentWorld.x - drag.startWorld.x;
   const dy = drag.currentWorld.y - drag.startWorld.y;
@@ -138,6 +149,12 @@ export function commitOrderDrag(ctx: OrderDragCtx): void {
   }
 
   if (deployValid && strategic) {
+    if (!ctx.chargeCP(drag.team, 'orderDrag')) {
+      ctx.triggerBrokeFlash(drag.team);
+      ctx.setInputMode(null);
+      cancelOrderDrag(ctx);
+      return;
+    }
     ctx.setArmies(prev => {
       const updated = new Map(prev);
       const arr = (updated.get(HexUtils.key(strategic)) ?? []).map(u => {

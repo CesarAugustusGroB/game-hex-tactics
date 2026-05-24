@@ -349,6 +349,8 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         setArmies: ctx.setArmies,
         setInputMode: ctx.setInputMode,
         issueOrder: ctx.issueOrder,
+        chargeCP: ctx.chargeCP,
+        triggerBrokeFlash: ctx.triggerBrokeFlash,
       };
 
       app.stage.on('pointerdown', (e) => {
