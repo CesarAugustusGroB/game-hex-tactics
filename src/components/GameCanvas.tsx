@@ -568,6 +568,7 @@ export const GameCanvas: React.FC = () => {
     if (cur?.committed) return;
     const isMarching = cur?.mode === 'march' && !!cur.attackTarget;
     if (isMarching) {
+      if (!chargeCP(team, 'cycleHeading')) { triggerBrokeFlash(team); return; }
       issueOrder(team, gid, { heading: cycleConeHeading(team, cur!.heading) });
       return;
     }
@@ -582,6 +583,7 @@ export const GameCanvas: React.FC = () => {
         r: avgR + dir.r * 15,
       });
     }
+    if (!chargeCP(team, 'march')) { triggerBrokeFlash(team); return; }
     issueOrder(team, gid, {
       mode: 'march',
       attackTarget,
@@ -590,7 +592,7 @@ export const GameCanvas: React.FC = () => {
       chargeDamagedIds: undefined,
       holdTicks: undefined,
     });
-  }, [issueOrder]);
+  }, [issueOrder, chargeCP, triggerBrokeFlash]);
 
   const toggleScan = useCallback(() => {
     setIsScanning(s => {
@@ -602,6 +604,7 @@ export const GameCanvas: React.FC = () => {
 
   const cycleFormation = useCallback((gid: GroupId) => {
     const team = selectedTeamRef.current;
+    if (!chargeCP(team, 'cycleFormation')) { triggerBrokeFlash(team); return; }
     const key = groupOrderKey(team, gid);
     setGroupFormations(prev => {
       const next = new Map(prev);
@@ -610,7 +613,7 @@ export const GameCanvas: React.FC = () => {
       next.set(key, FORMATION_CYCLE[(idx + 1) % FORMATION_CYCLE.length]);
       return next;
     });
-  }, []);
+  }, [chargeCP, triggerBrokeFlash]);
 
   const resetBattle = useCallback(() => {
     setArmies(new Map());
