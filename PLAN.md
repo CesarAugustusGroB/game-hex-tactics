@@ -1,159 +1,303 @@
-# Architectural review: hex-tactics from a strategy-game-design lens
+# Refactor `GameCanvas.tsx` into modular files (8-phase roadmap)
 
 ## Context
 
-Strategic-game architect's diagnostic review focused on opportunities for improvement, especially around scaling (many units) and depth. Below is a snapshot of what's there, where the foundation is strong, where it gets squeezed at scale, and prioritized opportunities.
+`src/components/GameCanvas.tsx` is a 3327-line god-component owning six unrelated concerns: module-scope constants & terrain defs, 40+ PIXI texture refs, world generation, terrain/detail/unit renderers, drag/pointer/keyboard input, the simulation tick loop, AI dispatch, capture-progress accounting, projectile spawning, and the entire HUD JSX. Every small change requires loading the whole context of the file; cross-cutting tweaks (e.g. adding a new HUD panel that reads orders) force navigation through hundreds of lines of unrelated rendering code.
 
-## Snapshot of the current architecture
+The goal: pull the file apart along its natural seams into one God-Component → ~150-line shell that wires up well-scoped modules. Each phase is an independent PR. Phases are ordered so each leaves the app working and reduces the file's size monotonically.
 
-- **Three files hold ~99% of the logic**:
-  - `src/components/GameCanvas.tsx` (1737 lines) — world gen, terrain rendering, units rendering, input, HUD, tick driver.
-  - `src/battle/simulate.ts` (1122 lines) — pure sim, motion modes, defendHeight formation engine, combat phase.
-  - `scripts/sim-formations.ts` (636 lines) — manual scenario harness.
-- **Sim loop**: `setInterval` at `TICK_MS=500` calls a pure `simulateTick(units, orders, config)`. Pure-in / pure-out, deterministic.
-- **Render**: single PIXI Application, one `Container` per logical layer (terrain, highlights, preview, units). Drawn via React's mount-only effect plus React-driven `useCallback` redraws.
-- **Combat model**: every unit with ≥1 adjacent enemy deals a constant `damagePerTick` to that enemy's weakest neighbor each tick. No armor / range / abilities / morale. All units identical stats-wise; only sprite differs by team.
-- **Motion modes (5)**: `march`, `charge`, `retreat`, `unleash`, `defendHeight`. Recent work has been deep on `defendHeight`: segment/rank BFS, perimeter walks, sticky assignments, lateral fallback. UNLEASH also got target-spreading + lateral fallback.
-- **Strategic ↔ Tactical "dive"**: same procedural noise field used for both views by re-rolling `noiseOffset` + `resolution`. Clever and cheap.
-- **State**: React state + mirrored refs for the long-lived PIXI handlers. Orders are a `Map<string, GroupOrder>`; armies a `Map<string, Unit[]>` keyed by strategic hex.
+## End-state file tree
 
-## Strengths to preserve
+```
+src/
+  battle/                     (unchanged — pure sim, already separated)
+    simulate.ts
+    terrain.ts
+    ai.ts
+  hex-engine/                 (unchanged)
+    HexUtils.ts
+  game/
+    constants.ts              — DRAG_THRESHOLD_PX, DIVE_ZOOM, TICK_MS, RETREAT_REFUND_FRAC, CAPTURE_TICKS_TO_WIN…
+    terrainDefs.ts            — TERRAINS, DETAIL_RULES, ALL_DETAIL_KEYS, TerrainDef type
+    types.ts                  — OrderDrag, InputMode, Armies, Rosters, GroupOrders, GroupFormations, GroupDepths
+    deployZone.ts             — DEPLOY_ZONE_FRAC, deployZoneFor()
+    captureZone.ts            — CAPTURE_CENTER, CAPTURE_ZONE_HEXES, captureZoneKeys()
+    worldGen.ts               — generateWorldData(settings, viewMode, gridRadius, noise) → GridData
+  rendering/
+    assets.ts                 — loadTextures() → TextureBundle (terrain, units, details, flag, javelin)
+    worldSetup.ts             — createPixiApp(container) → { app, world, layers: PixiLayers, renderLoop }
+    terrainRenderer.ts        — drawMap(layers, gridData, opts)
+    detailRenderer.ts         — drawDetails(layers, gridData, textures)
+    unitRenderer.ts           — drawUnits(layers, armies, opts, tweenState)
+    projectileRenderer.ts     — spawnProjectiles(layers, projectiles, texture)
+    captureFlagRenderer.ts    — drawCaptureZone + flag sprite positioning
+    shaders/
+      waterFilter.ts          — GLSL source + WATER_FILTER_CONFIGS + createWaterFilter() factory + advanceWaterTime(handles, deltaSec)
+  input/
+    usePointerHandlers.ts     — pan/zoom/tap/paint/drag handlers + drag-order state
+    useKeyboard.ts            — tactical-order + global shortcuts via declarative key→action map
+  state/
+    useBattleState.ts         — armies, rosters, orders, formations, depths, selection, capture, win
+    useOrderCommands.ts       — issueOrder, clearOrder, toggleMode, marchForward (depends on useBattleState)
+    useBattleTick.ts          — setInterval + AI dispatch + simulateTick + capture-progress + win check
+  hud/
+    Hud.tsx                   — layout shell, composes the panels below
+    WinBanner.tsx
+    CaptureProgress.tsx
+    TerrainTooltip.tsx
+    DeployButtons.tsx
+    TeamToggle.tsx
+    GroupsPanel.tsx           — wrapper over 3 groups
+      GroupRow.tsx            — one row's 2 button rows + state (currently ~300 lines of IIFEs)
+    BattleControls.tsx        — START/PAUSE, RESET BATTLE, RETURN TO STRATEGIC, REGENERATE
+  components/
+    GameCanvas.tsx            — ~150 lines: mount PIXI via worldSetup + assets, instantiate state hooks, render <Hud/>
+```
 
-1. **Pure `simulateTick`**. The sim is testable, deterministic, replayable. This is the load-bearing decision that makes everything else possible — sim-formations.ts works because of it, regression checks are easy, future replay/network sync would be cheap.
-2. **One-canvas PIXI architecture**. No per-unit React component, no synchronization drift. Easily handles 145 units at 500ms ticks.
-3. **Strategic-tactical dive via noise reseeding** — elegant, no level data to ship, infinite worlds.
-4. **Hex math centralized** in `HexUtils.ts` (111 lines, clean). Used consistently.
-5. **Player-driven AI substitute**: pressing `<` swaps which team you're controlling so both sides can be played from one seat. Pragmatic shortcut that defers writing real AI.
-6. **The defend system is genuinely sophisticated** — perimeter walk + rank BFS + sticky assignment + lateral fallback is a small algorithm fortress. It's one of the strongest parts of the codebase.
+## Cross-cutting principles (apply to every phase)
 
-## Findings (high → low priority by gameplay impact)
+- **PIXI refs are NOT React Context**. Pass them explicitly. `worldSetup.ts` returns a single `PixiLayers` object that downstream renderers/handlers receive as a parameter. Context hides initialisation order and makes refactors fragile.
+- **Renderers are one-way pure**: `(layers, data, opts) → void`. They never own React state or call setters. The exception: `unitRenderer.ts` owns a GSAP-tween container map, passed in as a `tweenState` ref.
+- **Pointer handlers are the only place inversion happens** (PIXI events → React setters). That asymmetry is intentional.
+- **No new global store** (Zustand/Redux). `useBattleState` agglomerates the ~12 current `useState` into a single hook return; that's enough.
+- **Each phase compiles, lints, runs in browser, and passes `npx tsx scripts/sim-formations.ts`** before merging.
+- **Git strategy**: one branch per phase, branched off the previous phase's merge. Use `git worktree` so the previous phase's code stays available for diff/reference.
+- **Shader code (`rendering/shaders/waterFilter.ts`) is a module of its own** even though it's small (~120 lines total). Don't inline GLSL strings inside renderer files — they're whitespace-sensitive and benefit from their own home for future shaders (terrain-flow, fog-of-war reveal, etc.) that may follow the same factory pattern.
 
-### F1. Combat depth is the smallest in the project. Everything else is built around it but it's a 5-line loop.
+## Phase 1 — Extract pure data modules (incl. shader source)
 
-The combat phase (`simulate.ts:804-823`) is: pick weakest adjacent enemy → deal constant damage. No:
-- **Unit types** with different stats (HP, damage, range, speed, defense). The Roman/Hoplite split is purely cosmetic — same numbers under the hood.
-- **Ranged attacks**. Charge is melee-only and there's no ranged weapon mechanic — yet the front-line/back-line formation work is built FOR ranged combat patterns.
-- **Flanking / facing bonuses**. The lieutenant has a captured `heading` but it's not used in combat math. The shield is iconic in the sprite but doesn't translate to a defensive arc.
-- **Morale / rout**. Units fight to the death. No retreat under pressure, no chain reactions, no "defending the high ground holds the rabble".
-- **Terrain combat modifiers**. Defending HILL vs. attacking from PLAIN should give a defensive bonus — that's the entire premise of "defend HEIGHT". Currently terrain affects movement only.
+**Scope.** Move all module-scope constants, types, pure helpers, and the water-shader GLSL source out of `GameCanvas.tsx`. No logic changes; only re-exports and re-imports.
 
-**Impact**: every tactical decision (rank position, terrain choice, formation shape) is currently visual — the system rewards none of it numerically. Players will eventually notice "it doesn't matter where I stand". This is the biggest design gap.
+**Files created.** `game/constants.ts`, `game/terrainDefs.ts`, `game/types.ts`, `game/deployZone.ts`, `game/captureZone.ts`, `rendering/shaders/waterFilter.ts` (initial seed — only constants/types this phase; factory lands in Phase 4).
 
-### F2. No AI for the opposing team — the game can't be played solo against a challenge.
+**What moves.**
+- `constants.ts`: `DRAG_THRESHOLD_PX`, `DIVE_ZOOM`, `STRATEGIC_RESOLUTION`, `HEADING_ARROWS`, `COHORT_SIZE`, `INITIAL_ROSTER`, `RETREAT_REFUND_FRAC`, `CAPTURE_TICKS_TO_WIN`, `LOD_THRESHOLD`, `TICK_MS`, `DAMAGE_PER_TICK`.
+- `terrainDefs.ts`: `TerrainDef` interface, `TERRAINS` record, `DetailLayerConfig`/`TerrainDetailRules` types, `DETAIL_RULES`, `ALL_DETAIL_KEYS`, `GRASS_KEYS`/`FLOWER_KEYS`/etc, `numKeys()` helper, `detailAssetPath()`, `spriteCategory()`, `pickWeighted()`, `seededRandom()`, `getHexSeed()`, `grassChunkPatch()`.
+- `types.ts`: `OrderDrag`, `InputMode`, `Armies`, `Rosters`, `Roster`, `GroupOrders`, `GroupFormations`, `GroupDepths`, `Hex` re-export.
+- `deployZone.ts`: `DEPLOY_ZONE_FRAC`, `deployZoneFor()`.
+- `captureZone.ts`: `CAPTURE_CENTER`, `CAPTURE_ZONE_HEXES`, `captureZoneKeys()`.
+- `rendering/shaders/waterFilter.ts`: `WATER_FILTER_VERTEX`, `WATER_FILTER_FRAGMENT`, `WATER_FILTER_CONFIGS` (deepSea + coastal presets), `WaterFilterConfig`, `WaterFilterHandle` interfaces. **The `createWaterFilter` factory stays in `GameCanvas.tsx` for now** — it touches `PIXI.Filter`/`PIXI.GlProgram` and belongs to the rendering layer, which moves in Phase 4. Splitting it from its GLSL source temporarily is fine since both files are imported together.
 
-The only way the blue team moves is if the human player swaps teams via `<` and issues orders manually. There's no enemy AI loop, no behavior tree, no scripted scenarios. A solo player can only test their own algorithm against a stationary enemy.
+**Files modified.** `GameCanvas.tsx`: replace module-scope blocks with imports. No other code touched.
 
-**Impact**: there is no game loop yet, just a sandbox. Adding even a primitive AI (e.g., "every blue group moves toward the nearest red group") would unlock playability.
+**Verification.**
+1. `npm run build` passes (no new errors).
+2. `npm run lint` baseline unchanged.
+3. `npx tsx scripts/sim-formations.ts` numbers identical.
+4. Browser smoke: dive into tactical, deploy a unit, run a battle — visual output unchanged. **Specifically check water animation** (SEA/DEEP_SEA hexes should still shimmer at the same speed/strength).
 
-### F3. `GameCanvas.tsx` at 1737 lines is the biggest scaling risk for the codebase itself.
+**Risk.** Near-zero. Purely mechanical. The biggest gotcha is making sure `detailAssetPath` and `seededRandom` and `pickWeighted` keep the same signatures since `drawDetails` calls them, and that the shader GLSL strings are preserved byte-for-byte (whitespace-sensitive on some drivers).
 
-It contains: world gen, PIXI bootstrap, terrain draw, highlights, units draw, input (pointer + keyboard), 5 input modes, HUD JSX, tick driver, refs / state sync. The file has crossed a threshold where:
-- Greppable concepts are still fine, but **causal reasoning across the file is hard**. Adding a new mode requires touching ~6 distinct sections.
-- The mount-only `useEffect` is a 600-line god-block.
-- All five PIXI event handlers (`pointerdown`, `globalpointermove`, `pointerup`, `pointertap`, `dblclick`) branch on `inputModeRef.current`. Each new mode adds another branch in each handler.
-- The HUD JSX is interleaved with sim-side logic. Refactoring one risks the other.
+**LOC moved out:** ~500 (constants 418 + shader source/configs/types ~80).
 
-This is a "growth in place" problem. The codebase has been doubling functionally every week or two — eventually a single file approach hits a wall.
+## Phase 2 — Extract `generateWorldData`
 
-**Impact**: not user-visible, but every feature now costs more than the last.
+**Scope.** Pull world generation out as a pure function. It currently sits inside a `useCallback` with deps `[genSettings, gridRadius, viewMode]` but mutates nothing — it builds and returns a fresh `gridData`.
 
-### F4. No real test coverage outside of `sim-formations.ts`.
+**Files created.** `game/worldGen.ts` exporting `generateWorldData(input: GenInput) → GridEntry[]` where `GenInput = { settings, viewMode, gridRadius, noise, detailDensityNoise, tacticalHalfW?, tacticalHalfH?, tacticalBboxQ?, tacticalBboxR? }`.
 
-The harness is good — it's a series of scenarios that print final positions for manual inspection. But:
-- No automated assertions. The harness prints; humans verify. If you accidentally break `march-east-clear` while adding a feature, nothing red-flags it — the user notices weeks later.
-- No tests on the canvas (input, mode toggles, render pipeline).
-- No tests on world generation invariants (continents are connected, rivers terminate at sea, etc.).
-- No CI hook running `npm run sim` or similar.
+**Files modified.** `GameCanvas.tsx`: the in-component `useCallback` becomes a 5-line wrapper that pulls refs and `genSettings` and calls the pure function. Noise refs stay where they are.
 
-**Impact**: regressions ship. We've already seen ~3 cases in recent history where a "fix" broke an adjacent scenario; only the user catching it live prevented bigger damage.
+**Verification.** Same as Phase 1. Strategic and tactical map generation must produce visually-identical results (compare a screenshot or just deploy + battle as before).
 
-### F5. Performance scales poorly past ~200 units due to repeated O(N²) work in render.
+**Risk.** Low. The function is already pure-ish; the only state it owns is the `noiseRef`/`detailDensityNoiseRef` lazy-init pattern, which can be hoisted into the caller or passed in.
 
-Per-tick render scan does `units.find(d => d.hex.q === ... && d.hex.r === ...)` lookups inside loops. Examples:
-- `drawUnits` calls `gridData.find(d => d.hex.q === u.tacticalHex.q && d.hex.r === u.tacticalHex.r)` for every unit → O(N × gridSize) per render. For a 35-radius map (~4000 hexes) and 145 units that's 580k comparisons per frame.
-- Similar pattern in `renderOrderPreview` and `renderDefendPreview` ("find tile by q,r" inside per-slot loop).
-- `gridDataRef.current` is a flat array, not a `Map<key, …>`. Cheap to fix.
+**LOC moved out:** ~110.
 
-There's also a couple of redraws-from-scratch in places where partial updates would be possible (terrain redraws on every gridData change, unit-graphics container clears every tick).
+## Phase 3 — Extract asset loader
 
-**Impact**: invisible at 145 units, but the project has been bumping unit count fast. 500-1000 units would expose this.
+**Scope.** The async block that loads ~40 textures inside the mount `useEffect` becomes a `loadTextures()` function returning a `TextureBundle`.
 
-### F6. Visual feedback for orders is sparse — at 145 units the player can't see who's going where.
+**Files created.** `rendering/assets.ts`:
+```ts
+export type TextureBundle = {
+  units: { red: Record<UnitType, PIXI.Texture>, blue: Record<UnitType, PIXI.Texture> },
+  terrain: { base: Record<TerrainKey, PIXI.Texture>, variations: …, patches: … },
+  details: Map<string, PIXI.Texture>,
+  flag: PIXI.Texture,
+  javelin: PIXI.Texture,
+};
+export async function loadTextures(): Promise<TextureBundle>;
+```
 
-Today, the player:
-- Issues an ATTACK-drag and sees a one-tick preview of slots.
-- After commit, that preview goes away. There's no persistent indicator showing "this group is marching east" or "the rank-2 unit there belongs to G3".
-- The lieutenant gets a ★ + direction arrow but only at the lieutenant slot. The other 144 units in G1 have no on-screen affiliation cue besides the team-color hex outline.
+**Files modified.** `GameCanvas.tsx` mount useEffect: replace the ~150-line texture-loading block with `const textures = await loadTextures()`. The existing 40+ texture refs collapse to one ref holding the bundle.
 
-**Impact**: at scale the battlefield reads as a sea of identical pieces. Players can't quickly understand intent, even their own. UI ergonomics, not architecture, but a high-leverage place to invest.
+**Verification.** Build/lint/harness/browser. The first paint after dive should look identical.
 
-### F7. Order types are tightly coupled to the sim's pure shape, which hurts serialization / save.
+**Risk.** Medium. Some sprite refs are stored individually for use deep in renderers (e.g. `javelinTextureRef` accessed during projectile spawn). The bundle pattern means renderers/handlers receive `textures` instead. Catch: HMR may reload the bundle — ensure the loader is idempotent or guarded.
 
-- `GroupOrder` includes `defendAssignments?: Record<string, Hex>` and other sticky state. As more modes accrue, the order interface grows.
-- Orders are stored in a `Map`, which doesn't JSON-serialize directly (so save/load would need a `mapToObject` / `objectToMap` helper).
-- There's no separation between "order metadata the player issued" and "transient sim state computed from it" (e.g., `chargeTicksRemaining`, `chargeDamagedIds`, `defendAssignments` are all mixed in the same struct).
+**LOC moved out:** ~150 from `GameCanvas.tsx`, ~200 in new file (with types).
 
-**Impact**: future replay/save/multiplayer features will pay this debt. Not urgent.
+## Phase 4 — Extract renderers (the big win)
 
-### F8. Movement system stalls in adversarial geometry — the sim test admits this.
+**Scope.** `drawMap`, `drawDetails`, `drawUnits`, projectile spawn — each becomes a pure-on-PIXI function taking `(layers, data, ...)`. This is the single biggest reduction in `GameCanvas.tsx` LOC.
 
-Lateral fallback unblocked many cases; sticky assignment removed the oscillation. But edge cases remain:
-- Two units perfectly blocking each other's targets ("swap deadlock") — not handled. Documented as out-of-scope.
-- Units assigned to a rank-N slot they geometrically can't reach (full perimeter blocks center).
-- No A* pathfinding for "obvious detour available" cases.
+**Sub-phases (one PR each):**
 
-**Impact**: occasional confusing visual ("why is that unit just sitting there?"). Low-frequency at moderate density; degrades at very high density.
+**4a — `worldSetup.ts` + finish `waterFilter.ts`** first, because the others depend on it. Exports `createPixiApp(container) → { app, world, layers: PixiLayers, renderLoop: { addCallback(fn), removeCallback(fn) } }` where `PixiLayers = { terrainGfx, terrainOverlay, detailsGfx, gridGfx, deployZoneGfx, captureZoneGfx, captureFlag, unitsGfx, projectilesGfx, previewGfx, highlightGfx }`. Encapsulates the z-order assembly currently at lines ~2846–2861 plus a thin wrapper over `app.ticker.add` so per-frame consumers don't reach into the PIXI app directly.
 
-### F9. No save / load, no replay, no multiplayer.
+  Also in this sub-phase: **move the `createWaterFilter` factory** out of `GameCanvas.tsx` into `rendering/shaders/waterFilter.ts` (joining the GLSL source extracted in Phase 1). Add `advanceWaterTime(handles: WaterFilterHandle[], deltaSec: number): void` as the per-frame uniform update — the body is the current 3-line loop at ~line 2329. The `waterFilterHandlesRef` becomes owned by `terrainRenderer.ts` (Phase 4b) and registered with `renderLoop.addCallback` so the ticker calls `advanceWaterTime` every frame.
 
-The pure sim could trivially do all three (deterministic). Currently none exist. At least save/load would substantially raise perceived completeness with very little work.
+**4b — `terrainRenderer.ts`.** `drawMap(layers, gridData, { showGrid, terrainTexturesLoaded, viewMode, textures, waterHandles })`. Becomes a pure function; the existing `useCallback` becomes a 5-line `useEffect` that re-renders when deps change. The renderer pushes onto `waterHandles` as it creates filters per overlay sprite (current line ~1145). The per-frame `advanceWaterTime` call is registered once at mount via `renderLoop.addCallback`.
 
-### F10. Strategic layer is decorative.
+**4c — `detailRenderer.ts`.** `drawDetails(layers, gridData, textures)`. Same pattern.
 
-The strategic view is procedural terrain at low resolution that you "dive into". Once inside tactical, you fight. No campaign progression, no overworld movement of armies, no resource economy, no objectives. The strategic ↔ tactical dive is a *capability* (the tech is in place) more than a *gameplay loop*.
+**4d — `unitRenderer.ts`.** `drawUnits(layers, { armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam, textures, tweenState })`. The trickiest: it owns a `Map<unitId, PIXI.Container>` and GSAP tweens. Pass that map in as `tweenState` ref so the renderer maintains it across calls without losing tween identity. Test by deploying units and verifying smooth movement during a battle.
 
-**Impact**: depends on design goals — if the goal is "be a tactical sandbox like Total War battles," this is fine. If it's "build a 4X-style strategy game," there's no strategy layer yet.
+**4e — `projectileRenderer.ts` + `captureFlagRenderer.ts`.** Smaller. Both follow the same shape.
 
-## Recommendations (priority-ordered, with quick-win first)
+**Verification per sub-phase.** Build, browser test, especially: terrain looks identical, water shimmers at the same speed (compare side-by-side if possible), deploy and attack to see units tween smoothly, throw a javelin (skirmisher at range) to verify projectiles, win a battle to verify capture-flag drawing.
 
-### P0 — Quick win this week
-1. **Index `gridData` as a `Map<key, TerrainTile>` at write time** (or a per-tick Map at the top of each draw fn). Replaces all `gridData.find(...)` calls. ~30-line change, kills the O(N×gridSize) render lookups for free. Addresses F5.
-2. **Add automated assertions to `sim-formations.ts`**. Each scenario already prints expected outcomes in comments — convert those to `assert.deepEqual(finalPositions, expected)` checks and fail the run on regression. Hook into `npm run sim` and run on each meaningful change. Addresses F4.
+**Risk.** Medium-high — the unit renderer GSAP-tween-container management is the most subtle bit. Mitigate by making 4d its own PR with careful manual testing. For 4a, the water-shader split has a subtle risk: if the per-frame callback registration leaks across HMR reloads, you'll get multiplied `uTime` advancement and the water will look like it's spinning. Guard with a cleanup that calls `renderLoop.removeCallback` on unmount.
 
-### P1 — Foundational, two-week
-3. **Split GameCanvas.tsx**. Suggested partition:
-   - `src/canvas/PixiApp.tsx` — mount-only PIXI bootstrap, terrain/units/highlights/preview Graphics refs.
-   - `src/canvas/input/{useOrderDrag, useDefendGesture, useKeyboard}.ts` — one hook per input mode.
-   - `src/canvas/render/{drawTerrain, drawUnits, renderOrderPreview, renderDefendPreview}.ts` — pure render fns taking refs + state.
-   - `src/canvas/HUD.tsx` — the React panel only.
-   - GameCanvas stays as a thin composition root.
-   Addresses F3.
-4. **Introduce a unit-type table.** `src/battle/unitTypes.ts` with `{id, maxHp, damage, range, speed, defenseTerrainMods}`. Roman = legionary stats, Hoplite = hoplite stats. Combat phase reads from there. Once this lands, sprite-by-team becomes "sprite-by-unit-type" naturally. Unlocks F1, F10.
+**LOC moved out:** ~1000 total across the sub-phases (incl. shader factory + per-frame loop).
 
-### P2 — Game-shaping, month
-5. **Terrain combat modifiers**: a unit on HILL/ROCKY defending against an attacker on PLAIN gets a damage-reduction bonus. Same for the river crossing (attacker crossing river takes attack penalty). This is what `defendHeight` is silently promising. ~50-line combat-phase change. Addresses F1.
-6. **Primitive enemy AI**: a single `runAITick(state)` that, for each enemy group without an order, issues an `attackTarget` toward the nearest player group. Add `isAIControlled: boolean` on team. Makes the game playable solo. Addresses F2.
-7. **Order visualization layer**: persistent rendering of each group's destination (lieutenant's slot) as a faint team-colored arrow from the group's centroid. Optional: thin line for the formation outline at the target. Addresses F6.
+## Phase 5 — Extract input hooks
 
-### P3 — Long-term, when relevant
-8. **Save / load via the pure sim**. `serializeState({units, orders, gridData, viewMode, ...})` → JSON; reverse. Pair with replay (save tick deltas). F7 + F9.
-9. **A* pathing for blocked-unit fallback**. Per-unit, only when greedy + lateral both fail. Cheap when applied selectively. F8.
-10. **Strategic layer with army movement on the overworld** — what unlocks the "dive" mechanic from a sandbox curiosity into a campaign loop. F10.
+**Scope.** The pointer/wheel/pointertap handlers inside the mount `useEffect`, plus the two keyboard useEffects, become hooks.
 
-## Critical files to reference during implementation
+**Files created.**
+- `input/usePointerHandlers.ts` — `usePointerHandlers({ world, container, viewMode, isScanning, inputMode, deps… })`. Owns drag state (`OrderDrag`), calls into commands.
+- `input/useKeyboard.ts` — single keyboard hook backed by a declarative `{ key: { handler, when: 'tactical'|'global' } }` map. Replaces the two 8-arm switch statements.
 
-- `src/battle/simulate.ts` — combat phase at 804-823 (F1), `computeDefendFormation` at ~550 (reusable), `simulateTick` at 763 (entry point for AI hook).
-- `src/components/GameCanvas.tsx` — file size (F3); render lookups at 327, 555-560, 657-660 (F5); HUD section starts ~1370 (F3 split candidate).
-- `scripts/sim-formations.ts` — `runScenario` returns `ScenarioResult` but the result is never asserted on (F4).
-- `src/hex-engine/HexUtils.ts` — small, stable, reusable. No changes needed.
+**Files modified.** `GameCanvas.tsx`: the long pointer-event block in mount `useEffect` is replaced by a hook call. Both keyboard `useEffect`s collapse into `useKeyboard({ commands, selection, battle })`.
 
-## What this review is NOT
+**Verification.** Manual: pan, zoom, dive, deploy by drag, place units by paint, all keyboard shortcuts (T/Q/W/E/R/S/A/D/F + 1/2/3 + Z/X/C + SPACE + ,/< + Backspace) — each one fires exactly once and only in the right mode.
 
-- Not a multiplayer / netcode review (no networking yet).
-- Not a graphics / shader review (PIXI default rendering is fine for the scale).
-- Not a build / bundle audit (Vite is well-configured; the 500 KB warning is benign).
-- Not a TypeScript strictness audit (strict mode is on, types are good).
+**Risk.** Medium. The pointer drag state crosses multiple events and the preview render. Test by issuing several drag orders back-to-back to make sure state resets.
 
-## Suggested next conversation
+**LOC moved out:** ~400.
 
-When ready to act on this review, the natural pick is **P0 + P1 in sequence**: ship the `gridData` indexing + automated test assertions this week, then start the file split + unit-type table next week. That's two weeks of low-risk groundwork that makes every subsequent gameplay feature (terrain combat mods, AI, ranged attacks) cheaper.
+## Phase 6 — Extract state hooks
+
+**Scope.** Consolidate the ~12 `useState` + their refs into `useBattleState()`. Move order-mutation callbacks into `useOrderCommands(state)`.
+
+**Files created.**
+- `state/useBattleState.ts` returning `{ armies, setArmies, armiesRef, rosters, setRosters, rostersRef, groupOrders, groupOrdersRef, groupFormations, groupDepths, selectedTeam, selectedTeamRef, selectedGroup, selectedGroupRef, selectedUnitType, captureProgress, captureProgressRef, winBanner, setWinBanner, isBattleRunning, setIsBattleRunning, inputMode, fogOfWar, currentStrategicHex }`.
+- `state/useOrderCommands.ts` returning `{ issueOrder, clearOrder, toggleMode, marchForward }`. Depends on `useBattleState`.
+
+**Files modified.** `GameCanvas.tsx`: replace all `useState`/`useRef` mirroring with two hook calls.
+
+**Verification.** Full battle playthrough including: deploy → march → engage → retreat (refund) → unleash → capture flag → win. Every state transition that worked before still works.
+
+**Risk.** Medium. Lots of refs to sync. Easy to miss one and end up with stale-closure bugs. Mitigate by doing a fresh search for `useRef<` after the migration and confirming every old ref is reachable via the new hook.
+
+**LOC moved out:** ~300.
+
+## Phase 7 — Extract battle tick loop
+
+**Scope.** The setInterval `useEffect` at lines ~2287–2449 becomes `useBattleTick({ battle, commands, mapApi, isRunning })`. Encapsulates AI dispatch, `simulateTick` call, projectile spawning trigger, capture-progress accounting, win-check.
+
+**Files created.** `state/useBattleTick.ts`.
+
+**Files modified.** `GameCanvas.tsx`: one hook call.
+
+**Note.** Projectile-sprite spawning lives in `projectileRenderer.ts` (Phase 4e); `useBattleTick` calls that renderer with the latest projectile list. Capture-progress writes go via `useBattleState`'s setters.
+
+**Verification.** Run a full battle. Capture progress increments at the same rate, projectiles fly and tween at the same speed, win banner appears at the same trigger.
+
+**Risk.** Low-medium. The tick loop is already well-bounded; main concern is making sure the `tickCounterRef` monotonic invariant (see `CLAUDE.md`) is preserved and not reset on tick mount/unmount cycles.
+
+**LOC moved out:** ~160.
+
+## Phase 8 — Extract HUD components
+
+**Scope.** Split the ~600-line JSX block (lines ~2760–3327) into focused per-panel React components. Do the small ones first so the cleanup is incremental.
+
+**Sub-phases (one PR each):**
+
+**8a — Easy three.** `WinBanner.tsx`, `CaptureProgress.tsx`, `TerrainTooltip.tsx`. Each ~30–60 lines. Pure presentational, props come from `useBattleState`. Drop-in replacement.
+
+**8b — `BattleControls.tsx`.** The START/PAUSE BATTLE button, RESET BATTLE, RETURN TO STRATEGIC, REGENERATE ECOSYSTEM. Each owns one action; props are `{ commands, battle, viewMode }`.
+
+**8c — `DeployButtons.tsx` + `TeamToggle.tsx`.** Roster-aware Z/X/C buttons + red/blue selector. Both ~80 lines.
+
+**8d — `GroupsPanel.tsx` + `GroupRow.tsx`.** The biggest. Currently a single 300-line block with multiple IIFEs. Extract one `GroupRow` component receiving `{ gid, group, order, commands, selection, count, engaged }`. The IIFEs (A-MARCH, F-RETREAT engagement check, etc.) become clean computed props passed to plain buttons. Each button could also be its own component but probably overkill — keep them inline inside `GroupRow`.
+
+**8e — `Hud.tsx` shell.** Composes everything in the same order as the current layout. After this, `GameCanvas.tsx` returns `<div ref={container}/> <Hud .../>`.
+
+**Verification per sub-phase.** Visual diff: panel sits in the same position, colors match, buttons enable/disable in the same conditions, hotkeys still wire through.
+
+**Risk.** Low per-PR, since each panel is independently testable. The risk is doing them all in one PR (don't).
+
+**LOC moved out:** ~600.
+
+## Final state of `GameCanvas.tsx`
+
+After all 8 phases, the file is roughly:
+
+```tsx
+export const GameCanvas: React.FC = () => {
+  const container = useRef<HTMLDivElement>(null);
+  const battle = useBattleState();
+  const commands = useOrderCommands(battle);
+  const [pixi, setPixi] = useState<{ app, world, layers, textures } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const textures = await loadTextures();
+      const { app, world, layers } = createPixiApp(container.current!);
+      if (cancelled) return;
+      setPixi({ app, world, layers, textures });
+    })();
+    return () => { cancelled = true; pixi?.app.destroy(); };
+  }, []);
+
+  useTerrainRender(pixi?.layers, battle.gridData, { /* opts */ });
+  useDetailRender(pixi?.layers, battle.gridData, pixi?.textures);
+  useUnitRender(pixi?.layers, battle, pixi?.textures);
+  usePointerHandlers({ pixi, battle, commands });
+  useKeyboard({ commands, battle });
+  useBattleTick({ battle, commands, isRunning: battle.isBattleRunning });
+
+  return (
+    <div style={{ width: '100vw', height: '100vh' }}>
+      <div ref={container} />
+      <Hud battle={battle} commands={commands} />
+    </div>
+  );
+};
+```
+
+~150 lines, all wiring.
+
+## Cross-phase verification
+
+Standing checks for every PR:
+
+1. **`npm run build`** — passes with no new TS errors.
+2. **`npm run lint`** — baseline maintained (no new errors; warnings may move).
+3. **`npx tsx scripts/sim-formations.ts`** — all scenarios pass with identical numbers.
+4. **Browser smoke** (`npm run dev`):
+   - Strategic overview generates an island, click-to-dive into tactical works.
+   - Deploy cohort, drag to set heading + formation, press A to march.
+   - Engage an enemy: melee damage applies, units tween smoothly.
+   - Toss a javelin (skirmisher at range): projectile sprite tweens to target.
+   - Push to capture zone: gold flower visible, flag sprite at centre, capture-progress strip increments.
+   - Win the battle: WIN banner appears, auto-clears.
+   - Press RESET BATTLE / RETURN / REGENERATE: each resets the expected scope.
+
+5. **Diff size**: each PR should remove more lines from `GameCanvas.tsx` than it adds across the new files (after Phase 1 sets up imports). If a PR grows the file, something went wrong.
+
+## Out of scope
+
+- Adding state-management libraries (Zustand, Redux). The `useBattleState` hook is enough.
+- Splitting the battle simulator (`src/battle/*.ts`) — already cleanly separated.
+- Test coverage. Worth adding unit tests for `useOrderCommands` and `worldGen` opportunistically as they're extracted, but not a blocker.
+- Type-narrowing the renderer parameter objects beyond what's needed for correctness. Premature.
+- Replacing PIXI with another renderer.
+- Migrating to a different React state pattern (signals, immer, etc.).
+
+## Suggested execution order
+
+1. Phase 1 first (foundation imports).
+2. Phase 3 (assets) next — it's bigger than Phase 2 but unblocks Phase 4 sub-phases.
+3. Phase 2 (worldGen) in parallel with Phase 3 if multiple PRs in flight.
+4. Phase 4 (4a → 4b → 4c → 4d → 4e in order).
+5. Phase 5 (input).
+6. Phase 6 (state).
+7. Phase 7 (tick).
+8. Phase 8 (HUD: 8a → 8b → 8c → 8d → 8e).
+
+If at any point a phase's PR review surfaces a missing seam or naming issue, fix it in the next phase rather than re-doing earlier work — the file tree is meant to be revisable.
