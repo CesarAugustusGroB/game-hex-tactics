@@ -27,13 +27,35 @@ export const WATER_FILTER_CONFIGS: Record<'deepSea' | 'coastal', WaterFilterConf
   },
 };
 
+// PIXI v8 auto-binds uInputSize / uOutputFrame / uOutputTexture into every filter; the
+// vertex shader must use them to map the [0,1] aPosition quad into the filter's allocated
+// region of the framebuffer atlas. A naïve `aPosition * 2 - 1` ignores those uniforms,
+// stretching the quad to the full viewport and sampling the input texture from corner to
+// corner — which yields a flat-color rectangle wherever the filtered container actually
+// lives. This shader matches PIXI's canonical passthrough.vert (see node_modules/pixi.js
+// filters/defaults/passthrough/passthrough.vert.mjs).
 export const WATER_FILTER_VERTEX = `
   in vec2 aPosition;
   out vec2 vTextureCoord;
 
+  uniform vec4 uInputSize;
+  uniform vec4 uOutputFrame;
+  uniform vec4 uOutputTexture;
+
+  vec4 filterVertexPosition() {
+    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+    position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
+    return vec4(position, 0.0, 1.0);
+  }
+
+  vec2 filterTextureCoord() {
+    return aPosition * (uOutputFrame.zw * uInputSize.zw);
+  }
+
   void main(void) {
-    gl_Position = vec4(aPosition * 2.0 - 1.0, 0.0, 1.0);
-    vTextureCoord = aPosition;
+    gl_Position = filterVertexPosition();
+    vTextureCoord = filterTextureCoord();
   }
 `;
 

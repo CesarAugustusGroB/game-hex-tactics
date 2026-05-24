@@ -172,6 +172,16 @@ Same pattern applies if you ever add biome border strokes or any other per-edge 
 
 ## Bugs we caught, and the lessons (continued)
 
+### PIXI v8 filter vertex shader must use `uOutputFrame` / `uInputSize` / `uOutputTexture`
+
+`createWaterFilter` shipped with a vertex shader that did `gl_Position = vec4(aPosition * 2.0 - 1.0, 0.0, 1.0); vTextureCoord = aPosition;`. That treats `aPosition` as if PIXI gave a full-viewport quad and the input texture as a full-frame sampler. Neither is true in PIXI v8.
+
+PIXI v8's `FilterSystem` allocates each filter pass into a sub-rectangle of a shared framebuffer atlas, and auto-binds three `vec4` uniforms describing that allocation: `uInputSize` (1/width, 1/height of the input texture), `uOutputFrame` (xy = offset, zw = size of the output region in pixels), and `uOutputTexture` (the target texture dimensions, with z encoding flip). The standard `passthrough.vert` (in `pixi.js/lib/filters/defaults/passthrough/`) uses these to map `aPosition ∈ [0,1]` to the correct NDC slice and the correct sampler sub-rect. If you skip them, the quad covers the full viewport and the sampler reads from corner to corner of the atlas — wherever the actual content sits in the atlas, you get something else (typically the cleared atlas background, a single uniform color).
+
+Visible symptom in this codebase: the `DEEP_SEA` and `SEA` overlays — each a `TilingSprite` in a `Container` clipped by a hex-union `Graphics` mask — rendered as a flat rectangular blob inside the hex-shaped mask boundary, instead of the tiled noise texture they were supposed to show. The mask was clipping correctly; the filter was producing garbage that happened to read as a constant color, so the clipped region looked uniform. Confirmed by side-by-side screenshots before/after replacing the vertex shader with the canonical PIXI v8 pattern.
+
+Lesson: when you write a custom PIXI v8 filter, copy `passthrough.vert` first and only modify the fragment. The vertex shader is essentially boilerplate that translates aPosition into the filter's allocated region — getting it wrong silently corrupts the output for any filter applied to anything smaller than the viewport. The bug had been live for the entire history of the water rendering and was only caught when a regenerated world happened to produce a large enough sea region for the flat-color rectangle to be visually obvious.
+
 ### Hover-highlight stale-closure bug, surfaced by the canvas split
 
 The PIXI ticker was registered inside the mount-only `useEffect([])` and called `updateHighlights()` directly. `updateHighlights` was redeclared on every render and read React state (`hoveredHex`, `gridData`, `isScanning`) by name. Because the ticker captured the mount-time identity of the function, it kept calling the original closure forever — the one that saw `hoveredHex === null` and returned early. **Hover highlighting was silently doing nothing for the entire history of the project.** No one noticed because the cursor-crosshair cue made it feel responsive enough.
