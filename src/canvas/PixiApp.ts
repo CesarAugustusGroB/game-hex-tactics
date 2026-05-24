@@ -18,6 +18,7 @@ import type { OrderDrag } from './input/orderDrag';
 import type { Hex } from '../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../battle/simulate';
 import type { OrderChange } from '../battle/ai';
+import type { CpIntent } from '../battle/command-points';
 import type {
   Armies, GroupFormations, GroupDepths, Rosters, GroupOrders,
 } from './constants';
@@ -116,6 +117,8 @@ export interface PixiAppCtx {
   setArmies: Dispatch<SetStateAction<Armies>>;
   setRosters: Dispatch<SetStateAction<Rosters>>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
+  chargeCP: (team: Team, intent: CpIntent) => boolean;
+  triggerBrokeFlash: (team: Team) => void;
   generateWorldData: () => void;
 }
 
@@ -327,6 +330,8 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         inputModeRef: ctx.inputModeRef,
         setArmies: ctx.setArmies,
         setRosters: ctx.setRosters,
+        chargeCP: ctx.chargeCP,
+        triggerBrokeFlash: ctx.triggerBrokeFlash,
       };
 
       const odCtx: OrderDragCtx = {

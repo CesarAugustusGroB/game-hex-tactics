@@ -6,6 +6,7 @@ import {
   COHORT_SIZE, INITIAL_ROSTER, deployZoneFor,
   type Armies, type Rosters, type InputMode,
 } from '../constants';
+import type { CpIntent } from '../../battle/command-points';
 
 export interface PaintModeCtx {
   currentStrategicHexRef: MutableRefObject<Hex | null>;
@@ -19,6 +20,8 @@ export interface PaintModeCtx {
   inputModeRef: MutableRefObject<InputMode | null>;
   setArmies: Dispatch<SetStateAction<Armies>>;
   setRosters: Dispatch<SetStateAction<Rosters>>;
+  chargeCP: (team: Team, intent: CpIntent) => boolean;
+  triggerBrokeFlash: (team: Team) => void;
 }
 
 export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
@@ -47,6 +50,10 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
     occupied.add(k);
   }
   if (target.length === 0) return;
+  if (!ctx.chargeCP(team, 'placeCohort')) {
+    ctx.triggerBrokeFlash(team);
+    return;
+  }
   const groupId = ctx.selectedGroupRef.current;
   const newUnits: Unit[] = target.map(h => {
     const placementType = ctx.gridDataRef.current.find(d => d.hex.q === h.q && d.hex.r === h.r)?.type;

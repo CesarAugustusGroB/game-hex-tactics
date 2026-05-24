@@ -340,7 +340,6 @@ export const GameCanvas: React.FC = () => {
     return canAffordPure(commandPointsRef.current, team, intent);
   }, []);
 
-  // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
   const chargeCP = useCallback((team: Team, intent: CpIntent): boolean => {
     const next = debit(commandPointsRef.current, team, intent);
     if (next === null) return false;
@@ -349,7 +348,6 @@ export const GameCanvas: React.FC = () => {
     return true;
   }, []);
 
-  // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
   const triggerBrokeFlash = useCallback((team: Team) => {
     setBrokeFlash(prev => ({ ...prev, [team]: true }));
     window.setTimeout(() => {
@@ -444,6 +442,8 @@ export const GameCanvas: React.FC = () => {
     setArmies,
     setRosters,
     issueOrder,
+    chargeCP,
+    triggerBrokeFlash,
     generateWorldData,
   };
   usePixiApp(pixiCtx);
