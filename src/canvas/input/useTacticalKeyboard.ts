@@ -1,17 +1,17 @@
 import { useEffect } from 'react';
-import type React from 'react';
-import { HexUtils } from '../../hex-engine/HexUtils';
+import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
+import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import type { Team, GroupId, OrderMode } from '../../battle/simulate';
 import type { InputMode, Armies } from '../constants';
 
 export interface TacticalKeyboardCtx {
   viewMode: 'STRATEGIC' | 'TACTICAL';
-  selectedGroupRef: React.MutableRefObject<GroupId>;
-  selectedTeamRef: React.MutableRefObject<Team>;
-  currentStrategicHexRef: React.MutableRefObject<import('../../hex-engine/HexUtils').Hex | null>;
-  armiesRef: React.MutableRefObject<Armies>;
-  setInputMode: React.Dispatch<React.SetStateAction<InputMode | null>>;
-  setIsScanning: React.Dispatch<React.SetStateAction<boolean>>;
+  selectedGroupRef: MutableRefObject<GroupId>;
+  selectedTeamRef: MutableRefObject<Team>;
+  currentStrategicHexRef: MutableRefObject<Hex | null>;
+  armiesRef: MutableRefObject<Armies>;
+  setInputMode: Dispatch<SetStateAction<InputMode | null>>;
+  setIsScanning: Dispatch<SetStateAction<boolean>>;
   toggleMode: (mode: Exclude<OrderMode, 'march'>) => void;
   marchForward: () => void;
   cycleFormation: (gid: GroupId) => void;

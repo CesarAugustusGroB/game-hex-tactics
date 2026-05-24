@@ -1,4 +1,4 @@
-import type React from 'react';
+import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { getTerrainMods } from '../../battle/terrain';
 import { MAX_HP_BY_TYPE, type Team, type GroupId, type UnitType, type Unit } from '../../battle/simulate';
@@ -8,17 +8,17 @@ import {
 } from '../constants';
 
 export interface PaintModeCtx {
-  currentStrategicHexRef: React.MutableRefObject<Hex | null>;
-  lastPaintedKeyRef: React.MutableRefObject<string | null>;
-  selectedTeamRef: React.MutableRefObject<Team>;
-  selectedGroupRef: React.MutableRefObject<GroupId>;
-  selectedUnitTypeRef: React.MutableRefObject<UnitType>;
-  armiesRef: React.MutableRefObject<Armies>;
-  rostersRef: React.MutableRefObject<Rosters>;
-  gridDataRef: React.MutableRefObject<{ hex: Hex; type: string }[]>;
-  inputModeRef: React.MutableRefObject<InputMode | null>;
-  setArmies: React.Dispatch<React.SetStateAction<Armies>>;
-  setRosters: React.Dispatch<React.SetStateAction<Rosters>>;
+  currentStrategicHexRef: MutableRefObject<Hex | null>;
+  lastPaintedKeyRef: MutableRefObject<string | null>;
+  selectedTeamRef: MutableRefObject<Team>;
+  selectedGroupRef: MutableRefObject<GroupId>;
+  selectedUnitTypeRef: MutableRefObject<UnitType>;
+  armiesRef: MutableRefObject<Armies>;
+  rostersRef: MutableRefObject<Rosters>;
+  gridDataRef: MutableRefObject<{ hex: Hex; type: string }[]>;
+  inputModeRef: MutableRefObject<InputMode | null>;
+  setArmies: Dispatch<SetStateAction<Armies>>;
+  setRosters: Dispatch<SetStateAction<Rosters>>;
 }
 
 export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {

@@ -1,24 +1,24 @@
 import { useEffect } from 'react';
-import type React from 'react';
-import { HexUtils } from '../../hex-engine/HexUtils';
+import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
+import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../../battle/simulate';
-import type { InputMode, Rosters } from '../constants';
+import type { InputMode, Rosters, Armies } from '../constants';
 
 export interface GlobalShortcutsCtx {
   viewMode: 'STRATEGIC' | 'TACTICAL';
-  selectedTeamRef: React.MutableRefObject<Team>;
-  selectedGroupRef: React.MutableRefObject<GroupId>;
-  selectedUnitTypeRef: React.MutableRefObject<UnitType>;
-  currentStrategicHexRef: React.MutableRefObject<import('../../hex-engine/HexUtils').Hex | null>;
-  inputModeRef: React.MutableRefObject<InputMode | null>;
-  rostersRef: React.MutableRefObject<Rosters>;
-  setIsBattleRunning: React.Dispatch<React.SetStateAction<boolean>>;
-  setSelectedTeam: React.Dispatch<React.SetStateAction<Team>>;
-  setSelectedGroup: React.Dispatch<React.SetStateAction<GroupId>>;
-  setSelectedUnitType: React.Dispatch<React.SetStateAction<UnitType>>;
-  setInputMode: React.Dispatch<React.SetStateAction<InputMode | null>>;
-  setIsScanning: React.Dispatch<React.SetStateAction<boolean>>;
-  setArmies: React.Dispatch<React.SetStateAction<import('../constants').Armies>>;
+  selectedTeamRef: MutableRefObject<Team>;
+  selectedGroupRef: MutableRefObject<GroupId>;
+  selectedUnitTypeRef: MutableRefObject<UnitType>;
+  currentStrategicHexRef: MutableRefObject<Hex | null>;
+  inputModeRef: MutableRefObject<InputMode | null>;
+  rostersRef: MutableRefObject<Rosters>;
+  setIsBattleRunning: Dispatch<SetStateAction<boolean>>;
+  setSelectedTeam: Dispatch<SetStateAction<Team>>;
+  setSelectedGroup: Dispatch<SetStateAction<GroupId>>;
+  setSelectedUnitType: Dispatch<SetStateAction<UnitType>>;
+  setInputMode: Dispatch<SetStateAction<InputMode | null>>;
+  setIsScanning: Dispatch<SetStateAction<boolean>>;
+  setArmies: Dispatch<SetStateAction<Armies>>;
   clearOrder: (team: Team, gid: GroupId) => void;
 }
 

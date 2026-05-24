@@ -1,5 +1,5 @@
 import * as PIXI from 'pixi.js';
-import type React from 'react';
+import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import {
   groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots,
@@ -27,19 +27,19 @@ export interface OrderDrag {
 }
 
 export interface OrderDragCtx {
-  previewGfx: React.MutableRefObject<PIXI.Container>;
-  zoom: React.MutableRefObject<number>;
-  orderDragRef: React.MutableRefObject<OrderDrag | null>;
-  selectedTeamRef: React.MutableRefObject<Team>;
-  selectedGroupRef: React.MutableRefObject<GroupId>;
-  currentStrategicHexRef: React.MutableRefObject<Hex | null>;
-  armiesRef: React.MutableRefObject<Armies>;
-  groupOrdersRef: React.MutableRefObject<GroupOrders>;
-  groupFormationsRef: React.MutableRefObject<GroupFormations>;
-  groupDepthsRef: React.MutableRefObject<GroupDepths>;
-  gridDataRef: React.MutableRefObject<{ hex: Hex; type: string }[]>;
-  setArmies: React.Dispatch<React.SetStateAction<Armies>>;
-  setInputMode: React.Dispatch<React.SetStateAction<InputMode | null>>;
+  previewGfx: MutableRefObject<PIXI.Container>;
+  zoom: MutableRefObject<number>;
+  orderDragRef: MutableRefObject<OrderDrag | null>;
+  selectedTeamRef: MutableRefObject<Team>;
+  selectedGroupRef: MutableRefObject<GroupId>;
+  currentStrategicHexRef: MutableRefObject<Hex | null>;
+  armiesRef: MutableRefObject<Armies>;
+  groupOrdersRef: MutableRefObject<GroupOrders>;
+  groupFormationsRef: MutableRefObject<GroupFormations>;
+  groupDepthsRef: MutableRefObject<GroupDepths>;
+  gridDataRef: MutableRefObject<{ hex: Hex; type: string }[]>;
+  setArmies: Dispatch<SetStateAction<Armies>>;
+  setInputMode: Dispatch<SetStateAction<InputMode | null>>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
 }
 
