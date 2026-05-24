@@ -105,6 +105,28 @@ Five order modes (`march` / `charge` / `retreat` / `unleash` / `defendHeight`). 
 
 `src/battle/terrain.ts` owns the mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) — kept React/PIXI-free so the harness can import it. `src/canvas/terrain-defs.ts` spreads `TERRAIN_MODS[KEY]` into its `TerrainDef` table for HUD/tooltips; do **not** define a parallel mod table anywhere else.
 
+## Data files
+
+All balance- and content-tunable values live in `src/data/`. Each `.json` file is paired with a `.ts` wrapper that owns the type declaration and any boot-time transformation (hex-color parsing, sprite-pool expansion). Consumers import from the `.ts`, never from the `.json` directly.
+
+- `combat.json` / `combat.ts` — `DAMAGE_PER_TICK`, charge (`durationTicks`, `impactRange`), hold (`reductionPerTick`, `reductionCap`, `autoIdleAfterTicks`), `UNLEASH_MAX_ENGAGERS`, height bonus (`bonusPerUnit`, `bonusCap`).
+- `units.json` / `units.ts` — per-unitType `maxHp`, `marchSpeed`, `chargeSpeed`, `chargeImpactDamage`, plus skirmisher-only `missileRange`, `missileDamage`, `kiteThreshold`.
+- `terrain.json` / `terrain.ts` (canvas) + `terrain-mods.ts` (sim) — single source for both visual (`color`, `label`, `height`, `walkable`) and mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`). Two wrappers project different views so `src/battle/` does not import canvas.
+- `game.json` / `game.ts` — `TICK_MS`, `LOD_THRESHOLD`, `DRAG_THRESHOLD_PX`, deploy zone fraction, retreat refund, initial roster, cohort size, capture (`ticksToWin`, `center`), team tints, formation cycle/labels, heading arrows.
+- `world-gen.json` / `world-gen.ts` — `bucket` thresholds (deepSeaMult, sandOffset, forestMult, hillMult, mountainOffset), falloff (intercept, exponent), `STRATEGIC_RESOLUTION`, `DIVE_ZOOM`, `GRID_RADIUS`, default `GenSettings`.
+- `details.json` / `details.ts` — sprite catalog (categories, counts, asset paths) and per-terrain scatter rules. Pools use compact `{category, weight, firstN?}` form; the wrapper expands to flat per-key entries.
+
+**Adding a new tunable:** add the field to the JSON, declare it in the wrapper's `interface`, and re-export. If a consumer wants the legacy `UPPER_SNAKE_CASE` symbol shape, derive it in the wrapper (see e.g. `units.ts` for the pattern).
+
+**What stays inline (not in JSON):** pure math constants (hash multipliers `73856093`/`19349663`, `Math.sin(seed) * 10000`), structural playfield geometry (`TACTICAL_HALF_W/H`, `TACTICAL_BBOX_*`), and noise-mixing weights (`0.4 * noise(nx * 2.2, ny * 2.2)`). These are program structure, not balance.
+
+**Type residency for wrappers:**
+- When the type is fundamental to the data shape and has no logical home elsewhere, declare it in the `src/data/*.ts` wrapper directly. `TerrainDef` is the canonical example — it moved to `src/data/terrain.ts` to keep the module graph one-directional (data exposes the type; canvas re-exports for legacy imports).
+- When the type already lives in a render-side or sim-side module that owns related logic (interfaces tied to render-time interpretation, like `DetailLayerConfig` and `DetailCategory` in `src/canvas/detail-rules.ts`), the wrapper may `import type { ... }` from that module — TypeScript erases the import at compile time, so there's no runtime cycle even if the value direction is data ← canvas.
+- Avoid value-direction cycles: `src/data/*.ts` must not value-import from `src/canvas/*` or `src/battle/*`. Type-only imports are fine.
+
+**Regression scripts:** `scripts/snapshot-worldgen.ts` dumps `gridData` for a fixed mulberry32 seed (seeds both simplex noise AND `Math.random` so river placements are deterministic too); run before/after any world-gen change and diff to confirm value-preservation. The headless battle harness (`npm run sim` — actually `npx tsx scripts/sim-formations.ts` on Windows where `npm run sim` can't resolve `tsx` from PATH) gates any change to `combat`, `units`, or `terrain` JSON.
+
 ## Worktree note
 
 This is a `git worktree` at `.worktrees/feature-refactor-gamecanvas` on branch `feature/refactor-gamecanvas`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
