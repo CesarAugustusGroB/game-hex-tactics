@@ -291,7 +291,7 @@ export const HUD: React.FC<HUDProps> = ({
             const samePlacing = isPlacing && selectedUnitType === type;
             const remaining = rosters.get(selectedTeam)?.[type] ?? 0;
             const outOfStock = remaining <= 0;
-            const disabled = viewMode !== 'TACTICAL' || outOfStock || !canAfford(selectedTeam, 'placeCohort');
+            const disabled = viewMode !== 'TACTICAL' || outOfStock || (!samePlacing && !canAfford(selectedTeam, 'placeCohort'));
             const keyHint = type === 'infantry' ? '(Z)' : type === 'cavalry' ? '(X)' : '(C)';
             const label = type === 'infantry' ? 'INFANTRY' : type === 'cavalry' ? 'CAVALRY' : 'SKIRMISH';
             return (
@@ -327,7 +327,7 @@ export const HUD: React.FC<HUDProps> = ({
                 }}
               >
                 {samePlacing ? `STOP ${keyHint}` : `${label} ×${remaining} ${keyHint}`}
-                <CostChip cost={CP_COSTS.placeCohort} affordable={canAfford(selectedTeam, 'placeCohort')} />
+                {!samePlacing && <CostChip cost={CP_COSTS.placeCohort} affordable={canAfford(selectedTeam, 'placeCohort')} />}
               </button>
             );
           })}
@@ -445,7 +445,7 @@ export const HUD: React.FC<HUDProps> = ({
                     </button>
                     {/* Q — DEPLOY (enter order mode for drag-deploy / direction set) */}
                     <button
-                      disabled={count === 0 || !canAfford(selectedTeam, 'orderDrag')}
+                      disabled={count === 0 || (!orderActive && !canAfford(selectedTeam, 'orderDrag'))}
                       title="Deploy: drag from a deploy-zone hex to set heading + formation (shortcut: Q)"
                       onClick={() => {
                         setSelectedGroup(gid);
@@ -462,7 +462,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       DEPLOY (Q)
-                      <CostChip cost={CP_COSTS.orderDrag} affordable={canAfford(selectedTeam, 'orderDrag')} />
+                      {!orderActive && <CostChip cost={CP_COSTS.orderDrag} affordable={canAfford(selectedTeam, 'orderDrag')} />}
                     </button>
                     {/* W — HOLD: stand still + accrue defensive damage reduction up to a cap.
                         When the cap is reached the sim auto-flips the group to IDLE. */}
