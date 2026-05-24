@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+﻿import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import gsap from 'gsap';
 import { createNoise2D } from 'simplex-noise';
-import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeLineSlotAssignmentsByType, snapToForwardCone, cycleConeHeading, CHARGE_DURATION_TICKS, MAX_HP_BY_TYPE, HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP } from '../battle/simulate';
+import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeLineSlotAssignmentsByType, snapToForwardCone, cycleConeHeading, CHARGE_DURATION_TICKS, MAX_HP_BY_TYPE } from '../battle/simulate';
 import type { Unit, OrderMode, Team, GroupId, FormationType, UnitType } from '../battle/simulate';
 import { getTerrainMods } from '../battle/terrain';
 import { getAiController, type OrderChange } from '../battle/ai';
@@ -13,7 +13,7 @@ import {
   type Rosters,
   INITIAL_ROSTER, COHORT_SIZE, RETREAT_REFUND_FRAC,
   CAPTURE_TICKS_TO_WIN, CAPTURE_CENTER, captureZoneKeys, CAPTURE_ZONE_HEXES, makeInitialRosters,
-  FORMATION_CYCLE, FORMATION_LABELS, TEAM_TINTS,
+  FORMATION_CYCLE, TEAM_TINTS,
   DAMAGE_PER_TICK, TICK_MS, LOD_THRESHOLD,
   groupOrderKey, deployZoneFor,
 } from '../canvas/constants';
@@ -27,6 +27,7 @@ import {
   type WaterFilterHandle,
   WATER_FILTER_CONFIGS, createWaterFilter,
 } from '../canvas/water-filter';
+import { HUD } from '../canvas/HUD';
 
 interface OrderDrag {
   team: Team;
@@ -51,7 +52,7 @@ export const GameCanvas: React.FC = () => {
   // Tinted deploy-zone strips. Repainted by `drawMap` alongside the grid; no separate
   // visibility toggle for now (always on in TACTICAL view).
   const deployZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
-  // Capture zone (central 7-hex flower) — gold outline + soft fill. Sprite for the flag
+  // Capture zone (central 7-hex flower) â€” gold outline + soft fill. Sprite for the flag
   // sits inside the same container so it tweens with the world pan/zoom.
   const captureZoneGfx = useRef<PIXI.Graphics>(new PIXI.Graphics());
   const captureFlagSpriteRef = useRef<PIXI.Sprite | null>(null);
@@ -128,7 +129,6 @@ export const GameCanvas: React.FC = () => {
   const [armies, setArmies] = useState<Armies>(new Map());
   const [currentStrategicHex, setCurrentStrategicHex] = useState<Hex | null>(null);
   const [inputMode, setInputMode] = useState<InputMode | null>(null);
-  const isPlacing = inputMode === 'place'; // derived; keeps existing JSX expressions terse
   const [selectedTeam, setSelectedTeam] = useState<Team>('red');
   const [selectedGroup, setSelectedGroup] = useState<GroupId>(1);
   const [selectedUnitType, setSelectedUnitType] = useState<UnitType>('infantry');
@@ -153,7 +153,7 @@ export const GameCanvas: React.FC = () => {
   // Tactical battlefield is a wide rectangle (N-S battle axis preserved).
   // Pixel half-extents centred at (0,0); iteration filters by HexUtils.hexToPixel
   // because a pure axial-rectangle is sheared into a parallelogram by the flat-top
-  // q→x,y skew. The axial bounding box is intentionally generous to cover the
+  // qâ†’x,y skew. The axial bounding box is intentionally generous to cover the
   // half-extents after the skew.
   const TACTICAL_HALF_W = 2000;
   const TACTICAL_HALF_H = 1000;
@@ -308,7 +308,7 @@ export const GameCanvas: React.FC = () => {
         base.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) });
       }
       // PIXI v8 gotcha: `Color.multiply(number)` treats the number as a hex int via
-      // bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
+      // bit-shifts (0.7 | 0 = 0 â†’ black), so pass an RGB array.
       const drawSide = (v1: number, v2: number, shade: number, bottomH = 0, color = tDef.color) => {
         tGfx.beginFill(PIXI.Color.shared.setValue(color).multiply([shade, shade, shade, 1]).toNumber());
         tGfx.moveTo(top[v1].x, top[v1].y)
@@ -317,7 +317,7 @@ export const GameCanvas: React.FC = () => {
             .lineTo(base[v1].x, base[v1].y - bottomH)
             .closePath().endFill();
       };
-      // S / SE / SW only — N / NE / NW are hidden inside the hex top from top-down view.
+      // S / SE / SW only â€” N / NE / NW are hidden inside the hex top from top-down view.
       const sType  = terrainAt.get(HexUtils.key({ q: item.hex.q,     r: item.hex.r + 1 }));
       const seType = terrainAt.get(HexUtils.key({ q: item.hex.q + 1, r: item.hex.r     }));
       const swType = terrainAt.get(HexUtils.key({ q: item.hex.q - 1, r: item.hex.r + 1 }));
@@ -595,8 +595,8 @@ export const GameCanvas: React.FC = () => {
         paintCliffsBefore: 'SNOW',
       },
     ];
-    // Cliff edges (taller hex → shorter neighbour). vertex pair + axial direction. Only
-    // S / SE / SW — the other three would render inside the hex top in 2.5D.
+    // Cliff edges (taller hex â†’ shorter neighbour). vertex pair + axial direction. Only
+    // S / SE / SW â€” the other three would render inside the hex top in 2.5D.
     const cliffEdges: [number, number, number][] = [
       [1, 2, 5], [0, 1, 0], [2, 3, 4],
     ];
@@ -654,7 +654,7 @@ export const GameCanvas: React.FC = () => {
       const hexH = (TERRAINS[layer.type] ?? TERRAINS.SEA).height;
       const sz = HexUtils.size;
       // Base layers (no hexFilter) extend the mask to the visible cliff faces against
-      // shorter neighbours — biome texture continues down the cliff instead of leaving a
+      // shorter neighbours â€” biome texture continues down the cliff instead of leaving a
       // dark shaded wall. Decoration layers (dry/dense/flowery patches) stay top-only.
       const includeCliffs = layer.includeCliffs ?? !layer.hexFilter;
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -810,10 +810,10 @@ export const GameCanvas: React.FC = () => {
     }
     overlay.addChild(forestEarthCliffs);
 
-    // Deploy zone frontier — for each zone hex, stroke only the edges that face a
+    // Deploy zone frontier â€” for each zone hex, stroke only the edges that face a
     // non-zone neighbour (or the map edge). Produces one bold line along each side's
-    // front, no fill clutter inside the zones. Vertex pair → axial dir mapping is the
-    // same as `gridEdges` below (flat-top, vertex i at angle 60·i). TACTICAL-only —
+    // front, no fill clutter inside the zones. Vertex pair â†’ axial dir mapping is the
+    // same as `gridEdges` below (flat-top, vertex i at angle 60Â·i). TACTICAL-only â€”
     // the strategic overview shows world terrain, not battle overlays.
     if (viewMode === 'TACTICAL') {
       const redZone = deployZoneFor('red', gridData);
@@ -846,9 +846,9 @@ export const GameCanvas: React.FC = () => {
       }
     }
 
-    // Capture zone — the central 7-hex flower. Soft gold fill on each hex top + a bold
+    // Capture zone â€” the central 7-hex flower. Soft gold fill on each hex top + a bold
     // gold frontier stroke on the outer edges. Also reposition the flag sprite atop the
-    // centre hex now that terrain height is known. TACTICAL-only — strategic overview
+    // centre hex now that terrain height is known. TACTICAL-only â€” strategic overview
     // hides the flag (it's a battle objective, not a world feature).
     const flagSprite = captureFlagSpriteRef.current;
     if (flagSprite) flagSprite.visible = viewMode === 'TACTICAL';
@@ -886,7 +886,7 @@ export const GameCanvas: React.FC = () => {
                .stroke({ width: 5, color: 0xfacc15, alpha: 1.0 });
         }
       }
-      // Flag sprite sits on the centre hex top — y offset by that hex's terrain height.
+      // Flag sprite sits on the centre hex top â€” y offset by that hex's terrain height.
       const flag = captureFlagSpriteRef.current;
       if (flag) {
         const centerTile = gridData.find(d => d.hex.q === CAPTURE_CENTER.q && d.hex.r === CAPTURE_CENTER.r);
@@ -897,11 +897,11 @@ export const GameCanvas: React.FC = () => {
       }
     }
 
-    // Each shared edge is stroked ONCE — by the taller hex (tiebreak: axial-key compare).
+    // Each shared edge is stroked ONCE â€” by the taller hex (tiebreak: axial-key compare).
     // Stops double-line artefacts at elevation boundaries where each side would otherwise
     // draw its own outline at its own height.
     if (showGrid) {
-      // Edge → vertex pair → neighbour axial dir (flat-top, r = 60·i).
+      // Edge â†’ vertex pair â†’ neighbour axial dir (flat-top, r = 60Â·i).
       const gridEdges: [number, number, number][] = [
         [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
       ];
@@ -1093,11 +1093,11 @@ export const GameCanvas: React.FC = () => {
 
     // teamByKey is used by the team-outline edge filter below to skip edges shared with
     // a same-team neighbour (so a cluster shows only its outer perimeter). Mapping:
-    // edge k ↔ neighbour at HexUtils.directions[(6 - k) % 6].
+    // edge k â†” neighbour at HexUtils.directions[(6 - k) % 6].
     const teamByKey = new Map<string, Team>();
     for (const u of units) teamByKey.set(HexUtils.key(u.tacticalHex), u.team);
 
-    // Read scale directly — zoom.current is stale during a GSAP dive tween.
+    // Read scale directly â€” zoom.current is stale during a GSAP dive tween.
     const isFar = worldRef.current.scale.x < LOD_THRESHOLD;
 
     const visibleHexes = new Set<string>();
@@ -1140,9 +1140,9 @@ export const GameCanvas: React.FC = () => {
         (container as unknown as { _targetKey: string })._targetKey = targetKey;
         // Stretch the tween over the destination terrain's cooldown so the unit GLIDES
         // across rough hexes instead of teleporting in TICK_MS and then sitting idle for
-        // the moveCost cooldown ticks. The sim's discrete steps remain — only the
+        // the moveCost cooldown ticks. The sim's discrete steps remain â€” only the
         // visual interpolation changes. By the time the tween finishes the cooldown is
-        // also up, so the next step engages immediately → smooth and slow.
+        // also up, so the next step engages immediately â†’ smooth and slow.
         const moveCost = getTerrainMods(tile.type).moveCost;
         gsap.to(container.position, {
           x: pos.x,
@@ -1232,7 +1232,7 @@ export const GameCanvas: React.FC = () => {
 
       if (lieutenantIds.has(u.id)) {
         const star = new PIXI.Text({
-          text: '★',
+          text: 'â˜…',
           style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
         });
         star.anchor.set(0.5);
@@ -1245,7 +1245,7 @@ export const GameCanvas: React.FC = () => {
         const order = groupOrders.get(`${u.team}:${u.groupId}`);
         if (order?.attackTarget) {
           const arrow = new PIXI.Text({
-            text: HEADING_ARROWS[order.heading] ?? '→',
+            text: HEADING_ARROWS[order.heading] ?? 'â†’',
             style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
           });
           arrow.anchor.set(0.5);
@@ -1259,7 +1259,7 @@ export const GameCanvas: React.FC = () => {
     });
 
     // Attack target indicators per group. Tagged 'unit-detail' for LOD hiding.
-    // Fog of war: skip rings owned by the OTHER team — they would otherwise leak
+    // Fog of war: skip rings owned by the OTHER team â€” they would otherwise leak
     // enemy intent through fog (you'd see where they're charging without seeing them).
     groupOrders.forEach(order => {
       if (!order.attackTarget) return;
@@ -1288,7 +1288,7 @@ export const GameCanvas: React.FC = () => {
   // - the very next `simulateTick` in the tick loop sees AI-issued orders (no 1-tick
   //   delay waiting for React to flush),
   // - React still gets a new Map reference and re-renders the HUD as before.
-  // When the order doesn't exist yet, a default skeleton is created — `change` only
+  // When the order doesn't exist yet, a default skeleton is created â€” `change` only
   // needs to specify the fields it cares about.
   const issueOrder = useCallback((team: Team, groupId: GroupId, change: OrderChange) => {
     const key = groupOrderKey(team, groupId);
@@ -1326,7 +1326,7 @@ export const GameCanvas: React.FC = () => {
     const app = new PIXI.Application();
     const start = async () => {
       await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
-      // The army SVG is natively 40×40 — too low for high-DPI. Pre-rasterise to a
+      // The army SVG is natively 40Ã—40 â€” too low for high-DPI. Pre-rasterise to a
       // higher-res canvas so PIXI downsamples instead of upsampling.
       const loadHighResSvgTexture = async (url: string, pixelSize: number): Promise<PIXI.Texture> => {
         const img = new Image();
@@ -1424,7 +1424,7 @@ export const GameCanvas: React.FC = () => {
       unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
       unitTextureBlueSkirmisherRef.current = skirmisherTex;
       javelinTextureRef.current = javelinTex;
-      // Capture-the-flag marker — loaded once at mount, positioned at hex (0,0).
+      // Capture-the-flag marker â€” loaded once at mount, positioned at hex (0,0).
       const winFlagTex = await PIXI.Assets.load<PIXI.Texture>('/assets/win-flag.png');
       if (!isMounted) return;
       winFlagTex.source.scaleMode = 'linear';
@@ -1439,7 +1439,7 @@ export const GameCanvas: React.FC = () => {
       flagSprite.x = flagPos.x;
       flagSprite.y = flagPos.y - 8; // sit on the hex top (terrain height applied in drawMap, this is OK as a default)
       captureFlagSpriteRef.current = flagSprite;
-      // Note: world tree is built below — flag is added to `world` there alongside its
+      // Note: world tree is built below â€” flag is added to `world` there alongside its
       // graphics layer so it ends up at a deterministic z-order (above the zone outline
       // but below grid/units).
       const detailTexs = await Promise.all(
@@ -1488,8 +1488,8 @@ export const GameCanvas: React.FC = () => {
       const world = worldRef.current;
       world.x = app.screen.width / 2; world.y = app.screen.height / 2; world.scale.set(zoom.current);
       app.stage.addChild(world);
-      // World z-order: terrain → painted overlay → scatter details → grid → units →
-      // projectiles → drag previews → hover highlights.
+      // World z-order: terrain â†’ painted overlay â†’ scatter details â†’ grid â†’ units â†’
+      // projectiles â†’ drag previews â†’ hover highlights.
       world.addChild(terrainGfx.current);
       world.addChild(terrainOverlayRef.current);
       world.addChild(detailsGfx.current);
@@ -1659,7 +1659,7 @@ export const GameCanvas: React.FC = () => {
 
           if (isLieutenant) {
             const star = new PIXI.Text({
-              text: '★',
+              text: 'â˜…',
               style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
             });
             star.anchor.set(0.5);
@@ -1668,7 +1668,7 @@ export const GameCanvas: React.FC = () => {
             gfx.addChild(star);
 
             const arrow = new PIXI.Text({
-              text: HEADING_ARROWS[heading] ?? '→',
+              text: HEADING_ARROWS[heading] ?? 'â†’',
               style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
             });
             arrow.anchor.set(0.5);
@@ -1772,7 +1772,7 @@ export const GameCanvas: React.FC = () => {
             );
           }
 
-          // LINE pairs by role (cav→flanks, skir→front-center, inf→back); other
+          // LINE pairs by role (cavâ†’flanks, skirâ†’front-center, infâ†’back); other
           // formations keep the march-projection pairing.
           const pairing = lineFrontWidth > 0
             ? computeLineSlotAssignmentsByType(groupUnits, slots, drag.targetHex, lineFrontWidth)
@@ -1864,7 +1864,7 @@ export const GameCanvas: React.FC = () => {
         setInputMode(null);
       });
 
-      // Read world.scale.x (not zoom.current) — GSAP mutates scale directly during the
+      // Read world.scale.x (not zoom.current) â€” GSAP mutates scale directly during the
       // dive animation. Iterate children only on threshold crossings.
       let lastLodFar: boolean | null = null;
       let waterFilterTime = 0;
@@ -1897,14 +1897,14 @@ export const GameCanvas: React.FC = () => {
       generateWorldData();
     };
     // Capture the unit-containers map for the unmount cleanup. The ref's `.current`
-    // object is created once and never reassigned — only mutated by drawUnits via
-    // `.set`/`.delete` — so this reference stays valid through the lifetime of the
+    // object is created once and never reassigned â€” only mutated by drawUnits via
+    // `.set`/`.delete` â€” so this reference stays valid through the lifetime of the
     // component and points to the same Map at unmount.
     const containers = unitContainersRef.current;
     start();
     return () => {
       isMounted = false;
-      // Kill GSAP tweens before PIXI destroys their targets — otherwise GSAP keeps
+      // Kill GSAP tweens before PIXI destroys their targets â€” otherwise GSAP keeps
       // updating freed objects for up to TICK_MS after unmount.
       containers.forEach(cont => {
         gsap.killTweensOf(cont);
@@ -1926,7 +1926,7 @@ export const GameCanvas: React.FC = () => {
   const [captureProgress, setCaptureProgress] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
   const captureProgressRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
   useEffect(() => { captureProgressRef.current = captureProgress; }, [captureProgress]);
-  // MUST stay monotonic across battle pauses/restarts — units carry absolute
+  // MUST stay monotonic across battle pauses/restarts â€” units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
   const tickCounterRef = useRef(0);
@@ -1939,21 +1939,21 @@ export const GameCanvas: React.FC = () => {
       const strategicKey = HexUtils.key(strategic);
       const units = armiesRef.current.get(strategicKey) ?? [];
       if (units.length === 0) return;
-      // simulateTick BEFORE the setters — reading a closure variable written inside a
+      // simulateTick BEFORE the setters â€” reading a closure variable written inside a
       // setX(prev => ...) on the next line is undefined (the updater hasn't run yet).
       const teamsBefore = new Set(units.map(u => u.team));
       if (teamsBefore.size >= 2) lastTickHadBothTeamsRef.current = true;
       const grid = gridDataRef.current;
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
-      // Precompute deploy zone hex sets — the retreat-clear logic queries this per tick.
+      // Precompute deploy zone hex sets â€” the retreat-clear logic queries this per tick.
       const deployZones: Record<Team, Set<string>> = {
         red:  deployZoneFor('red',  grid),
         blue: deployZoneFor('blue', grid),
       };
       tickCounterRef.current += 1;
       // AI phase. Each registered controller writes its team's orders via `issueOrder`,
-      // which mutates the orders ref synchronously — so the `simulateTick` call below
+      // which mutates the orders ref synchronously â€” so the `simulateTick` call below
       // reads the post-AI order map, no one-tick lag.
       for (const team of (['red', 'blue'] as const)) {
         const fn = getAiController(team);
@@ -1998,7 +1998,7 @@ export const GameCanvas: React.FC = () => {
       });
       const javelinTex = javelinTextureRef.current;
       if (javelinTex && result.projectiles.length > 0) {
-        // Asset's natural tip points up-left (1813×822 diagonal). atan2(-670, -1610) is
+        // Asset's natural tip points up-left (1813Ã—822 diagonal). atan2(-670, -1610) is
         // the from-butt-to-tip angle; subtract to rotate the throw to face the target.
         const assetTipAngle = Math.atan2(-670, -1610);
         const container = projectilesGfx.current;
@@ -2160,7 +2160,7 @@ export const GameCanvas: React.FC = () => {
       const engaged = groupUnits.some(u =>
         HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
       );
-      if (engaged) return; // melee locks the retreat — no-op
+      if (engaged) return; // melee locks the retreat â€” no-op
       const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
       for (const u of groupUnits) {
         refund[u.unitType ?? 'infantry']++;
@@ -2185,13 +2185,13 @@ export const GameCanvas: React.FC = () => {
       return;
     }
     if (!cur?.attackTarget) return;
-    // Once committed (post-unleash), no further mode changes — RETREAT was handled
+    // Once committed (post-unleash), no further mode changes â€” RETREAT was handled
     // above and is the only escape. The HUD button is also disabled but the keyboard
-    // could still fire — short-circuit here for symmetry.
+    // could still fire â€” short-circuit here for symmetry.
     if (cur.committed) return;
     const isActive = (cur.mode ?? 'idle') === mode;
     if (isActive) {
-      // Toggle off → idle. Unleash never reaches here (one-way commit). Idle→idle is a
+      // Toggle off â†’ idle. Unleash never reaches here (one-way commit). Idleâ†’idle is a
       // visual no-op but harmless. Clear all mode-specific scratch fields so prior
       // state doesn't bleed in if the player later re-enables a mode.
       issueOrder(team, gid, { mode: 'idle', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined });
@@ -2213,7 +2213,7 @@ export const GameCanvas: React.FC = () => {
   //   - If currently marching: cycle heading within the team's forward cone.
   //   - Otherwise (idle, hold, charge, or no order yet): switch to march. Preserve
   //     existing heading/attackTarget if the player previously dragged one; otherwise
-  //     default to the team's straight-forward direction (red→N, blue→S) with an
+  //     default to the team's straight-forward direction (redâ†’N, blueâ†’S) with an
   //     attackTarget ~15 hexes ahead of the group's centroid.
   const marchForward = useCallback(() => {
     const gid = selectedGroupRef.current;
@@ -2251,10 +2251,80 @@ export const GameCanvas: React.FC = () => {
     });
   }, [issueOrder]);
 
-  // Order-related shortcuts for the currently selected group. Layout — top row:
-  //   T Q W E R  →  Assign / Deploy / Hold / Charge / Unleash
+  const toggleScan = useCallback(() => {
+    setIsScanning(s => {
+      const next = !s;
+      if (next) setInputMode(null);
+      return next;
+    });
+  }, []);
+
+  const cycleFormation = useCallback((gid: GroupId) => {
+    const team = selectedTeamRef.current;
+    const key = groupOrderKey(team, gid);
+    setGroupFormations(prev => {
+      const next = new Map(prev);
+      const cur = next.get(key) ?? 'line';
+      const idx = FORMATION_CYCLE.indexOf(cur);
+      next.set(key, FORMATION_CYCLE[(idx + 1) % FORMATION_CYCLE.length]);
+      return next;
+    });
+  }, []);
+
+  const resetBattle = useCallback(() => {
+    setArmies(new Map());
+    setInputMode(null);
+    setIsBattleRunning(false);
+    setGroupOrders(new Map());
+    setGroupFormations(new Map());
+    setGroupDepths(new Map());
+    setRosters(makeInitialRosters());
+    setCaptureProgress({ red: 0, blue: 0 });
+    captureProgressRef.current = { red: 0, blue: 0 };
+    setWinBanner(null);
+    lastTickHadBothTeamsRef.current = false;
+    tickCounterRef.current = 0;
+  }, []);
+
+  const returnToStrategic = useCallback(() => {
+    setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
+    setViewMode('STRATEGIC');
+    setCurrentStrategicHex(null);
+    setInputMode(null);
+    setIsBattleRunning(false);
+    setGroupOrders(new Map());
+    setGroupFormations(new Map());
+    setGroupDepths(new Map());
+    setRosters(makeInitialRosters());
+    setCaptureProgress({ red: 0, blue: 0 });
+    captureProgressRef.current = { red: 0, blue: 0 };
+    setWinBanner(null);
+    lastTickHadBothTeamsRef.current = false;
+    tickCounterRef.current = 0;
+  }, []);
+
+  const regenerateWorld = useCallback(() => {
+    noiseRef.current = null;
+    setArmies(new Map());
+    setCurrentStrategicHex(null);
+    setInputMode(null);
+    setIsBattleRunning(false);
+    setGroupOrders(new Map());
+    setGroupFormations(new Map());
+    setGroupDepths(new Map());
+    setRosters(makeInitialRosters());
+    setCaptureProgress({ red: 0, blue: 0 });
+    captureProgressRef.current = { red: 0, blue: 0 };
+    setWinBanner(null);
+    lastTickHadBothTeamsRef.current = false;
+    tickCounterRef.current = 0;
+    generateWorldData();
+  }, [generateWorldData]);
+
+  // Order-related shortcuts for the currently selected group. Layout â€” top row:
+  //   T Q W E R  â†’  Assign / Deploy / Hold / Charge / Unleash
   // Bottom row:
-  //   A S D F    →  March (start / cycle heading) / Idle / Cycle formation / Retreat
+  //   A S D F    â†’  March (start / cycle heading) / Idle / Cycle formation / Retreat
   // All TACTICAL-only; ignored while typing in inputs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2287,8 +2357,8 @@ export const GameCanvas: React.FC = () => {
       } else if (k === 's') {
         toggleMode('idle');
       } else if (k === 'a') {
-        // A is the MARCH key. From idle/hold/charge/no-order → start marching (uses
-        // existing heading if set by a prior drag, else team-forward). From march →
+        // A is the MARCH key. From idle/hold/charge/no-order â†’ start marching (uses
+        // existing heading if set by a prior drag, else team-forward). From march â†’
         // cycle heading within the team's forward cone.
         marchForward();
       } else if (k === 'd') {
@@ -2309,10 +2379,10 @@ export const GameCanvas: React.FC = () => {
   }, [viewMode, toggleMode, marchForward]);
 
   // Global shortcuts:
-  //   SPACE         → start/pause battle (preventDefault to suppress page scroll)
-  //   < / ,         → cycle selected team (red ↔ blue)
-  //   1 / 2 / 3     → select group
-  //   Z / X / C     → place infantry / cavalry / skirmisher (C reserved — skirmisher
+  //   SPACE         â†’ start/pause battle (preventDefault to suppress page scroll)
+  //   < / ,         â†’ cycle selected team (red â†” blue)
+  //   1 / 2 / 3     â†’ select group
+  //   Z / X / C     â†’ place infantry / cavalry / skirmisher (C reserved â€” skirmisher
   //                   unit type not yet implemented, so C is a no-op for now). Pressing
   //                   the same key again exits place mode; pressing the OTHER key
   //                   switches type without leaving place mode.
@@ -2394,581 +2464,41 @@ export const GameCanvas: React.FC = () => {
 
   const curT = hoveredHex ? TERRAINS[gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r)?.type || 'SEA'] : null;
 
-  const groupCounts: Record<GroupId, number> = { 1: 0, 2: 0, 3: 0 };
-  if (currentStrategicHex) {
-    const units = armies.get(HexUtils.key(currentStrategicHex)) ?? [];
-    for (const u of units) {
-      if (u.team === selectedTeam) {
-        groupCounts[u.groupId]++;
-      }
-    }
-  }
-
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: '#02040a', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', zIndex: 1, cursor: (isScanning || inputMode !== null) ? 'crosshair' : 'default' }} />
-
-      {winBanner && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          padding: '24px 48px',
-          fontSize: '28px',
-          fontWeight: 900,
-          letterSpacing: '4px',
-          color: 'white',
-          background: `linear-gradient(135deg, ${winBanner === 'red' ? '#ef4444' : '#3b82f6'} 0%, rgba(0,0,0,0.5) 100%)`,
-          border: `2px solid ${winBanner === 'red' ? '#ef4444' : '#3b82f6'}`,
-          borderRadius: '20px',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
-          zIndex: 200,
-          pointerEvents: 'none',
-        }}>
-          {winBanner.toUpperCase()} VICTORY
-        </div>
-      )}
-
-      {/* Capture progress strip — top-centre. Two bars race to CAPTURE_TICKS_TO_WIN.
-          Only visible once a battle is in progress (currentStrategicHex is set). */}
-      {viewMode === 'TACTICAL' && currentStrategicHex && (
-        <div style={{
-          position: 'absolute',
-          top: '12px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          padding: '10px 18px',
-          background: 'rgba(0,0,0,0.55)',
-          border: '1px solid rgba(250,204,21,0.5)',
-          borderRadius: '12px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
-          zIndex: 150,
-          minWidth: '280px',
-          pointerEvents: 'none',
-        }}>
-          <div style={{
-            fontSize: '10px', color: '#facc15', fontWeight: 800, letterSpacing: '2px',
-            marginBottom: '8px', textAlign: 'center',
-          }}>
-            HOLD THE CENTRE — {CAPTURE_TICKS_TO_WIN} TICKS
-          </div>
-          {(['red', 'blue'] as const).map(team => {
-            const v = captureProgress[team];
-            const pct = (v / CAPTURE_TICKS_TO_WIN) * 100;
-            const color = team === 'red' ? '#ef4444' : '#3b82f6';
-            return (
-              <div key={team} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: team === 'red' ? '6px' : 0 }}>
-                <span style={{ fontSize: '10px', color, fontWeight: 800, width: '38px', letterSpacing: '1px' }}>
-                  {team.toUpperCase()}
-                </span>
-                <div style={{
-                  flex: 1, height: '8px', background: 'rgba(255,255,255,0.08)',
-                  borderRadius: '4px', overflow: 'hidden',
-                }}>
-                  <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 0.3s ease' }} />
-                </div>
-                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '34px', textAlign: 'right' }}>
-                  {v}/{CAPTURE_TICKS_TO_WIN}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* HUD - Professional Glassmorphism */}
-      <div style={{
-        position: 'absolute', top: 24, left: 24, color: '#f8fafc', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(24px)',
-        padding: '32px', borderRadius: '32px', border: '1px solid rgba(255, 255, 255, 0.12)',
-        width: '360px', boxShadow: '0 40px 80px rgba(0, 0, 0, 0.9)', zIndex: 100, pointerEvents: 'auto',
-        fontFamily: '"Inter", sans-serif'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>{viewMode} COMMAND</h2>
-          <span style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 800, letterSpacing: '1px' }}>SYSTEM READY</span>
-        </div>
-        
-        <div style={{ background: 'rgba(0,0,0,0.4)', padding: '20px', borderRadius: '20px', marginBottom: '32px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>TERRAIN TYPE</span>
-            <span style={{ color: curT ? `#${curT.color.toString(16).padStart(6,'0')}` : '#475569', fontWeight: 900, fontSize: '14px', filter: 'brightness(1.5)' }}>
-              {curT ? curT.label : 'OFFLINE'}
-            </span>
-          </div>
-        </div>
-
-        <button
-          onClick={() => {
-            setIsScanning(s => {
-              const next = !s;
-              if (next) setInputMode(null);
-              return next;
-            });
-          }}
-          style={{ width: '100%', padding: '18px', background: isScanning ? '#ef4444' : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '13px', fontWeight: '900', cursor: 'pointer', marginBottom: '12px', transition: '0.2s', boxShadow: '0 8px 24px rgba(59, 130, 246, 0.3)' }}
-        >
-          {isScanning ? 'CANCEL SCAN' : '🎯 INITIATE TACTICAL DIVE'}
-        </button>
-
-        {/* Deploy row: each button drops a cohort of up to COHORT_SIZE units of that
-            type into the selected team's zone on the next zone click. Button shows the
-            remaining roster count for the active team; disabled when that count is 0. */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-          {(['infantry', 'cavalry', 'skirmisher'] as const).map(type => {
-            const samePlacing = isPlacing && selectedUnitType === type;
-            const remaining = rosters.get(selectedTeam)?.[type] ?? 0;
-            const outOfStock = remaining <= 0;
-            const disabled = viewMode !== 'TACTICAL' || outOfStock;
-            const keyHint = type === 'infantry' ? '(Z)' : type === 'cavalry' ? '(X)' : '(C)';
-            const label = type === 'infantry' ? 'INFANTRY' : type === 'cavalry' ? 'CAVALRY' : 'SKIRMISH';
-            return (
-              <button
-                key={type}
-                onClick={() => {
-                  if (viewMode !== 'TACTICAL' || outOfStock) return;
-                  setSelectedUnitType(type);
-                  setInputMode(samePlacing ? null : 'place');
-                  if (!samePlacing) setIsScanning(false);
-                }}
-                disabled={disabled}
-                title={
-                  viewMode !== 'TACTICAL' ? 'Dive into a tactical view first'
-                  : outOfStock ? `No ${type} left in roster`
-                  : `Deploy a cohort of up to ${COHORT_SIZE} ${type} — ${remaining} remaining`
-                }
-                style={{
-                  flex: 1,
-                  padding: '14px 6px',
-                  background: disabled
-                    ? 'rgba(255,255,255,0.04)'
-                    : samePlacing ? '#ef4444' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-                  color: disabled ? '#475569' : 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  letterSpacing: '1px',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  transition: '0.2s',
-                }}
-              >
-                {samePlacing ? `STOP ${keyHint}` : `${label} ×${remaining} ${keyHint}`}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-          {(['red', 'blue'] as const).map(team => {
-            const active = selectedTeam === team;
-            const bg = team === 'red' ? '#ef4444' : '#3b82f6';
-            return (
-              <button
-                key={team}
-                onClick={() => setSelectedTeam(team)}
-                style={{
-                  flex: 1,
-                  padding: '10px',
-                  background: active ? bg : 'rgba(255,255,255,0.04)',
-                  color: active ? 'white' : '#94a3b8',
-                  border: active ? `1px solid ${bg}` : '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '10px',
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  letterSpacing: '1px',
-                  cursor: 'pointer',
-                  transition: '0.2s',
-                }}
-              >
-                {team.toUpperCase()}
-              </button>
-            );
-          })}
-        </div>
-
-        <button
-          onClick={() => setShowGrid(!showGrid)}
-          style={{ width: '100%', padding: '12px', background: showGrid ? 'rgba(59, 130, 246, 0.1)' : '#10b981', color: showGrid ? '#60a5fa' : 'white', border: showGrid ? '1px solid rgba(59, 130, 246, 0.5)' : 'none', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
-        >
-          GRID SYSTEM: {showGrid ? 'ACTIVE' : 'DEACTIVATED'}
-        </button>
-
-        {viewMode === 'TACTICAL' && (
-          <button
-            onClick={() => setFogOfWar(f => !f)}
-            style={{ width: '100%', padding: '12px', background: fogOfWar ? '#10b981' : 'rgba(59, 130, 246, 0.1)', color: fogOfWar ? 'white' : '#60a5fa', border: fogOfWar ? 'none' : '1px solid rgba(59, 130, 246, 0.5)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
-          >
-            FOG OF WAR: {fogOfWar ? 'ACTIVE' : 'DEACTIVATED'}
-          </button>
-        )}
-
-        {viewMode === 'TACTICAL' && (
-          <div style={{
-            background: 'rgba(0,0,0,0.4)',
-            padding: '14px',
-            borderRadius: '14px',
-            marginBottom: '12px',
-            border: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
-              GROUPS
-            </div>
-            {([1, 2, 3] as const).map(gid => {
-              const count = groupCounts[gid];
-              const isSelectedRow = selectedGroup === gid;
-              const assignActive = inputMode === 'assign' && selectedGroup === gid;
-              const orderActive = inputMode === 'order' && selectedGroup === gid;
-              const teamColor = TEAM_TINTS[selectedTeam];
-              const teamColorHex = `#${teamColor.toString(16).padStart(6, '0')}`;
-              const formationKey = groupOrderKey(selectedTeam, gid);
-              const formation: FormationType = groupFormations.get(formationKey) ?? 'line';
-              const formationIsDefault = formation === 'line';
-              const order = groupOrders.get(formationKey);
-              const canHold = !!order?.attackTarget;
-              const committed = !!order?.committed;
-              // Post-unleash lock: every interaction except RETREAT is disabled. The
-              // group becomes re-orderable again only after retreat lands it back in
-              // its deploy zone (sim auto-clears the order; see simulate.ts retreat).
-              const canEdit = canHold && !committed;
-              const orderMode: OrderMode = order?.mode ?? 'march';
-              const chargeActive = orderMode === 'charge';
-              const unleashActive = orderMode === 'unleash';
-              const holdActive = orderMode === 'hold';
-              const idleActive = orderMode === 'idle';
-              const holdTicks = order?.holdTicks ?? 0;
-              const holdPct = Math.round(Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP) * 100);
-              const chargeRemaining = order?.chargeTicksRemaining;
-              // AOE-style two-row layout. Each row mirrors a keyboard row so the buttons
-              // sit under the keys that activate them:
-              //   Row 1 (QWERT-ish):  [G] [T-ASSIGN] [Q-ATTACK] [W-HOLD] [E-CHARGE] [R-UNLEASH]
-              //   Row 2 (ASDFV):              [A-MIRROR] [S-DEFEND] [D-FORM] [F-RETREAT] [V-DEPTH]
-              const rowStyle: React.CSSProperties = {
-                display: 'flex', alignItems: 'center', gap: '6px',
-              };
-              const btnBase: React.CSSProperties = {
-                flex: 1, padding: '6px 4px', fontSize: '10px', fontWeight: 800,
-                borderRadius: '8px', letterSpacing: '0.5px',
-              };
-              return (
-                <div key={gid} style={{
-                  marginBottom: '6px',
-                  padding: '4px 6px',
-                  borderLeft: isSelectedRow ? `3px solid ${teamColorHex}` : '3px solid transparent',
-                  background: isSelectedRow ? `${teamColorHex}14` : 'transparent',
-                  borderRadius: '6px',
-                  transition: 'background 120ms, border-color 120ms',
-                }}>
-                  {/* Row 1 ──────── G  T  Q  W  E  R ──────── */}
-                  <div style={{ ...rowStyle, marginBottom: '4px' }}>
-                    <button
-                      onClick={() => setSelectedGroup(gid)}
-                      title={`Select G${gid} (shortcut: ${gid})`}
-                      style={{
-                        flex: '0 0 48px', padding: 0, background: 'transparent', border: 'none',
-                        textAlign: 'left', fontSize: '11px', fontWeight: 800,
-                        color: isSelectedRow ? teamColorHex : '#cbd5e1',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      G{gid} <span style={{ color: '#64748b', fontWeight: 600 }}>×{count}</span>
-                    </button>
-                    {/* Q — DEPLOY (enter order mode for drag-deploy / direction set) */}
-                    <button
-                      disabled={count === 0}
-                      title="Deploy: drag from a deploy-zone hex to set heading + formation (shortcut: Q)"
-                      onClick={() => {
-                        setSelectedGroup(gid);
-                        setInputMode(prev => (prev === 'order' && selectedGroup === gid) ? null : 'order');
-                        setIsScanning(false);
-                      }}
-                      style={{
-                        ...btnBase,
-                        background: orderActive ? teamColorHex : 'rgba(255,255,255,0.04)',
-                        color: count === 0 ? '#475569' : orderActive ? 'white' : '#94a3b8',
-                        border: orderActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
-                        cursor: count === 0 ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      DEPLOY (Q)
-                    </button>
-                    {/* W — HOLD: stand still + accrue defensive damage reduction up to a cap.
-                        When the cap is reached the sim auto-flips the group to IDLE. */}
-                    <button
-                      disabled={!canEdit}
-                      title={
-                        committed ? '🔒 Group committed — retreat to redeploy'
-                        : !canHold ? 'No active order to hold'
-                        : holdActive ? `Holding — ${holdPct}% damage reduction (cap ${Math.round(HOLD_REDUCTION_CAP * 100)}%). Click to cancel (shortcut: W).`
-                        : `Hold: stand still, accrue +${Math.round(HOLD_REDUCTION_PER_TICK * 100)}% damage reduction per tick up to ${Math.round(HOLD_REDUCTION_CAP * 100)}% cap (shortcut: W)`
-                      }
-                      onClick={() => { if (canEdit) toggleMode('hold'); }}
-                      style={{
-                        ...btnBase,
-                        background: holdActive ? '#f59e0b' : 'rgba(255,255,255,0.04)',
-                        color: !canEdit ? '#475569' : holdActive ? 'white' : '#94a3b8',
-                        border: holdActive ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canEdit ? 'not-allowed' : 'pointer',
-                        opacity: !canEdit ? 0.5 : 1,
-                      }}
-                    >
-                      {holdActive ? `HOLD ${holdPct}% (W)` : 'HOLD (W)'}
-                    </button>
-                    {/* E — CHARGE */}
-                    <button
-                      disabled={!canEdit}
-                      title={
-                        committed ? '🔒 Group committed — retreat to redeploy'
-                        : canEdit ? (chargeActive ? `Charge active${chargeRemaining != null ? ` (${chargeRemaining} ticks left)` : ''} — click to cancel (shortcut: E)` : 'Charge: 2 hexes/tick, lance damage, 1.5s burst (shortcut: E)')
-                        : 'No active order'
-                      }
-                      onClick={() => { if (canEdit) toggleMode('charge'); }}
-                      style={{
-                        ...btnBase,
-                        background: chargeActive ? '#dc2626' : 'rgba(255,255,255,0.04)',
-                        color: !canEdit ? '#475569' : chargeActive ? 'white' : '#94a3b8',
-                        border: chargeActive ? '1px solid #dc2626' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canEdit ? 'not-allowed' : 'pointer',
-                        opacity: !canEdit ? 0.5 : 1,
-                      }}
-                    >
-                      {chargeActive && chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : 'CHARGE (E)'}
-                    </button>
-                    {/* R — UNLEASH (one-way commit) */}
-                    <button
-                      disabled={!canEdit}
-                      title={
-                        committed ? '🔒 Unleashed — locked. Retreat to redeploy'
-                        : canEdit ? (unleashActive ? 'Unleashed — units chase nearest enemy (shortcut: R)' : 'Unleash: ONE-WAY commit — no more orders until retreat reaches deploy zone (shortcut: R)')
-                        : 'No active order'
-                      }
-                      onClick={() => { if (canEdit) toggleMode('unleash'); }}
-                      style={{
-                        ...btnBase,
-                        background: unleashActive ? '#a855f7' : 'rgba(255,255,255,0.04)',
-                        color: !canEdit ? '#475569' : unleashActive ? 'white' : '#94a3b8',
-                        border: unleashActive ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canEdit ? 'not-allowed' : 'pointer',
-                        opacity: !canEdit ? 0.5 : 1,
-                      }}
-                    >
-                      {committed ? '🔒 UNLEASH' : 'UNLEASH (R)'}
-                    </button>
-                    {/* T — ASSIGN. Sits right of UNLEASH so the row reads Q W E R T,
-                        matching the keyboard. Available regardless of order state. */}
-                    <button
-                      title="Assign units to this group (shortcut: T)"
-                      onClick={() => {
-                        setSelectedGroup(gid);
-                        setInputMode(prev => (prev === 'assign' && selectedGroup === gid) ? null : 'assign');
-                        setIsScanning(false);
-                      }}
-                      style={{
-                        ...btnBase,
-                        background: assignActive ? teamColorHex : 'rgba(255,255,255,0.04)',
-                        color: assignActive ? 'white' : '#94a3b8',
-                        border: assignActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ASSIGN (T)
-                    </button>
-                  </div>
-                  {/* Row 2 ──────── A  S  D  F ──────── */}
-                  <div style={{ ...rowStyle, paddingLeft: '54px' /* aligns under the QWER cluster, past the G label */ }}>
-                    {/* A — MARCH / cycle heading. Idle/no-order → starts forward march.
-                        Already marching → cycles heading within the forward cone. Button
-                        face shows the next heading when marching, "MARCH" otherwise. */}
-                    {(() => {
-                      const isMarching = orderMode === 'march' && !!order?.attackTarget;
-                      const nextHeading = cycleConeHeading(selectedTeam, order?.heading ?? (selectedTeam === 'red' ? 2 : 5));
-                      const marchDisabled = count === 0 || committed;
-                      return (
-                        <button
-                          disabled={marchDisabled}
-                          title={
-                            committed ? '🔒 Group committed — retreat to redeploy'
-                            : count === 0 ? 'No units in this group'
-                            : isMarching ? `Cycle heading ${HEADING_ARROWS[order!.heading]} → ${HEADING_ARROWS[nextHeading]} (shortcut: A)`
-                            : 'March: start advancing forward (shortcut: A)'
-                          }
-                          onClick={() => { if (!marchDisabled) marchForward(); }}
-                          style={{
-                            ...btnBase, fontSize: '12px',
-                            background: isMarching ? '#10b981' : 'rgba(255,255,255,0.04)',
-                            color: marchDisabled ? '#475569' : isMarching ? 'white' : '#94a3b8',
-                            border: isMarching ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
-                            cursor: marchDisabled ? 'not-allowed' : 'pointer',
-                            opacity: marchDisabled ? 0.5 : 1,
-                          }}
-                        >
-                          {isMarching ? `${HEADING_ARROWS[nextHeading]} (A)` : 'MARCH (A)'}
-                        </button>
-                      );
-                    })()}
-                    {/* S — IDLE: stand still, no defensive bonus accrual. Mutually
-                        exclusive with HOLD (toggleMode auto-replaces). */}
-                    <button
-                      disabled={!canEdit}
-                      title={
-                        committed ? '🔒 Group committed — retreat to redeploy'
-                        : !canHold ? 'No active order'
-                        : idleActive ? 'Idle — standing by. Press A to march (shortcut: S)'
-                        : 'Idle: stand still, no movement, no defensive bonus (shortcut: S)'
-                      }
-                      onClick={() => { if (canEdit) toggleMode('idle'); }}
-                      style={{
-                        ...btnBase,
-                        background: idleActive ? '#64748b' : 'rgba(255,255,255,0.04)',
-                        color: !canEdit ? '#475569' : idleActive ? 'white' : '#94a3b8',
-                        border: idleActive ? '1px solid #64748b' : '1px solid rgba(255,255,255,0.1)',
-                        cursor: !canEdit ? 'not-allowed' : 'pointer',
-                        opacity: !canEdit ? 0.5 : 1,
-                      }}
-                    >
-                      IDLE (S)
-                    </button>
-                    {/* D — Cycle formation */}
-                    <button
-                      disabled={isBattleRunning}
-                      title={isBattleRunning ? 'Formation locked during battle' : `Formation: ${formation} (click to cycle, shortcut: D)`}
-                      onClick={() => {
-                        setGroupFormations(prev => {
-                          const next = new Map(prev);
-                          const cur = next.get(formationKey) ?? 'line';
-                          const idx = FORMATION_CYCLE.indexOf(cur);
-                          next.set(formationKey, FORMATION_CYCLE[(idx + 1) % FORMATION_CYCLE.length]);
-                          return next;
-                        });
-                      }}
-                      style={{
-                        ...btnBase,
-                        background: isBattleRunning ? 'rgba(255,255,255,0.02)' : formationIsDefault ? 'rgba(255,255,255,0.04)' : 'rgba(148,163,184,0.18)',
-                        color: isBattleRunning ? '#475569' : formationIsDefault ? '#94a3b8' : '#e2e8f0',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        cursor: isBattleRunning ? 'not-allowed' : 'pointer',
-                        opacity: isBattleRunning ? 0.5 : 1,
-                      }}
-                    >
-                      {FORMATION_LABELS[formation]} (D)
-                    </button>
-                    {/* F — RETREAT: vanish from field + refund 80% of each unit type
-                        to roster. Blocked if any unit in the group has an enemy hex
-                        adjacent (must fight out of melee). */}
-                    {(() => {
-                      const allUnitsHere = currentStrategicHex ? armies.get(HexUtils.key(currentStrategicHex)) ?? [] : [];
-                      const groupUnitsHere = allUnitsHere.filter(u => u.team === selectedTeam && u.groupId === gid && u.hp > 0);
-                      const enemyHexes = new Set(
-                        allUnitsHere.filter(u => u.team !== selectedTeam && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
-                      );
-                      const engaged = groupUnitsHere.some(u =>
-                        HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
-                      );
-                      const retreatDisabled = count === 0 || engaged;
-                      const refundPct = Math.round(RETREAT_REFUND_FRAC * 100);
-                      return (
-                        <button
-                          disabled={retreatDisabled}
-                          title={
-                            count === 0 ? 'No units in this group'
-                            : engaged ? '⚔ In melee — break contact first'
-                            : `Retreat: vanish from field + ${refundPct}% refund (shortcut: F)`
-                          }
-                          onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
-                          style={{
-                            ...btnBase,
-                            background: 'rgba(255,255,255,0.04)',
-                            color: retreatDisabled ? '#475569' : '#3b82f6',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            cursor: retreatDisabled ? 'not-allowed' : 'pointer',
-                            opacity: retreatDisabled ? 0.5 : 1,
-                          }}
-                        >
-                          {engaged ? '⚔ RETREAT' : 'RETREAT (F)'}
-                        </button>
-                      );
-                    })()}
-                  </div>
-                </div>
-              );
-            })}
-            <button
-              onClick={() => setIsBattleRunning(b => !b)}
-              style={{
-                width: '100%', padding: '12px', marginTop: '6px',
-                background: isBattleRunning ? '#ef4444' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                color: 'white', border: 'none', borderRadius: '10px',
-                fontSize: '11px', fontWeight: 900, cursor: 'pointer',
-              }}
-            >
-              {isBattleRunning ? '⏸ PAUSE BATTLE' : '▶ START BATTLE'}
-            </button>
-          </div>
-        )}
-
-        {/* RESET BATTLE — wipe all units on the current tactical map, restore both
-            rosters, clear orders + capture progress + winBanner. Keeps the world and
-            view; for replaying the same map without regenerating terrain. */}
-        {viewMode === 'TACTICAL' && (
-          <button
-            onClick={() => {
-              setArmies(new Map());
-              setInputMode(null);
-              setIsBattleRunning(false);
-              setGroupOrders(new Map());
-              setGroupFormations(new Map());
-              setGroupDepths(new Map());
-              setRosters(makeInitialRosters());
-              setCaptureProgress({ red: 0, blue: 0 });
-              captureProgressRef.current = { red: 0, blue: 0 };
-              setWinBanner(null);
-              lastTickHadBothTeamsRef.current = false;
-              tickCounterRef.current = 0;
-            }}
-            style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px' }}
-          >RESET BATTLE</button>
-        )}
-
-        <button
-          onClick={() => {
-            setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
-            setViewMode('STRATEGIC');
-            setCurrentStrategicHex(null);
-            setInputMode(null);
-            setIsBattleRunning(false);
-            setGroupOrders(new Map());
-            setGroupFormations(new Map());
-            setGroupDepths(new Map());
-            setRosters(makeInitialRosters());
-            setCaptureProgress({ red: 0, blue: 0 });
-            captureProgressRef.current = { red: 0, blue: 0 };
-            setWinBanner(null);
-            lastTickHadBothTeamsRef.current = false;
-            tickCounterRef.current = 0;
-          }}
-          style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '32px' }}
-        >RETURN TO STRATEGIC OVERVIEW</button>
-
-        <button onClick={() => {
-          noiseRef.current = null;
-          setArmies(new Map());
-          setCurrentStrategicHex(null);
-          setInputMode(null);
-          setIsBattleRunning(false);
-          setGroupOrders(new Map());
-          setGroupFormations(new Map());
-          setGroupDepths(new Map());
-          setRosters(makeInitialRosters());
-          setCaptureProgress({ red: 0, blue: 0 });
-          captureProgressRef.current = { red: 0, blue: 0 };
-          setWinBanner(null);
-          lastTickHadBothTeamsRef.current = false;
-          tickCounterRef.current = 0;
-          generateWorldData();
-        }} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
-          REGENERATE ECOSYSTEM
-        </button>
-      </div>
-    </div>
+    <HUD
+      containerRef={containerRef}
+      viewMode={viewMode}
+      isScanning={isScanning}
+      showGrid={showGrid}
+      fogOfWar={fogOfWar}
+      inputMode={inputMode}
+      winBanner={winBanner}
+      isBattleRunning={isBattleRunning}
+      captureProgress={captureProgress}
+      currentStrategicHex={currentStrategicHex}
+      armies={armies}
+      groupOrders={groupOrders}
+      groupFormations={groupFormations}
+      rosters={rosters}
+      selectedTeam={selectedTeam}
+      selectedGroup={selectedGroup}
+      selectedUnitType={selectedUnitType}
+      curT={curT}
+      setIsScanning={setIsScanning}
+      setShowGrid={setShowGrid}
+      setFogOfWar={setFogOfWar}
+      setSelectedTeam={setSelectedTeam}
+      setSelectedGroup={setSelectedGroup}
+      setSelectedUnitType={setSelectedUnitType}
+      setInputMode={setInputMode}
+      setIsBattleRunning={setIsBattleRunning}
+      toggleScan={toggleScan}
+      toggleMode={toggleMode}
+      marchForward={marchForward}
+      cycleFormation={cycleFormation}
+      resetBattle={resetBattle}
+      returnToStrategic={returnToStrategic}
+      regenerateWorld={regenerateWorld}
+    />
   );
 };
