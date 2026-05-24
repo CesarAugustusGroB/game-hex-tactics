@@ -33,7 +33,6 @@ export interface HUDProps {
   selectedTeam: Team;
   selectedGroup: GroupId;
   selectedUnitType: UnitType;
-  // command points
   commandPoints: { red: number; blue: number };
   brokeFlash: { red: boolean; blue: boolean };
   // computed
@@ -215,7 +214,9 @@ export const HUD: React.FC<HUDProps> = ({
                 }}>{team.toUpperCase()}</span>
                 <div style={{
                   flex: 1, height: '8px',
-                  background: flashing ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.08)',
+                  background: flashing
+                    ? (team === 'red' ? 'rgba(239,68,68,0.6)' : 'rgba(59,130,246,0.6)')
+                    : 'rgba(255,255,255,0.08)',
                   borderRadius: '4px', overflow: 'hidden',
                   transition: 'background 80ms',
                 }}>
