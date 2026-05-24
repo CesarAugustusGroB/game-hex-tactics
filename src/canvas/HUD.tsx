@@ -9,7 +9,7 @@ import {
   FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
-import { CP_CAP } from '../battle/command-points';
+import { CP_CAP, CP_COSTS, type CpIntent } from '../battle/command-points';
 
 export interface HUDProps {
   // ref
@@ -35,6 +35,7 @@ export interface HUDProps {
   selectedUnitType: UnitType;
   commandPoints: { red: number; blue: number };
   brokeFlash: { red: boolean; blue: boolean };
+  canAfford: (team: Team, intent: CpIntent) => boolean;
   // computed
   curT: TerrainDef | null;
   // setters
@@ -56,6 +57,24 @@ export interface HUDProps {
   regenerateWorld: () => void;
 }
 
+const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affordable }) => {
+  if (cost === 0) return null;
+  return (
+    <span style={{
+      position: 'absolute',
+      top: '-5px', right: '-5px',
+      background: affordable ? '#facc15' : '#ef4444',
+      color: affordable ? '#0b1220' : 'white',
+      borderRadius: '8px',
+      padding: '1px 5px',
+      fontSize: '8px',
+      fontWeight: 900,
+      border: '1px solid #0b1220',
+      pointerEvents: 'none',
+    }}>{cost}</span>
+  );
+};
+
 export const HUD: React.FC<HUDProps> = ({
   containerRef,
   viewMode,
@@ -76,6 +95,7 @@ export const HUD: React.FC<HUDProps> = ({
   selectedUnitType,
   commandPoints,
   brokeFlash,
+  canAfford,
   curT,
   setIsScanning,
   setShowGrid,
@@ -271,7 +291,7 @@ export const HUD: React.FC<HUDProps> = ({
             const samePlacing = isPlacing && selectedUnitType === type;
             const remaining = rosters.get(selectedTeam)?.[type] ?? 0;
             const outOfStock = remaining <= 0;
-            const disabled = viewMode !== 'TACTICAL' || outOfStock;
+            const disabled = viewMode !== 'TACTICAL' || outOfStock || !canAfford(selectedTeam, 'placeCohort');
             const keyHint = type === 'infantry' ? '(Z)' : type === 'cavalry' ? '(X)' : '(C)';
             const label = type === 'infantry' ? 'INFANTRY' : type === 'cavalry' ? 'CAVALRY' : 'SKIRMISH';
             return (
@@ -292,6 +312,7 @@ export const HUD: React.FC<HUDProps> = ({
                 style={{
                   flex: 1,
                   padding: '14px 6px',
+                  position: 'relative',
                   background: disabled
                     ? 'rgba(255,255,255,0.04)'
                     : samePlacing ? '#ef4444' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
@@ -306,6 +327,7 @@ export const HUD: React.FC<HUDProps> = ({
                 }}
               >
                 {samePlacing ? `STOP ${keyHint}` : `${label} ×${remaining} ${keyHint}`}
+                <CostChip cost={CP_COSTS.placeCohort} affordable={canAfford(selectedTeam, 'placeCohort')} />
               </button>
             );
           })}
@@ -423,7 +445,7 @@ export const HUD: React.FC<HUDProps> = ({
                     </button>
                     {/* Q — DEPLOY (enter order mode for drag-deploy / direction set) */}
                     <button
-                      disabled={count === 0}
+                      disabled={count === 0 || !canAfford(selectedTeam, 'orderDrag')}
                       title="Deploy: drag from a deploy-zone hex to set heading + formation (shortcut: Q)"
                       onClick={() => {
                         setSelectedGroup(gid);
@@ -432,6 +454,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: orderActive ? teamColorHex : 'rgba(255,255,255,0.04)',
                         color: count === 0 ? '#475569' : orderActive ? 'white' : '#94a3b8',
                         border: orderActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
@@ -439,11 +462,12 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       DEPLOY (Q)
+                      <CostChip cost={CP_COSTS.orderDrag} affordable={canAfford(selectedTeam, 'orderDrag')} />
                     </button>
                     {/* W — HOLD: stand still + accrue defensive damage reduction up to a cap.
                         When the cap is reached the sim auto-flips the group to IDLE. */}
                     <button
-                      disabled={!canEdit}
+                      disabled={!canEdit || (!holdActive && !canAfford(selectedTeam, 'hold'))}
                       title={
                         committed ? '🔒 Group committed — retreat to redeploy'
                         : !canHold ? 'No active order to hold'
@@ -453,6 +477,7 @@ export const HUD: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('hold'); }}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: holdActive ? '#f59e0b' : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : holdActive ? 'white' : '#94a3b8',
                         border: holdActive ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
@@ -461,10 +486,11 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       {holdActive ? `HOLD ${holdPct}% (W)` : 'HOLD (W)'}
+                      {!holdActive && <CostChip cost={CP_COSTS.hold} affordable={canAfford(selectedTeam, 'hold')} />}
                     </button>
                     {/* E — CHARGE */}
                     <button
-                      disabled={!canEdit}
+                      disabled={!canEdit || (!chargeActive && !canAfford(selectedTeam, 'charge'))}
                       title={
                         committed ? '🔒 Group committed — retreat to redeploy'
                         : canEdit ? (chargeActive ? `Charge active${chargeRemaining != null ? ` (${chargeRemaining} ticks left)` : ''} — click to cancel (shortcut: E)` : 'Charge: 2 hexes/tick, lance damage, 1.5s burst (shortcut: E)')
@@ -473,6 +499,7 @@ export const HUD: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('charge'); }}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: chargeActive ? '#dc2626' : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : chargeActive ? 'white' : '#94a3b8',
                         border: chargeActive ? '1px solid #dc2626' : '1px solid rgba(255,255,255,0.1)',
@@ -481,10 +508,11 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       {chargeActive && chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : 'CHARGE (E)'}
+                      {!chargeActive && <CostChip cost={CP_COSTS.charge} affordable={canAfford(selectedTeam, 'charge')} />}
                     </button>
                     {/* R — UNLEASH (one-way commit) */}
                     <button
-                      disabled={!canEdit}
+                      disabled={!canEdit || (!unleashActive && !committed && !canAfford(selectedTeam, 'unleash'))}
                       title={
                         committed ? '🔒 Unleashed — locked. Retreat to redeploy'
                         : canEdit ? (unleashActive ? 'Unleashed — units chase nearest enemy (shortcut: R)' : 'Unleash: ONE-WAY commit — no more orders until retreat reaches deploy zone (shortcut: R)')
@@ -493,6 +521,7 @@ export const HUD: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('unleash'); }}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: unleashActive ? '#a855f7' : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : unleashActive ? 'white' : '#94a3b8',
                         border: unleashActive ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
@@ -501,6 +530,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       {committed ? '🔒 UNLEASH' : 'UNLEASH (R)'}
+                      {!unleashActive && !committed && <CostChip cost={CP_COSTS.unleash} affordable={canAfford(selectedTeam, 'unleash')} />}
                     </button>
                     {/* T — ASSIGN. Sits right of UNLEASH so the row reads Q W E R T,
                         matching the keyboard. Available regardless of order state. */}
@@ -513,6 +543,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: assignActive ? teamColorHex : 'rgba(255,255,255,0.04)',
                         color: assignActive ? 'white' : '#94a3b8',
                         border: assignActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
@@ -520,6 +551,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       ASSIGN (T)
+                      <CostChip cost={CP_COSTS.assign} affordable={canAfford(selectedTeam, 'assign')} />
                     </button>
                   </div>
                   {/* Row 2 ──────── A  S  D  F ──────── */}
@@ -530,7 +562,8 @@ export const HUD: React.FC<HUDProps> = ({
                     {(() => {
                       const isMarching = orderMode === 'march' && !!order?.attackTarget;
                       const nextHeading = cycleConeHeading(selectedTeam, order?.heading ?? (selectedTeam === 'red' ? 2 : 5));
-                      const marchDisabled = count === 0 || committed;
+                      const marchIntent: CpIntent = isMarching ? 'cycleHeading' : 'march';
+                      const marchDisabled = count === 0 || committed || !canAfford(selectedTeam, marchIntent);
                       return (
                         <button
                           disabled={marchDisabled}
@@ -543,6 +576,7 @@ export const HUD: React.FC<HUDProps> = ({
                           onClick={() => { if (!marchDisabled) marchForward(); }}
                           style={{
                             ...btnBase, fontSize: '12px',
+                            position: 'relative',
                             background: isMarching ? '#10b981' : 'rgba(255,255,255,0.04)',
                             color: marchDisabled ? '#475569' : isMarching ? 'white' : '#94a3b8',
                             border: isMarching ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
@@ -551,6 +585,7 @@ export const HUD: React.FC<HUDProps> = ({
                           }}
                         >
                           {isMarching ? `${HEADING_ARROWS[nextHeading]} (A)` : 'MARCH (A)'}
+                          <CostChip cost={CP_COSTS[marchIntent]} affordable={canAfford(selectedTeam, marchIntent)} />
                         </button>
                       );
                     })()}
@@ -567,6 +602,7 @@ export const HUD: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('idle'); }}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: idleActive ? '#64748b' : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : idleActive ? 'white' : '#94a3b8',
                         border: idleActive ? '1px solid #64748b' : '1px solid rgba(255,255,255,0.1)',
@@ -575,14 +611,16 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       IDLE (S)
+                      <CostChip cost={CP_COSTS.idle} affordable={canAfford(selectedTeam, 'idle')} />
                     </button>
                     {/* D — Cycle formation */}
                     <button
-                      disabled={isBattleRunning}
+                      disabled={isBattleRunning || !canAfford(selectedTeam, 'cycleFormation')}
                       title={isBattleRunning ? 'Formation locked during battle' : `Formation: ${formation} (click to cycle, shortcut: D)`}
                       onClick={() => cycleFormation(gid)}
                       style={{
                         ...btnBase,
+                        position: 'relative',
                         background: isBattleRunning ? 'rgba(255,255,255,0.02)' : formationIsDefault ? 'rgba(255,255,255,0.04)' : 'rgba(148,163,184,0.18)',
                         color: isBattleRunning ? '#475569' : formationIsDefault ? '#94a3b8' : '#e2e8f0',
                         border: '1px solid rgba(255,255,255,0.1)',
@@ -591,6 +629,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       {FORMATION_LABELS[formation]} (D)
+                      <CostChip cost={CP_COSTS.cycleFormation} affordable={canAfford(selectedTeam, 'cycleFormation')} />
                     </button>
                     {/* F — RETREAT: vanish from field + refund 80% of each unit type
                         to roster. Blocked if any unit in the group has an enemy hex
@@ -604,7 +643,7 @@ export const HUD: React.FC<HUDProps> = ({
                       const engaged = groupUnitsHere.some(u =>
                         HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
                       );
-                      const retreatDisabled = count === 0 || engaged;
+                      const retreatDisabled = count === 0 || engaged || !canAfford(selectedTeam, 'retreat');
                       const refundPct = Math.round(RETREAT_REFUND_FRAC * 100);
                       return (
                         <button
@@ -617,6 +656,7 @@ export const HUD: React.FC<HUDProps> = ({
                           onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
                           style={{
                             ...btnBase,
+                            position: 'relative',
                             background: 'rgba(255,255,255,0.04)',
                             color: retreatDisabled ? '#475569' : '#3b82f6',
                             border: '1px solid rgba(255,255,255,0.1)',
@@ -625,6 +665,7 @@ export const HUD: React.FC<HUDProps> = ({
                           }}
                         >
                           {engaged ? '⚔ RETREAT' : 'RETREAT (F)'}
+                          <CostChip cost={CP_COSTS.retreat} affordable={canAfford(selectedTeam, 'retreat')} />
                         </button>
                       );
                     })()}

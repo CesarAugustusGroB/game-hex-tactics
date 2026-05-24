@@ -335,7 +335,6 @@ export const GameCanvas: React.FC = () => {
   const [commandPoints, setCommandPoints] = useState<CommandPoints>(makeInitialCommandPoints());
   const [brokeFlash, setBrokeFlash] = useState<{ red: boolean; blue: boolean }>({ red: false, blue: false });
 
-  // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
   const canAfford = useCallback((team: Team, intent: CpIntent): boolean => {
     return canAffordPure(commandPointsRef.current, team, intent);
   }, []);
@@ -745,6 +744,7 @@ export const GameCanvas: React.FC = () => {
       regenerateWorld={regenerateWorld}
       commandPoints={commandPoints}
       brokeFlash={brokeFlash}
+      canAfford={canAfford}
     />
   );
 };
