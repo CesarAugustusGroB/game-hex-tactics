@@ -8,6 +8,7 @@ import type { Team, GroupId } from '../battle/simulate';
 import { getAiController } from '../battle/ai';
 import type { OrderChange } from '../battle/ai';
 import { getTerrainMods } from '../battle/terrain';
+import { applyRegen, type CommandPoints } from '../battle/command-points';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_TICKS_TO_WIN, CAPTURE_ZONE_HEXES,
   captureZoneKeys, deployZoneFor,
@@ -34,6 +35,8 @@ export interface BattleTickCtx {
   setCaptureProgress: Dispatch<SetStateAction<{ red: number; blue: number }>>;
   setWinBanner: Dispatch<SetStateAction<Team | null>>;
   setIsBattleRunning: Dispatch<SetStateAction<boolean>>;
+  commandPointsRef: MutableRefObject<CommandPoints>;
+  setCommandPoints: Dispatch<SetStateAction<CommandPoints>>;
 }
 
 export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
@@ -58,6 +61,12 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
         blue: deployZoneFor('blue', grid),
       };
       ctx.tickCounterRef.current += 1;
+      const cpBefore = ctx.commandPointsRef.current;
+      const cpAfter = applyRegen(cpBefore, ctx.tickCounterRef.current);
+      if (cpAfter !== cpBefore) {
+        ctx.commandPointsRef.current = cpAfter;
+        ctx.setCommandPoints(cpAfter);
+      }
       // AI phase. Each registered controller writes its team's orders via `issueOrder`,
       // which mutates the orders ref synchronously — so the `simulateTick` call below
       // reads the post-AI order map, no one-tick lag.
