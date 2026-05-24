@@ -3,17 +3,17 @@ import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import gsap from 'gsap';
 import { createNoise2D } from 'simplex-noise';
-import { simulateTick, groupHeading, snapHeading, computeFormationPreview, computeLineDragSlots, computeWedgeDragSlots, computeHexDragSlots, computeOrderedSlotAssignments, computeLineSlotAssignmentsByType, snapToForwardCone, cycleConeHeading, CHARGE_DURATION_TICKS, MAX_HP_BY_TYPE } from '../battle/simulate';
-import type { Unit, OrderMode, Team, GroupId, FormationType, UnitType } from '../battle/simulate';
+import { simulateTick, cycleConeHeading, CHARGE_DURATION_TICKS } from '../battle/simulate';
+import type { OrderMode, Team, GroupId, UnitType } from '../battle/simulate';
 import { getTerrainMods } from '../battle/terrain';
 import { getAiController, type OrderChange } from '../battle/ai';
 import {
-  DRAG_THRESHOLD_PX, HEADING_ARROWS, STRATEGIC_RESOLUTION, DIVE_ZOOM,
+  STRATEGIC_RESOLUTION, DIVE_ZOOM,
   type InputMode, type Armies, type GroupOrders, type GroupFormations, type GroupDepths,
   type Rosters,
-  INITIAL_ROSTER, COHORT_SIZE, RETREAT_REFUND_FRAC,
+  INITIAL_ROSTER, RETREAT_REFUND_FRAC,
   CAPTURE_TICKS_TO_WIN, CAPTURE_CENTER, captureZoneKeys, CAPTURE_ZONE_HEXES, makeInitialRosters,
-  FORMATION_CYCLE, TEAM_TINTS,
+  FORMATION_CYCLE,
   DAMAGE_PER_TICK, TICK_MS, LOD_THRESHOLD,
   groupOrderKey, deployZoneFor,
 } from '../canvas/constants';
@@ -25,17 +25,14 @@ import { generateWorldData as generateWorldDataPure, type GenSettings } from '..
 import { drawTerrain } from '../canvas/render/drawTerrain';
 import { drawDetails as drawDetailsRender } from '../canvas/render/drawDetails';
 import { drawUnits as drawUnitsRender } from '../canvas/render/drawUnits';
-
-interface OrderDrag {
-  team: Team;
-  groupId: GroupId;
-  formation: FormationType;
-  depth: number;
-  unitCount: number;
-  targetHex: Hex;
-  startWorld: { x: number; y: number };
-  currentWorld: { x: number; y: number };
-}
+import { useTacticalKeyboard } from '../canvas/input/useTacticalKeyboard';
+import { useGlobalShortcuts } from '../canvas/input/useGlobalShortcuts';
+import {
+  type OrderDrag,
+  type OrderDragCtx,
+  beginOrderDrag, updateOrderDrag, commitOrderDrag, cancelOrderDrag,
+} from '../canvas/input/orderDrag';
+import { type PaintModeCtx, paintAt } from '../canvas/input/paintMode';
 
 export const GameCanvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -473,184 +470,16 @@ export const GameCanvas: React.FC = () => {
       
       app.stage.eventMode = 'static'; app.stage.hitArea = app.screen;
 
-      // Drop a cohort centered on `hex`: the clicked hex plus its in-zone unoccupied
-      // neighbours, up to `COHORT_SIZE` units (capped by roster remaining). Refused
-      // outright if the clicked hex is outside the active team's deploy zone or its
-      // roster is empty for this type. Each click = at most one cohort (the paint loop's
-      // hex-dedupe guard at the top prevents the same drag re-firing on the same hex).
-      const paintPlace = (hex: Hex) => {
-        const strategicHex = currentStrategicHexRef.current;
-        if (!strategicHex) return;
-        const hexKey = HexUtils.key(hex);
-        if (lastPaintedKeyRef.current === hexKey) return;
-        lastPaintedKeyRef.current = hexKey;
-        const team = selectedTeamRef.current;
-        const zone = deployZoneFor(team, gridDataRef.current);
-        if (!zone.has(hexKey)) return;
-        const unitType = selectedUnitTypeRef.current;
-        const remaining = rostersRef.current.get(team)?.[unitType] ?? 0;
-        if (remaining <= 0) return;
-        const strategicKey = HexUtils.key(strategicHex);
-        const existing = armiesRef.current.get(strategicKey) ?? [];
-        const occupied = new Set(existing.map(u => HexUtils.key(u.tacticalHex)));
-        const target: Hex[] = [];
-        const candidates: Hex[] = [hex, ...HexUtils.getNeighbors(hex)];
-        const cap = Math.min(COHORT_SIZE, remaining);
-        for (const c of candidates) {
-          if (target.length >= cap) break;
-          const k = HexUtils.key(c);
-          if (!zone.has(k) || occupied.has(k)) continue;
-          target.push(c);
-          occupied.add(k);
-        }
-        if (target.length === 0) return;
-        const groupId = selectedGroupRef.current;
-        const newUnits: Unit[] = target.map(h => {
-          const placementType = gridDataRef.current.find(d => d.hex.q === h.q && d.hex.r === h.r)?.type;
-          return {
-            id: crypto.randomUUID(),
-            team,
-            unitType,
-            tacticalHex: h,
-            homeHex: h,
-            groupId,
-            hp: MAX_HP_BY_TYPE[unitType],
-            state: 'idle',
-            nextMoveTick: 0,
-            visionRadius: getTerrainMods(placementType).visionRadius,
-          };
-        });
-        setArmies(prev => {
-          const next = new Map(prev);
-          const cur = next.get(strategicKey) ?? [];
-          next.set(strategicKey, [...cur, ...newUnits]);
-          return next;
-        });
-        setRosters(prev => {
-          const next = new Map(prev);
-          const r = next.get(team) ?? { ...INITIAL_ROSTER };
-          next.set(team, { ...r, [unitType]: r[unitType] - newUnits.length });
-          return next;
-        });
+      const paintCtx: PaintModeCtx = {
+        currentStrategicHexRef, lastPaintedKeyRef, selectedTeamRef, selectedGroupRef,
+        selectedUnitTypeRef, armiesRef, rostersRef, gridDataRef, inputModeRef,
+        setArmies, setRosters,
       };
 
-      const paintAssign = (hex: Hex) => {
-        const strategicHex = currentStrategicHexRef.current;
-        if (!strategicHex) return;
-        const hexKey = HexUtils.key(hex);
-        if (lastPaintedKeyRef.current === hexKey) return;
-        lastPaintedKeyRef.current = hexKey;
-        const strategicKey = HexUtils.key(strategicHex);
-        const team = selectedTeamRef.current;
-        const groupId = selectedGroupRef.current;
-        setArmies(prev => {
-          const existing = prev.get(strategicKey) ?? [];
-          let mutated = false;
-          const updated = existing.map(u => {
-            if (u.team === team && u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r && u.groupId !== groupId) {
-              mutated = true;
-              return { ...u, groupId };
-            }
-            return u;
-          });
-          if (!mutated) return prev;
-          const next = new Map(prev);
-          next.set(strategicKey, updated);
-          return next;
-        });
-      };
-
-      const paintAt = (hex: Hex) => {
-        if (inputModeRef.current === 'place') paintPlace(hex);
-        else if (inputModeRef.current === 'assign') paintAssign(hex);
-      };
-
-      const renderOrderPreview = () => {
-        const gfx = previewGfx.current;
-        gfx.removeChildren();
-        const drag = orderDragRef.current;
-        if (!drag) return;
-
-        const dx = drag.currentWorld.x - drag.startWorld.x;
-        const dy = drag.currentWorld.y - drag.startWorld.y;
-        const screenDist = Math.hypot(dx, dy) * zoom.current;
-        const dragEndHex = HexUtils.pixelToHex({ x: drag.currentWorld.x, y: drag.currentWorld.y });
-        const dragHexDist = HexUtils.distance(drag.targetHex, dragEndHex);
-
-        let slots: Hex[];
-        let heading: number;
-        // Continuous-angle drag for LINE / WEDGE; other formations use 6-snap.
-        if (drag.formation === 'line' && dragHexDist >= 1) {
-          const r = computeLineDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
-          slots = r.slots;
-          heading = r.headingForward;
-        } else if (drag.formation === 'wedge' && dragHexDist >= 1) {
-          const r = computeWedgeDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
-          slots = r.slots;
-          heading = r.headingForward;
-        } else if (drag.formation === 'hex' && dragHexDist >= 1) {
-          const r = computeHexDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
-          slots = r.slots;
-          heading = r.headingForward;
-        } else {
-          if (screenDist >= DRAG_THRESHOLD_PX) {
-            heading = snapHeading(dx, dy);
-          } else {
-            const strategic = currentStrategicHexRef.current;
-            const groupUnits = strategic
-              ? (armiesRef.current.get(HexUtils.key(strategic)) ?? []).filter(
-                  u => u.team === drag.team && u.groupId === drag.groupId,
-                )
-              : [];
-            heading = groupHeading(groupUnits, drag.targetHex);
-          }
-          slots = computeFormationPreview(drag.unitCount, drag.targetHex, heading, drag.formation, drag.depth);
-        }
-        const teamColor = TEAM_TINTS[drag.team];
-
-        slots.forEach((slot, i) => {
-          const pos = HexUtils.hexToPixel(slot);
-          const tile = gridDataRef.current.find(d => d.hex.q === slot.q && d.hex.r === slot.r);
-          const topY = pos.y - (tile ? TERRAINS[tile.type].height : 0);
-
-          const isLieutenant = i === 0;
-          const hex = new PIXI.Graphics();
-          hex.lineStyle(isLieutenant ? 3 : 2, isLieutenant ? 0xfacc15 : teamColor, isLieutenant ? 0.95 : 0.75);
-          hex.beginFill(isLieutenant ? 0xfacc15 : teamColor, 0.18);
-          const s = HexUtils.size;
-          for (let k = 0; k < 6; k++) {
-            const r = Math.PI / 180 * (60 * k);
-            if (k === 0) hex.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
-            else hex.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
-          }
-          hex.closePath().endFill();
-          gfx.addChild(hex);
-
-          if (isLieutenant) {
-            const star = new PIXI.Text({
-              text: '★',
-              style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
-            });
-            star.anchor.set(0.5);
-            star.x = pos.x;
-            star.y = topY - 44;
-            gfx.addChild(star);
-
-            const arrow = new PIXI.Text({
-              text: HEADING_ARROWS[heading] ?? '→',
-              style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
-            });
-            arrow.anchor.set(0.5);
-            arrow.x = pos.x + 14;
-            arrow.y = topY - 44;
-            gfx.addChild(arrow);
-          }
-        });
-      };
-
-      const cancelOrderDrag = () => {
-        orderDragRef.current = null;
-        previewGfx.current.removeChildren();
+      const odCtx: OrderDragCtx = {
+        previewGfx, zoom, orderDragRef, selectedTeamRef, selectedGroupRef,
+        currentStrategicHexRef, armiesRef, groupOrdersRef, groupFormationsRef,
+        groupDepthsRef, gridDataRef, setArmies, setInputMode, issueOrder,
       };
 
       app.stage.on('pointerdown', (e) => {
@@ -659,32 +488,11 @@ export const GameCanvas: React.FC = () => {
           isPaintingRef.current = true;
           lastPaintedKeyRef.current = null;
           const local = world.toLocal(e.global);
-          paintAt(HexUtils.pixelToHex({ x: local.x, y: local.y }));
+          paintAt(HexUtils.pixelToHex({ x: local.x, y: local.y }), paintCtx);
           return;
         }
         if (mode === 'order' && currentStrategicHexRef.current) {
-          const team = selectedTeamRef.current;
-          const groupId = selectedGroupRef.current;
-          const strategicKey = HexUtils.key(currentStrategicHexRef.current);
-          const groupUnits = (armiesRef.current.get(strategicKey) ?? []).filter(
-            u => u.team === team && u.groupId === groupId,
-          );
-          if (groupUnits.length === 0) return;
-          const local = world.toLocal(e.global);
-          const targetHex = HexUtils.pixelToHex({ x: local.x, y: local.y });
-          const formation = groupFormationsRef.current.get(groupOrderKey(team, groupId)) ?? 'line';
-          const depth = groupDepthsRef.current.get(groupOrderKey(team, groupId)) ?? 1;
-          orderDragRef.current = {
-            team,
-            groupId,
-            formation,
-            depth,
-            unitCount: groupUnits.length,
-            targetHex,
-            startWorld: { x: local.x, y: local.y },
-            currentWorld: { x: local.x, y: local.y },
-          };
-          renderOrderPreview();
+          beginOrderDrag(e, world, odCtx);
           return;
         }
         isDragging.current = true;
@@ -695,104 +503,11 @@ export const GameCanvas: React.FC = () => {
         const local = world.toLocal(e.global);
         const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
         setHoveredHex(hex);
-        if (isPaintingRef.current) paintAt(hex);
-        if (orderDragRef.current) {
-          orderDragRef.current.currentWorld = { x: local.x, y: local.y };
-          renderOrderPreview();
-        }
+        if (isPaintingRef.current) paintAt(hex, paintCtx);
+        if (orderDragRef.current) updateOrderDrag(local.x, local.y, odCtx);
       });
       app.stage.on('pointerup', () => {
-        const drag = orderDragRef.current;
-        if (drag) {
-          const dx = drag.currentWorld.x - drag.startWorld.x;
-          const dy = drag.currentWorld.y - drag.startWorld.y;
-          const screenDist = Math.hypot(dx, dy) * zoom.current;
-          const strategic = currentStrategicHexRef.current;
-          const groupUnits = strategic
-            ? (armiesRef.current.get(HexUtils.key(strategic)) ?? []).filter(
-                u => u.team === drag.team && u.groupId === drag.groupId,
-              )
-            : [];
-          const dragEndHex = HexUtils.pixelToHex({ x: drag.currentWorld.x, y: drag.currentWorld.y });
-          const dragHexDist = HexUtils.distance(drag.targetHex, dragEndHex);
-
-          let heading: number;
-          let slots: Hex[];
-          let lineFrontWidth = 0;
-          if (drag.formation === 'line' && dragHexDist >= 1) {
-            const r = computeLineDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
-            heading = r.headingForward;
-            slots = r.slots;
-            lineFrontWidth = r.frontWidth;
-          } else if (drag.formation === 'wedge' && dragHexDist >= 1) {
-            const r = computeWedgeDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
-            heading = r.headingForward;
-            slots = r.slots;
-          } else if (drag.formation === 'hex' && dragHexDist >= 1) {
-            const r = computeHexDragSlots(drag.unitCount, drag.targetHex, dragEndHex);
-            heading = r.headingForward;
-            slots = r.slots;
-          } else {
-            heading = screenDist >= DRAG_THRESHOLD_PX
-              ? snapHeading(dx, dy)
-              : groupHeading(groupUnits, drag.targetHex);
-            slots = computeFormationPreview(
-              groupUnits.length, drag.targetHex, heading, drag.formation, drag.depth,
-            );
-          }
-
-          // LINE pairs by role (cav→flanks, skir→front-center, inf→back); other
-          // formations keep the march-projection pairing.
-          const pairing = lineFrontWidth > 0
-            ? computeLineSlotAssignmentsByType(groupUnits, slots, drag.targetHex, lineFrontWidth)
-            : computeOrderedSlotAssignments(groupUnits, slots, drag.targetHex);
-
-          // Deploy validation: every slot must be in-bounds, walkable, and not occupied by a
-          // unit outside this group. All-or-nothing.
-          const gridSet = new Set(gridDataRef.current.map(d => HexUtils.key(d.hex)));
-          const terrainAt = new Map(gridDataRef.current.map(d => [HexUtils.key(d.hex), d.type]));
-          const allUnits = strategic ? armiesRef.current.get(HexUtils.key(strategic)) ?? [] : [];
-          const groupIds = new Set(groupUnits.map(u => u.id));
-          const occupantByHex = new Map<string, Unit>();
-          for (const u of allUnits) {
-            if (!groupIds.has(u.id)) occupantByHex.set(HexUtils.key(u.tacticalHex), u);
-          }
-          let deployValid = pairing.size === groupUnits.length;
-          if (deployValid) {
-            for (const slot of pairing.values()) {
-              const k = HexUtils.key(slot);
-              if (!gridSet.has(k)) { deployValid = false; break; }
-              const tType = terrainAt.get(k);
-              if (!tType || !TERRAINS[tType].walkable) { deployValid = false; break; }
-              if (occupantByHex.has(k)) { deployValid = false; break; }
-            }
-          }
-
-          if (deployValid && strategic) {
-            // Snap units to their paired slots, then write the order with attackTarget = press.
-            setArmies(prev => {
-              const updated = new Map(prev);
-              const arr = (updated.get(HexUtils.key(strategic)) ?? []).map(u => {
-                const slot = pairing.get(u.id);
-                if (slot) return { ...u, tacticalHex: slot };
-                return u;
-              });
-              updated.set(HexUtils.key(strategic), arr);
-              return updated;
-            });
-            // New orders default to 'idle' (units stand at the deploy with heading set but
-            // don't auto-march); re-drag while marching/holding/etc. preserves the mode so
-            // the player can redirect mid-flight. Press A to start (or cycle) the march.
-            {
-              const prior = groupOrdersRef.current.get(groupOrderKey(drag.team, drag.groupId));
-              const change: OrderChange = { attackTarget: drag.targetHex, heading: snapToForwardCone(drag.team, heading) };
-              if (!prior?.mode) change.mode = 'idle';
-              issueOrder(drag.team, drag.groupId, change);
-            }
-          }
-          setInputMode(null);
-          cancelOrderDrag();
-        }
+        if (orderDragRef.current) commitOrderDrag(odCtx);
         isDragging.current = false;
         isPaintingRef.current = false;
         lastPaintedKeyRef.current = null;
@@ -829,7 +544,7 @@ export const GameCanvas: React.FC = () => {
 
       containerRef.current?.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        cancelOrderDrag();
+        cancelOrderDrag(odCtx);
         setInputMode(null);
       });
 
@@ -1289,119 +1004,17 @@ export const GameCanvas: React.FC = () => {
     generateWorldData();
   }, [generateWorldData]);
 
-  // Order-related shortcuts for the currently selected group. Layout — top row:
-  //   T Q W E R  →  Assign / Deploy / Hold / Charge / Unleash
-  // Bottom row:
-  //   A S D F    →  March (start / cycle heading) / Idle / Cycle formation / Retreat
-  // All TACTICAL-only; ignored while typing in inputs.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (!'tqwerasdf'.includes(k)) return;
-      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (viewMode !== 'TACTICAL') return;
-      const gid = selectedGroupRef.current;
-      const team = selectedTeamRef.current;
+  useTacticalKeyboard({
+    viewMode, selectedGroupRef, selectedTeamRef, currentStrategicHexRef, armiesRef,
+    setInputMode, setIsScanning, toggleMode, marchForward, cycleFormation,
+  });
 
-      if (k === 't') {
-        setInputMode(prev => (prev === 'assign' ? null : 'assign'));
-        setIsScanning(false);
-      } else if (k === 'q') {
-        const hex = currentStrategicHexRef.current;
-        const units = hex ? armiesRef.current.get(HexUtils.key(hex)) ?? [] : [];
-        const count = units.filter(u => u.team === team && u.groupId === gid).length;
-        if (count === 0) return;
-        setInputMode(prev => (prev === 'order' ? null : 'order'));
-        setIsScanning(false);
-      } else if (k === 'w') {
-        toggleMode('hold');
-      } else if (k === 'e') {
-        toggleMode('charge');
-      } else if (k === 'r') {
-        toggleMode('unleash');
-      } else if (k === 's') {
-        toggleMode('idle');
-      } else if (k === 'a') {
-        // A is the MARCH key. From idle/hold/charge/no-order → start marching (uses
-        // existing heading if set by a prior drag, else team-forward). From march →
-        // cycle heading within the team's forward cone.
-        marchForward();
-      } else if (k === 'd') {
-        cycleFormation(gid);
-      } else if (k === 'f') {
-        toggleMode('retreat');
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, marchForward, cycleFormation]);
-
-  // Global shortcuts:
-  //   SPACE         → start/pause battle (preventDefault to suppress page scroll)
-  //   < / ,         → cycle selected team (red ↔ blue)
-  //   1 / 2 / 3     → select group
-  //   Z / X / C     → place infantry / cavalry / skirmisher (C reserved — skirmisher
-  //                   unit type not yet implemented, so C is a no-op for now). Pressing
-  //                   the same key again exits place mode; pressing the OTHER key
-  //                   switches type without leaving place mode.
-  // All TACTICAL-only.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (viewMode !== 'TACTICAL') return;
-      if (e.key === ' ') {
-        e.preventDefault();
-        setIsBattleRunning(b => !b);
-        return;
-      }
-      if (e.key === '<' || e.key === ',') {
-        setSelectedTeam(prev => (prev === 'red' ? 'blue' : 'red'));
-        return;
-      }
-      if (e.key === '1' || e.key === '2' || e.key === '3') {
-        setSelectedGroup(Number(e.key) as GroupId);
-        return;
-      }
-      const setPlacementType = (type: UnitType) => {
-        // Hotkeys obey the same roster gate as the HUD buttons.
-        const team = selectedTeamRef.current;
-        if ((rostersRef.current.get(team)?.[type] ?? 0) <= 0) return;
-        const samePlacing = inputModeRef.current === 'place' && selectedUnitTypeRef.current === type;
-        setSelectedUnitType(type);
-        setInputMode(samePlacing ? null : 'place');
-        setIsScanning(false);
-      };
-      if (e.key === 'z' || e.key === 'Z') { setPlacementType('infantry'); return; }
-      if (e.key === 'x' || e.key === 'X') { setPlacementType('cavalry'); return; }
-      if (e.key === 'c' || e.key === 'C') { setPlacementType('skirmisher'); return; }
-      // Backspace: kill every unit in the selected team+group on this hex, and clear
-      // the group's order so no phantom lieutenant marker survives.
-      if (e.key === 'Backspace') {
-        e.preventDefault();
-        const strategic = currentStrategicHexRef.current;
-        if (!strategic) return;
-        const team = selectedTeamRef.current;
-        const gid = selectedGroupRef.current;
-        const key = HexUtils.key(strategic);
-        setArmies(prev => {
-          const cur = prev.get(key) ?? [];
-          const survivors = cur.filter(u => !(u.team === team && u.groupId === gid));
-          if (survivors.length === cur.length) return prev;
-          const next = new Map(prev);
-          next.set(key, survivors);
-          return next;
-        });
-        clearOrder(team, gid);
-        return;
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, clearOrder]);
+  useGlobalShortcuts({
+    viewMode, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
+    currentStrategicHexRef, inputModeRef, rostersRef,
+    setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
+    setInputMode, setIsScanning, setArmies, clearOrder,
+  });
 
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
