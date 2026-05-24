@@ -1,0 +1,121 @@
+{
+  "spriteCatalog": {
+    "grass":              { "count":  4, "path": "/details/grass" },
+    "flower":             { "count":  4, "path": "/details/flower" },
+    "rock":               { "count":  4, "path": "/details/rock" },
+    "tiny_pine_cluster":  { "count": 10, "path": "/details/forest" },
+    "low_shrub_cluster":  { "count": 10, "path": "/details/forest" },
+    "dark_leaf_patch":    { "count": 10, "path": "/details/forest" },
+    "dark_undergrowth":   { "count": 10, "path": "/details/forest" },
+    "moss_clump":         { "count": 10, "path": "/details/forest" },
+    "fallen_needles":     { "count": 10, "path": "/details/forest" },
+    "cyan_ripple":        { "count": 10, "path": "/details/river" },
+    "shimmer_glint":      { "count": 10, "path": "/details/river" },
+    "current_mark":       { "count": 10, "path": "/details/river" },
+    "foam_fleck":         { "count": 10, "path": "/details/river" },
+    "depth_wisp":         { "count": 10, "path": "/details/river" },
+    "sea_shimmer":        { "count":  8, "path": "/details/sea" }
+  },
+  "grassChunkSize": 6,
+  "rules": {
+    "GRASSLAND": {
+      "embedded": {
+        "density": 0.55, "maxPerHex": 2,
+        "scaleRange": [0.04, 0.07], "alphaRange": [1.0, 1.0],
+        "spritePool": [
+          { "category": "grass",  "weight": 5 },
+          { "category": "flower", "weight": 1 }
+        ]
+      },
+      "small": {
+        "density": 0.18, "maxPerHex": 1,
+        "scaleRange": [0.07, 0.11], "alphaRange": [1.0, 1.0],
+        "spritePool": [
+          { "category": "grass",  "weight": 6 },
+          { "category": "flower", "weight": 2 },
+          { "category": "rock",   "weight": 1, "firstN": 2 }
+        ]
+      },
+      "landmark": {
+        "density": 0.03, "maxPerHex": 1,
+        "scaleRange": [0.10, 0.15], "alphaRange": [1.0, 1.0],
+        "spritePool": [{ "category": "rock", "weight": 1 }]
+      },
+      "categoryStyle": {
+        "grass":  { "tint": "#FFFFFF" },
+        "flower": { "tint": "#FFFFFF" },
+        "rock":   { "tint": "#FFFFFF" }
+      }
+    },
+    "HILL": {
+      "small": {
+        "density": 0.07, "maxPerHex": 1,
+        "scaleRange": [0.035, 0.075], "alphaRange": [0.22, 0.45],
+        "spritePool": [
+          { "category": "grass",  "weight": 50 },
+          { "category": "rock",   "weight": 18 },
+          { "category": "flower", "weight":  2 }
+        ]
+      },
+      "categoryStyle": {
+        "grass":  { "tint": "#FFFFFF" },
+        "flower": { "tint": "#FFFFFF" },
+        "rock":   { "tint": "#FFFFFF" }
+      }
+    },
+    "FOREST": {
+      "small": {
+        "density": 0.22, "maxPerHex": 1,
+        "scaleRange": [0.07, 0.16], "alphaRange": [0.40, 0.70],
+        "spritePool": [
+          { "category": "tiny_pine_cluster", "weight": 55 },
+          { "category": "low_shrub_cluster", "weight": 20 },
+          { "category": "dark_leaf_patch",   "weight":  8 },
+          { "category": "dark_undergrowth",  "weight":  5 },
+          { "category": "moss_clump",        "weight":  8 },
+          { "category": "fallen_needles",    "weight":  4 }
+        ]
+      },
+      "categoryStyle": {
+        "pine":        { "tint": "#FFFFFF" },
+        "shrub":       { "tint": "#FFFFFF" },
+        "leafPatch":   { "tint": "#FFFFFF" },
+        "undergrowth": { "tint": "#FFFFFF" },
+        "moss":        { "tint": "#FFFFFF" },
+        "needles":     { "tint": "#FFFFFF" }
+      }
+    },
+    "RIVER": {
+      "small": {
+        "density": 0.12, "maxPerHex": 1,
+        "scaleRange": [0.06, 0.14], "alphaRange": [0.45, 0.85],
+        "spritePool": [
+          { "category": "cyan_ripple",   "weight": 34 },
+          { "category": "current_mark",  "weight": 26 },
+          { "category": "shimmer_glint", "weight": 18 },
+          { "category": "depth_wisp",    "weight": 14 },
+          { "category": "foam_fleck",    "weight":  8 }
+        ]
+      },
+      "categoryStyle": {
+        "ripple":    { "tint": "#FFFFFF" },
+        "shimmer":   { "tint": "#FFFFFF" },
+        "current":   { "tint": "#FFFFFF" },
+        "foam":      { "tint": "#FFFFFF" },
+        "depthWisp": { "tint": "#FFFFFF" }
+      }
+    },
+    "SEA": {
+      "small": {
+        "density": 0.025, "maxPerHex": 1,
+        "scaleRange": [0.07, 0.12], "alphaRange": [0.18, 0.36],
+        "spritePool": [
+          { "category": "sea_shimmer", "weight": 1 }
+        ]
+      },
+      "categoryStyle": {
+        "seaShimmer": { "tint": "#FFFFFF" }
+      }
+    }
+  }
+}
