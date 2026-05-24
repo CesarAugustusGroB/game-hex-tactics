@@ -14,6 +14,10 @@ import {
   FORMATION_CYCLE,
   groupOrderKey,
 } from '../canvas/constants';
+import {
+  CP_COSTS, type CommandPoints, type CpIntent,
+  makeInitialCommandPoints, debit,
+} from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
 import { HUD } from '../canvas/HUD';
@@ -280,6 +284,28 @@ export const GameCanvas: React.FC = () => {
     setGroupOrders(next);
   }, []);
 
+  // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
+  const canAfford = useCallback((team: Team, intent: CpIntent): boolean => {
+    return commandPointsRef.current[team] >= CP_COSTS[intent];
+  }, []);
+
+  // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
+  const chargeCP = useCallback((team: Team, intent: CpIntent): boolean => {
+    const next = debit(commandPointsRef.current, team, intent);
+    if (next === null) return false;
+    commandPointsRef.current = next;
+    setCommandPoints(next);
+    return true;
+  }, []);
+
+  // @ts-expect-error TS6133 -- TODO Task 5+: gates paintPlace/orderDrag/toggleMode
+  const triggerBrokeFlash = useCallback((team: Team) => {
+    setBrokeFlash(prev => ({ ...prev, [team]: true }));
+    window.setTimeout(() => {
+      setBrokeFlash(prev => ({ ...prev, [team]: false }));
+    }, 200);
+  }, []);
+
   // Mirror state into refs so the long-lived PIXI handlers (registered once at mount) read current values without re-registration.
    
   const isScanningRef = useRef(false);
@@ -327,6 +353,11 @@ export const GameCanvas: React.FC = () => {
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
   const tickCounterRef = useRef(0);
+  const commandPointsRef = useRef<CommandPoints>(makeInitialCommandPoints());
+  // @ts-expect-error TS6133 -- TODO Task 4: pass to HUD
+  const [commandPoints, setCommandPoints] = useState<CommandPoints>(makeInitialCommandPoints());
+  // @ts-expect-error TS6133 -- TODO Task 4: consumed by HUD broke-flash
+  const [brokeFlash, setBrokeFlash] = useState<{ red: boolean; blue: boolean }>({ red: false, blue: false });
 
   const updateHighlightsRef = useRef<() => void>(() => {});
 
@@ -586,6 +617,8 @@ export const GameCanvas: React.FC = () => {
     setWinBanner(null);
     lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
+    commandPointsRef.current = makeInitialCommandPoints();
+    setCommandPoints(makeInitialCommandPoints());
   }, []);
 
   const returnToStrategic = useCallback(() => {
@@ -603,6 +636,8 @@ export const GameCanvas: React.FC = () => {
     setWinBanner(null);
     lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
+    commandPointsRef.current = makeInitialCommandPoints();
+    setCommandPoints(makeInitialCommandPoints());
   }, []);
 
   const regenerateWorld = useCallback(() => {
@@ -620,6 +655,8 @@ export const GameCanvas: React.FC = () => {
     setWinBanner(null);
     lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
+    commandPointsRef.current = makeInitialCommandPoints();
+    setCommandPoints(makeInitialCommandPoints());
     generateWorldData();
   }, [generateWorldData]);
 
