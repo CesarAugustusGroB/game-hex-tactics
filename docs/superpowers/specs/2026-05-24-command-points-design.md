@@ -30,27 +30,37 @@ prioritisation, prevents micro-spam, and gives the AI a natural rate limit
 | Action | Cost (CP) |
 |---|---|
 | ASSIGN (T) — paint units onto group | 0 |
+| IDLE (S) | 0 |
 | Meta — SCAN, START/PAUSE, RESET, REGENERATE, RETURN | 0 |
+| Backspace (clear group / delete units) | 0 (debug-only shortcut) |
 | Cycle heading (A while marching) | 1 |
 | Cycle formation (D) | 1 |
-| MARCH start (A from no-order) | 2 |
-| IDLE (S) | 2 |
-| Place cohort (Z / X / C — 4 units from roster) | 2 |
-| Initial DEPLOY/ORDER (Q drag from deploy zone) | 3 |
+| MARCH start (A from no-order or non-march) | 2 |
+| Place cohort — **per painted hex** (Z / X / C, up to 4 units per hex) | 2 |
+| Order-drag commit (Q drop, from deploy zone) | 3 |
 | HOLD (W) | 4 |
 | RETREAT (F) | 4 |
 | CHARGE (E) | 6 |
 | UNLEASH (R) | 6 |
 
-**Cancelling** a mode (clicking the same mode button while it's active) is
-**free** — you only pay on the rising edge into a mode, not on the way out.
-A re-press of the same mode key always resolves to "cancel"; switching
-between two different modes (e.g. HOLD → IDLE) bills the entry into the
-new mode only.
+**IDLE is the free rest state.** Pressing S directly, or re-pressing an
+active mode key to cancel it, both resolve to idle and cost 0 CP. This
+guarantees there is no exploit where re-press-to-cancel is cheaper than
+press-S; both are free, no ambiguity.
 
-**Q drag re-issued** (drag from deploy zone again to change heading before
-the group leaves the zone) bills 3 CP per drag — each commit is a fresh
-order configuration.
+**Place-cohort cost is per `paintPlace` invocation**, not per discrete
+button click. The Z/X/C buttons just open `inputMode = 'place'` for free;
+the actual placement and CP debit happen each time the pointer enters a
+new hex inside the team's deploy zone (one paintPlace = one cohort drop
+of up to 4 units = 2 CP). A drag over 5 hexes costs 10 CP.
+
+**Order-drag (Q) is restricted to the deploy zone.** The current code
+allows `commitOrderDrag` to land anywhere on the map, which would let a
+single 3 CP drag teleport a group across the field. The spec adds an
+explicit `deployZoneFor(team).has(drag.targetHex)` check at the top of
+`commitOrderDrag`; misses cancel the drag with no CP charged. Each
+in-zone commit pays 3 CP (re-drags before the group marches out are
+each a fresh 3 CP).
 
 ## Lifecycle
 
@@ -82,13 +92,14 @@ export const CP_INITIAL = CP_CAP;
 
 export const CP_COSTS = {
   assign: 0,
+  idle: 0,        // rest state — also reached via cancel-mode (re-press active)
   meta: 0,
+  debug: 0,       // Backspace clear-group
   cycleHeading: 1,
   cycleFormation: 1,
   march: 2,
-  idle: 2,
-  placeCohort: 2,
-  initialOrder: 3,
+  placeCohort: 2, // per paintPlace invocation (one hex), regardless of unit count
+  orderDrag: 3,   // per commitOrderDrag from deploy zone
   hold: 4,
   retreat: 4,
   charge: 6,
@@ -116,13 +127,14 @@ pattern already used for `isScanningRef`, `noiseOffsetRef`, etc.).
 keeps receiving orders and ticking — it never asks whether they were
 "affordable".
 
-Two helpers wrap the existing extracted `issueOrder`/`clearOrder`:
+Two standalone helpers (not wrappers — call sites invoke them explicitly):
 
 ```ts
-// canAfford — read-only check for UI button enabled state.
-const canAfford = (team: Team, cost: number) => commandPointsRef.current[team] >= cost;
+// canAfford — read-only check, used by UI to compute `disabled` on buttons.
+const canAfford = (team: Team, cost: number) =>
+  commandPointsRef.current[team] >= cost;
 
-// chargeCP — debits and returns true; or returns false untouched if broke.
+// chargeCP — debits and returns true; returns false untouched if broke.
 const chargeCP = (team: Team, cost: number): boolean => {
   const have = commandPointsRef.current[team];
   if (have < cost) return false;
@@ -132,9 +144,20 @@ const chargeCP = (team: Team, cost: number): boolean => {
 };
 ```
 
-Every place that currently mutates orders (UI handlers, AI controller) is
-routed through `chargeCP` first. If `chargeCP` returns false, the action is
-a no-op and the HUD shows a 200ms red flash on the CP bar.
+Every gameplay action that currently mutates state checks `chargeCP`
+BEFORE issuing the order (or placing units / committing a drag). The
+canonical pattern at each call site:
+
+```ts
+// In toggleMode, marchForward, paintPlace, commitOrderDrag, etc.
+if (!chargeCP(team, cost)) { triggerBrokeFlash(team); return; }
+// ... proceed with issueOrder / setArmies / etc.
+```
+
+This keeps the debit and the rejection-feedback tightly local. Critically,
+**no CP is ever charged for an action that no-ops for another reason** —
+engagement-blocked RETREAT, place-into-occupied-hex, Q drag landing
+outside the deploy zone, etc. all reject before `chargeCP` is called.
 
 Battle tick (in `useBattleTick`):
 
@@ -154,14 +177,30 @@ if (tickCounter % CP_REGEN_PER_N_TICKS === 0) {
 
 `AiTickState` in `src/battle/ai.ts` gains:
 
-- `cp: number` — current CP for the controller's team (read-only).
-- `issueOrder` signature changes from `(...) => void` to `(...) => boolean`
-  (returns `false` if the order was rejected for lack of CP).
+- `cp: number` — current CP for the controller's team (read-only snapshot
+  captured before the controller runs).
+- `issueOrder` signature changes from
+  `(gid, change) => void`
+  to
+  `(gid, change, intent: keyof typeof CP_COSTS) => boolean`.
+  The wrapper installed in `useBattleTick` looks up `CP_COSTS[intent]`,
+  calls `chargeCP(team, cost)`, and only invokes the underlying
+  `issueOrder` (and returns `true`) on success. Returns `false` untouched
+  if the team can't afford it.
+- `clearOrder` stays `(gid) => void` and free (matches the player's
+  Backspace shortcut).
 
-The AI controller is responsible for prioritising within its budget. There
-is no special-case path — the same `chargeCP` wraps `issueOrder` whether
-called from player input or AI tick. A naïve AI that always tries the most
-expensive move will simply miss most ticks, which is the design.
+The player UI and the AI go through the **same** `chargeCP` and the
+**same** `CP_COSTS` table — there is no AI-only fast path or discount.
+A naïve AI that always asks for `unleash` will simply miss most ticks
+and miss most opportunities; the "intelligence" is in spending the
+budget well.
+
+Example AI call:
+```ts
+state.issueOrder(2, { mode: 'charge', attackTarget, heading }, 'charge');
+// → true if state.cp >= CP_COSTS.charge (6), false otherwise.
+```
 
 ## HUD
 
@@ -203,19 +242,32 @@ strip pattern (which stays at top centre):
 
 ## Edge cases
 
-- **Pause:** regen stops; pool persists; spending still allowed. Pausing is
-  free think time but does not accumulate budget.
+- **Pause:** regen stops (the `useBattleTick` interval is torn down when
+  `isBattleRunning` flips false); pool persists; spending still allowed.
+  Pausing is free think time but does not accumulate budget.
 - **Reset / regen / return:** pool reset to cap (20) for both teams.
 - **Keyboard shortcut while broke:** no-op + 200 ms red flash on CP bar.
   Does not trigger any state change.
-- **Cancelling a mode** (re-clicking the active mode button): free.
-- **Roster empty during cohort deploy:** the button is already disabled by
-  roster gate, so `chargeCP` is never called → no CP spent.
+- **Cancelling a mode** (re-clicking the active mode button): free —
+  resolves to idle, which is itself 0 CP.
+- **Roster empty during cohort deploy:** the Z/X/C button is already
+  disabled by roster gate, so `inputMode = 'place'` is never entered →
+  `paintPlace` is never invoked → no CP spent.
+- **Place mode entered, then drag with insufficient CP:** each `paintPlace`
+  invocation is gated. The first hex that can't be paid for is a no-op
+  (no placement, no debit, red flash on CP bar). The player remains in
+  `place` mode and can recover CP and continue painting later.
+- **Q drag started but released outside the deploy zone:** drag is
+  cancelled by `commitOrderDrag`'s new zone check; no CP charged, units
+  not moved, order unchanged.
 - **Charge timer expires** (`chargeTicksRemaining → 0`, sim flips charge
   back to march): no CP charged — only the initial mode change costs.
 - **Unleash committed:** all per-group buttons become locked by existing
   rules. RETREAT remains available and costs 4 CP. The sim's auto-clear
   on returning to deploy zone is also free (sim-initiated).
+- **RETREAT no-op when engaged:** existing rule — if any unit in the
+  group has an enemy adjacent, the retreat is rejected. No CP charged
+  (check engagement *before* `chargeCP`).
 - **AI broke:** `issueOrder` returns false; controller decides whether to
   wait, queue, or pick a cheaper alternative — entirely up to the AI
   implementation.
@@ -223,20 +275,43 @@ strip pattern (which stays at top centre):
 ## Files touched
 
 - `src/canvas/constants.ts` — add `CP_*` constants, `CommandPoints` type.
-- `src/components/GameCanvas.tsx` — add `commandPointsRef` + state, add
-  `canAfford` / `chargeCP` helpers, reset on regen/return/reset.
-- `src/canvas/useBattleTick.ts` — add regen step in the tick hook.
-- `src/canvas/HUD.tsx` — add bottom-centre CP bar; add cost chips on each
-  costed button; route every button's `onClick` through `chargeCP`; gate
-  `disabled` on `canAfford` + existing conditions; add red flash on broke.
-- `src/canvas/input/useTacticalKeyboard.ts` — same chargeCP gate for
-  shortcut paths.
-- `src/canvas/input/useGlobalShortcuts.ts` — same for global ones (Z/X/C).
-- `src/canvas/input/orderDrag.ts` — chargeCP on commit of the initial
-  DEPLOY/ORDER drag (Q).
-- `src/battle/ai.ts` — extend `AiTickState` with `cp`; change
-  `issueOrder` return type to `boolean`. No controller exists yet (this
-  branch will add one separately), so no consumer to migrate.
+- `src/components/GameCanvas.tsx` — add `commandPointsRef` + state mirror,
+  define `canAfford` / `chargeCP` helpers, thread them into every hook ctx
+  that mutates orders or units, reset pool on regen/return/reset (alongside
+  the existing wipes of armies/rosters/orders).
+- `src/canvas/useBattleTick.ts` — add CP regen step inside the interval
+  callback: `if (tickCounterRef.current % CP_REGEN_PER_N_TICKS === 0)`
+  bump both teams by 1 (clamped to cap). Naturally pauses with the
+  interval when `isBattleRunning === false`.
+- `src/canvas/HUD.tsx` — add bottom-centre CP bar (both teams stacked,
+  glass card, gated on tactical + `currentStrategicHex`); add per-button
+  cost chips (skip for ASSIGN / IDLE / meta); compute each button's
+  `disabled` as `existingCondition || !canAfford(team, cost)`; trigger a
+  200 ms red flash on the local team's bar when a click is rejected.
+- `src/canvas/input/useTacticalKeyboard.ts` — no direct CP changes; the
+  gate already lives inside the handlers (`toggleMode`, `marchForward`,
+  `cycleFormation`) that the keyboard calls. Just confirm the handler
+  signatures still match.
+- `src/canvas/input/useGlobalShortcuts.ts` — Z/X/C enter `inputMode =
+  'place'` for free; the actual debit happens inside `paintPlace`.
+  Backspace stays free (debug).
+- `src/canvas/input/paintMode.ts` — `paintPlace` calls `chargeCP(team,
+  CP_COSTS.placeCohort)` AFTER validating the candidates list is
+  non-empty (i.e. at least one unit will actually be placed); on broke,
+  returns early without modifying armies or roster. `paintAssign`
+  unchanged (cost is 0).
+- `src/canvas/input/orderDrag.ts` — at the top of `commitOrderDrag`,
+  reject if `!deployZoneFor(drag.team, ctx.gridDataRef.current)
+  .has(HexUtils.key(drag.targetHex))` (cancel drag, no CP, no state
+  change). On a valid in-zone commit, `chargeCP(drag.team,
+  CP_COSTS.orderDrag)` before issuing the order; if broke, also cancel
+  with no state change.
+- `src/battle/ai.ts` — extend `AiTickState` with `cp: number`; change
+  `issueOrder` signature to `(gid, change, intent: keyof typeof CP_COSTS)
+  => boolean`. The wrapper that bridges it to the real `issueOrder`
+  (installed in `useBattleTick`) does the `chargeCP(team,
+  CP_COSTS[intent])` lookup. `clearOrder` stays `(gid) => void` and free.
+  No controller exists yet on this branch, so no consumer to migrate.
 
 ## Out of scope
 
