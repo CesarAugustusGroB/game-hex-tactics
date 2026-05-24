@@ -172,6 +172,14 @@ Same pattern applies if you ever add biome border strokes or any other per-edge 
 
 ## Bugs we caught, and the lessons (continued)
 
+### Hover-highlight stale-closure bug, surfaced by the canvas split
+
+The PIXI ticker was registered inside the mount-only `useEffect([])` and called `updateHighlights()` directly. `updateHighlights` was redeclared on every render and read React state (`hoveredHex`, `gridData`, `isScanning`) by name. Because the ticker captured the mount-time identity of the function, it kept calling the original closure forever — the one that saw `hoveredHex === null` and returned early. **Hover highlighting was silently doing nothing for the entire history of the project.** No one noticed because the cursor-crosshair cue made it feel responsive enough.
+
+Surfaced during the Phase 7 split of `GameCanvas.tsx` into hooks: pulling the ticker registration into `usePixiApp` forced the closure boundary to become explicit. The fix is the standard "current-ref" pattern — a sibling `updateHighlightsRef` synced to the latest function via a no-dep `useEffect`, and the ticker calls `ref.current()` instead of the captured closure.
+
+Lesson: when a long-lived callback (`app.ticker.add`, `setInterval`, `window.addEventListener` set in a mount-only effect) calls a function defined alongside it in the same component, that call is frozen to the first render unless you route through a ref. The eslint rule that should have flagged this is `react-hooks/exhaustive-deps` — it WAS firing in the mount effect, but it had been suppressed with an `// eslint-disable-next-line react-hooks/immutability` directive that named a non-existent rule, so the real warning was never silenced or surfaced. Be suspicious of any `eslint-disable` directive in a mount-only effect; double-check the rule name actually exists.
+
 ### PIXI v8 `Color.multiply(number)` is a hex-int bit-shift, not a scalar multiply
 
 ```ts

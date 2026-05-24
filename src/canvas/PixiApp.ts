@@ -246,7 +246,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       flagSprite.scale.set(flagScale);
       flagSprite.x = flagPos.x;
       flagSprite.y = flagPos.y - 8;
-      ctx.captureFlagSpriteRef.current = flagSprite;  
+      ctx.captureFlagSpriteRef.current = flagSprite;
 
       const detailTexs = await Promise.all(
         ALL_DETAIL_KEYS.map(k => PIXI.Assets.load<PIXI.Texture>(detailAssetPath(k))),
@@ -260,7 +260,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         ctx.detailTexturesRef.current.set(ALL_DETAIL_KEYS[i], tex);
       }
 
-       
       ctx.grassTextureRef.current = grassTex;
       ctx.grassNoiseTextureRef.current = grassNoiseTex;
       ctx.grassMacroNoiseTextureRef.current = grassMacroNoiseTex;
@@ -289,12 +288,12 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       ctx.seaDepthPatchTextureRef.current = seaDepthPatchTex;
       ctx.seaMicroNoiseTextureRef.current = seaMicroNoiseTex;
       ctx.deepSeaTextureRef.current = deepSeaTex;
-       
+
       ctx.setTerrainTexturesLoaded(true);
 
       if (!ctx.containerRef.current) return;
       ctx.containerRef.current.appendChild(app.canvas);
-      ctx.appRef.current = app;  
+      ctx.appRef.current = app;
 
       const world = ctx.worldRef.current;
       world.x = app.screen.width / 2;

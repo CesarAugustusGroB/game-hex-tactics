@@ -657,9 +657,10 @@ export const GameCanvas: React.FC = () => {
       h.closePath();
     }
   };
-  // Mirror into ref after every render so the ticker (registered once at mount) always
-  // calls the latest closure, which captures current hoveredHex / gridData / isScanning.
-  useEffect(() => { updateHighlightsRef.current = updateHighlights; });  
+  // No deps: intentionally runs every render to keep updateHighlightsRef pointing at the
+  // latest closure so the ticker (registered once at mount) reads current hoveredHex /
+  // gridData / isScanning instead of the mount-time stale values. See LEARNINGS.md.
+  useEffect(() => { updateHighlightsRef.current = updateHighlights; });
 
   const curT = hoveredHex ? TERRAINS[gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r)?.type || 'SEA'] : null;
 
