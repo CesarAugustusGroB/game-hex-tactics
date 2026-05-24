@@ -18,6 +18,9 @@ dist-ssr
 # Playwright MCP artifacts
 .playwright-mcp/
 
+# Superpowers brainstorming mockups
+.superpowers/
+
 # Development screenshots in repo root (leave public/ and src/ assets alone)
 /*.png
 
