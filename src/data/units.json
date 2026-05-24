@@ -1,0 +1,6 @@
+{
+  "infantry":   { "maxHp": 100, "marchSpeed": 2, "chargeSpeed": 4, "chargeImpactDamage": 10 },
+  "cavalry":    { "maxHp":  60, "marchSpeed": 4, "chargeSpeed": 6, "chargeImpactDamage": 20 },
+  "skirmisher": { "maxHp":  40, "marchSpeed": 3, "chargeSpeed": 4, "chargeImpactDamage":  5,
+                  "missileRange": 3, "missileDamage": 5, "kiteThreshold": 2 }
+}

@@ -8,13 +8,21 @@ import {
   HOLD_REDUCTION_CAP,
   HOLD_AUTO_IDLE_AFTER_TICKS,
 } from '../data/combat';
+import {
+  MARCH_HEXES_PER_TICK,
+  CHARGE_HEXES_PER_TICK,
+  CHARGE_IMPACT_DAMAGE_BY_TYPE,
+  SKIRMISHER_MISSILE_RANGE,
+  SKIRMISHER_MISSILE_DAMAGE,
+  SKIRMISHER_KITE_THRESHOLD,
+} from '../data/units';
 
 export type Team = 'red' | 'blue';
 export type GroupId = 1 | 2 | 3;
 export type UnitState = 'idle' | 'moving' | 'fighting';
 export type FormationType = 'hex' | 'line' | 'wedge' | 'column';
 /** Distinguishes the unit roles. Per-type tunables (speed, max HP, charge damage, missile
- *  range) live in the *_BY_TYPE records below.
+ *  range) live in `src/data/units.json` and are re-exported below as *_BY_TYPE records.
  *  - infantry:    baseline foot. 1 hex/tick, 100 HP.
  *  - cavalry:     2 hex/tick on march, 3 on charge. 60 HP. 2× lance impact.
  *  - skirmisher:  1.5 hex/tick (alternates 1/2 per tick). 40 HP. Throws a javelin at the
@@ -174,52 +182,20 @@ export {
   HOLD_AUTO_IDLE_AFTER_TICKS,
 } from '../data/combat';
 
-/** Per-unit-type hexes advanced per tick on march/retreat/unleash. Mixed groups march at
- *  the GROUP MIN — `Math.min(...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType]))`.
- *  Fractional values (skirmisher 1.5) resolve to alternating integer steps per tick via
- *  `stepsForTick(speed, currentTick)` so the rigid-block step stays integer-axial. */
-export const MARCH_HEXES_PER_TICK: Record<UnitType, number> = {
-  infantry: 2,
-  cavalry: 4,
-  skirmisher: 3,
-};
-
-/** Per-unit-type hexes advanced per tick during a CHARGE. Same group-min rule as
- *  `MARCH_HEXES_PER_TICK`: mixed cavalry+infantry charge runs at infantry speed.
- *  Skirmisher charges at infantry pace — "no shock bonus." */
-export const CHARGE_HEXES_PER_TICK: Record<UnitType, number> = {
-  infantry: 4,
-  cavalry: 6,
-  skirmisher: 4,
-};
-
-/** Lance impact damage on a single enemy per CHARGE pass, keyed by the ATTACKER's type.
- *  Each enemy is hit at most once per charge cycle (`chargeDamagedIds` tracks that). */
-export const CHARGE_IMPACT_DAMAGE_BY_TYPE: Record<UnitType, number> = {
-  infantry: 10,
-  cavalry: 20,
-  skirmisher: 5,
-};
-
-/** Per-unit-type spawn HP. Cavalry is glass-fragile; skirmisher even more so. Used by
- *  `paintPlace` in the engine and by the HP-bar denominator in `drawUnits`. */
-export const MAX_HP_BY_TYPE: Record<UnitType, number> = {
-  infantry: 100,
-  cavalry: 60,
-  skirmisher: 40,
-};
-
-/** Max axial distance a skirmisher can throw a javelin. Pure radius — no line-of-sight
- *  blocking by terrain, consistent with the vision model. */
-export const SKIRMISHER_MISSILE_RANGE = 3;
-/** Damage of one javelin hit. Defender's `defenseMult` still applies (terrain cover
- *  works against missiles). One throw per skirmisher per tick, ONLY when not in melee. */
-export const SKIRMISHER_MISSILE_DAMAGE = 5;
-/** Hit-and-run trigger distance. In `unleash`, a skirmisher within this many hexes of
- *  its closest enemy switches from "approach in cone" to "kite (any direction, max
- *  distance)". At MISSILE_RANGE - 1 step beyond this, the skirmisher stands still and
- *  the combat phase throws the javelin. */
-export const SKIRMISHER_KITE_THRESHOLD = 2;
+// Per-unit-type tunables — values in src/data/units.json. Re-exported under their
+// legacy record names so existing call sites in this file and downstream consumers
+// don't need to migrate import paths. March/charge speeds use the group-MIN rule so
+// mixed-type groups advance at the slowest unit's pace. Skirmisher missile/kite values
+// govern the ranged and hit-and-run phases of `unleash`.
+export {
+  MARCH_HEXES_PER_TICK,
+  CHARGE_HEXES_PER_TICK,
+  CHARGE_IMPACT_DAMAGE_BY_TYPE,
+  MAX_HP_BY_TYPE,
+  SKIRMISHER_MISSILE_RANGE,
+  SKIRMISHER_MISSILE_DAMAGE,
+  SKIRMISHER_KITE_THRESHOLD,
+} from '../data/units';
 
 /** Resolve a fractional per-tick speed (e.g. 1.5) to integer hexes for THIS tick using a
  *  difference-of-floors. Guarantees the long-run average equals `speed` while staying
