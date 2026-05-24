@@ -23,9 +23,9 @@ export type UnitState = 'idle' | 'moving' | 'fighting';
 export type FormationType = 'hex' | 'line' | 'wedge' | 'column';
 /** Distinguishes the unit roles. Per-type tunables (speed, max HP, charge damage, missile
  *  range) live in `src/data/units.json` and are re-exported below as *_BY_TYPE records.
- *  - infantry:    baseline foot. 1 hex/tick, 100 HP.
- *  - cavalry:     2 hex/tick on march, 3 on charge. 60 HP. 2× lance impact.
- *  - skirmisher:  1.5 hex/tick (alternates 1/2 per tick). 40 HP. Throws a javelin at the
+ *  - infantry:    baseline foot. 2 hexes/tick march, 4 charge. 100 HP.
+ *  - cavalry:     4 hexes/tick march, 6 charge. 60 HP. 2× lance impact.
+ *  - skirmisher:  3 hexes/tick march, 4 charge. 40 HP. Throws a javelin at the
  *                 closest enemy within 3 hexes if NOT in melee — see ranged phase. Weak
  *                 in melee and on charge.
  *  Mixed groups take the slowest unit's speed for free (the rigid-block step waits on
