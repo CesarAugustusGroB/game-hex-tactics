@@ -14,7 +14,7 @@ export interface UnitsRenderContext {
   unitTextureRed: PIXI.Texture;
   unitTextureBlue: PIXI.Texture;
   unitTextureRedCavalry: PIXI.Texture;
-  unitTextureBlueCAvalry: PIXI.Texture;
+  unitTextureBlueCavalry: PIXI.Texture;
   unitTextureRedSkirmisher: PIXI.Texture;
   unitTextureBlueSkirmisher: PIXI.Texture;
   armyTexture: PIXI.Texture;
@@ -36,7 +36,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const unitTex = ctx.unitTextureRed;
   const unitTexBlue = ctx.unitTextureBlue;
   const unitTexRedCav = ctx.unitTextureRedCavalry;
-  const unitTexBlueCav = ctx.unitTextureBlueCAvalry;
+  const unitTexBlueCav = ctx.unitTextureBlueCavalry;
   const unitTexRedSkir = ctx.unitTextureRedSkirmisher;
   const unitTexBlueSkir = ctx.unitTextureBlueSkirmisher;
 
@@ -120,7 +120,6 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const teamByKey = new Map<string, Team>();
   for (const u of units) teamByKey.set(HexUtils.key(u.tacticalHex), u.team);
 
-  // Read scale directly — zoom.current is stale during a GSAP dive tween.
   const isFar = ctx.worldScale < LOD_THRESHOLD;
 
   const visibleHexes = new Set<string>();

@@ -230,7 +230,7 @@ export const GameCanvas: React.FC = () => {
       unitTextureRed: unitTex,
       unitTextureBlue: unitTexBlue,
       unitTextureRedCavalry: unitTexRedCav,
-      unitTextureBlueCAvalry: unitTexBlueCav,
+      unitTextureBlueCavalry: unitTexBlueCav,
       unitTextureRedSkirmisher: unitTexRedSkir,
       unitTextureBlueSkirmisher: unitTexBlueSkir,
       armyTexture: armyTex,
