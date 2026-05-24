@@ -64,7 +64,7 @@ export const TEAM_TINTS: Record<Team, number> = {
   blue: 0x3b82f6,
 };
 
-export const DAMAGE_PER_TICK = 10;
+export { DAMAGE_PER_TICK } from '../data/combat';
 export const TICK_MS = 500;
 
 // Below this world.scale, swap each unit's soldier sprite for a stylized strategic

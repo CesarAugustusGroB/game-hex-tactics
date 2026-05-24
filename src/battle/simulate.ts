@@ -1,5 +1,13 @@
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import { heightDamageBonus, type TerrainMods } from './terrain';
+import {
+  CHARGE_DURATION_TICKS,
+  CHARGE_IMPACT_RANGE,
+  UNLEASH_MAX_ENGAGERS,
+  HOLD_REDUCTION_PER_TICK,
+  HOLD_REDUCTION_CAP,
+  HOLD_AUTO_IDLE_AFTER_TICKS,
+} from '../data/combat';
 
 export type Team = 'red' | 'blue';
 export type GroupId = 1 | 2 | 3;
@@ -154,8 +162,17 @@ export interface SimulationResult {
 }
 
 /** CHARGE tuning. Duration in ticks; at TICK_MS=500 this is 1.5s real-time. */
-export const CHARGE_DURATION_TICKS = 3;
-export const CHARGE_IMPACT_RANGE = 2;
+// Combat tunables sourced from src/data/combat.json. Kept as named re-exports here
+// so existing call sites within simulate.ts and downstream consumers don't need to
+// migrate import paths.
+export {
+  CHARGE_DURATION_TICKS,
+  CHARGE_IMPACT_RANGE,
+  UNLEASH_MAX_ENGAGERS,
+  HOLD_REDUCTION_PER_TICK,
+  HOLD_REDUCTION_CAP,
+  HOLD_AUTO_IDLE_AFTER_TICKS,
+} from '../data/combat';
 
 /** Per-unit-type hexes advanced per tick on march/retreat/unleash. Mixed groups march at
  *  the GROUP MIN — `Math.min(...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType]))`.
@@ -214,16 +231,12 @@ export const stepsForTick = (speed: number, tick: number): number =>
  *  new units pick a less-crowded enemy instead of dogpiling. 3 covers a clean half-arc
  *  (a hex has 6 neighbors, 3 from one side is plenty). If every enemy is at the cap,
  *  units fall back to closest-overall so they still engage. */
-export const UNLEASH_MAX_ENGAGERS = 3;
 
 /** Hold-mode defensive bonus: each tick spent in `hold` adds `HOLD_REDUCTION_PER_TICK`
  *  to the damage-taken reduction, capped at `HOLD_REDUCTION_CAP`. After
  *  `HOLD_AUTO_IDLE_AFTER_TICKS` ticks the bonus is at the cap and the sim flips the
  *  group to `idle` (counter clears, no more bonus). Player has to re-engage hold from
  *  scratch to rebuild the bonus. */
-export const HOLD_REDUCTION_PER_TICK = 0.05;
-export const HOLD_REDUCTION_CAP = 0.40;
-export const HOLD_AUTO_IDLE_AFTER_TICKS = 8;
 export const holdReduction = (holdTicks: number): number =>
   Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP);
 

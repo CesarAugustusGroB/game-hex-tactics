@@ -74,8 +74,8 @@ export const getTerrainMods = (type: string | undefined): TerrainMods => {
 };
 
 /** +1% damage per height-unit of elevation advantage, capped at +50%. */
-export const HEIGHT_BONUS_PER_UNIT = 0.01;
-export const HEIGHT_BONUS_CAP = 0.50;
+import { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP } from '../data/combat';
+export { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP };
 
 /**
  * Downhill attack bonus as a multiplier component. `heightBonus = 0.23` means +23%
