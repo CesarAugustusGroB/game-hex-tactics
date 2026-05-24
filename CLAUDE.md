@@ -103,7 +103,7 @@ Five order modes (`march` / `charge` / `retreat` / `unleash` / `defendHeight`). 
 
 ### Terrain mods
 
-`src/battle/terrain.ts` owns the mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) — kept React/PIXI-free so the harness can import it. `src/canvas/terrain-defs.ts` spreads `TERRAIN_MODS[KEY]` into its `TerrainDef` table for HUD/tooltips; do **not** define a parallel mod table anywhere else.
+Mechanical terrain values (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) live in `src/data/terrain.json`. The sim layer reads them via `src/data/terrain-mods.ts` (re-exported by `src/battle/terrain.ts` for backwards-compatible imports) — kept React/PIXI-free so the harness can import it. The canvas layer reads visual + mechanical fields together via `src/data/terrain.ts` (re-exported by `src/canvas/terrain-defs.ts` as a thin shim). Do **not** define a parallel mod table anywhere else — `terrain.json` is the single source.
 
 ## Data files
 
