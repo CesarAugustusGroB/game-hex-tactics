@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "sim": "tsx scripts/sim-formations.ts",
+    "test:cp": "tsx scripts/test-command-points.ts",
     "units:normalize": "python scripts/normalize-units.py"
   },
   "dependencies": {
