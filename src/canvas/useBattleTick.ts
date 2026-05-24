@@ -8,7 +8,7 @@ import type { Team, GroupId } from '../battle/simulate';
 import { getAiController } from '../battle/ai';
 import type { OrderChange } from '../battle/ai';
 import { getTerrainMods } from '../battle/terrain';
-import { applyRegen, type CommandPoints } from '../battle/command-points';
+import { applyRegen, type CommandPoints, CP_COSTS } from '../battle/command-points';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_TICKS_TO_WIN, CAPTURE_ZONE_HEXES,
   captureZoneKeys, deployZoneFor,
@@ -85,7 +85,17 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
             myOrders,
             allOrders: ctx.groupOrdersRef.current,
             gridData: grid,
-            issueOrder: (gid, change) => ctx.issueOrder(team, gid, change),
+            cp: ctx.commandPointsRef.current[team],
+            issueOrder: (gid, change, intent) => {
+              const cost = CP_COSTS[intent];
+              if (ctx.commandPointsRef.current[team] < cost) return false;
+              const nextCp = { ...ctx.commandPointsRef.current,
+                [team]: ctx.commandPointsRef.current[team] - cost };
+              ctx.commandPointsRef.current = nextCp;
+              ctx.setCommandPoints(nextCp);
+              ctx.issueOrder(team, gid, change);
+              return true;
+            },
             clearOrder: (gid) => ctx.clearOrder(team, gid),
           });
         } catch (err) {

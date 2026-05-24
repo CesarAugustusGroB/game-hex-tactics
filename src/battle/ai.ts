@@ -13,6 +13,7 @@
 
 import type { Hex } from '../hex-engine/HexUtils';
 import type { GroupOrder, Team, GroupId, Unit } from './simulate';
+import { type CpIntent } from './command-points';
 
 /** What an AI may change on an existing order. Team/groupId identify the order and
  *  can't be re-targeted, so they're excluded. */
@@ -28,8 +29,11 @@ export interface AiTickState {
   /** Read-only view across both teams — useful for reasoning about enemy intent. */
   allOrders: ReadonlyMap<string, GroupOrder>;
   gridData: ReadonlyArray<{ hex: Hex; type: string }>;
-  /** Bound to this controller's team. Group must belong to the same team. */
-  issueOrder: (groupId: GroupId, change: OrderChange) => void;
+  /** Snapshot of the team's CP at the start of the tick (read-only). */
+  cp: number;
+  /** Bound to this controller's team. Group must belong to the same team. Returns
+   *  true if the order was issued, false if rejected for lack of CP. */
+  issueOrder: (groupId: GroupId, change: OrderChange, intent: CpIntent) => boolean;
   clearOrder: (groupId: GroupId) => void;
 }
 
