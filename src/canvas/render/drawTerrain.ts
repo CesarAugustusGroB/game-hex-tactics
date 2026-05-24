@@ -462,18 +462,12 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     if (layer.alpha !== undefined) tile.alpha = layer.alpha;
     if (layer.blendMode !== undefined) tile.blendMode = layer.blendMode;
     const layerContainer = new PIXI.Container();
-    // Filter goes on filteredContent (inner container holding the tile), not the
-    // outer layerContainer that also holds the mask. PIXI's filter sampling
-    // breaks when a masked sibling lives at the same level — give the filter
-    // an isolated subtree of just the content it should sample.
-    const filteredContent = new PIXI.Container();
     layerContainer.x = minX;
     layerContainer.y = minY;
-    filteredContent.addChild(tile);
-    layerContainer.addChild(filteredContent);
+    layerContainer.addChild(tile);
     if (layer.waterFilter) {
       const handle = createWaterFilter(WATER_FILTER_CONFIGS[layer.waterFilter]);
-      filteredContent.filters = [handle.filter];
+      layerContainer.filters = [handle.filter];
       ctx.waterFilters.push(handle);
     }
     const mask = new PIXI.Graphics();
@@ -482,12 +476,10 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       const topY = p.y - hexH;
       const topV: { x: number; y: number }[] = [];
       const pts: number[] = [];
-      // Mask coords are local to layerContainer (which is positioned at
-      // (minX, minY)), so subtract that offset.
       for (let i = 0; i < 6; i++) {
         const r = Math.PI / 180 * (60 * i);
-        const vx = p.x + sz * Math.cos(r) - minX;
-        const vy = topY + sz * Math.sin(r) - minY;
+        const vx = p.x + sz * Math.cos(r);
+        const vy = topY + sz * Math.sin(r);
         topV.push({ x: vx, y: vy });
         pts.push(vx, vy);
       }
@@ -509,7 +501,7 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       }
     }
     overlay.addChild(layerContainer);
-    layerContainer.addChild(mask);
+    overlay.addChild(mask);
     layerContainer.mask = mask;
   }
   const riverSeaCliffs = new PIXI.Graphics();
