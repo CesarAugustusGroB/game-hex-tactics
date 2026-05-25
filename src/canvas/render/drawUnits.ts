@@ -9,9 +9,9 @@ import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, type Armies, type G
 
 const UNIT_SPRITE_SIZE = 112;
 const UNIT_SHADOW_OFFSET = { x: 8, y: 18 };
-const UNIT_SHADOW_SCALE = { x: 1.05, y: 0.35 };
 const UNIT_SHADOW_ALPHA = 0.35;
-const UNIT_SHADOW_BLUR = 3;
+const UNIT_SHADOW_W = UNIT_SPRITE_SIZE * 0.82;
+const UNIT_SHADOW_H = UNIT_SPRITE_SIZE * 0.30;
 
 export interface UnitsRenderContext {
   unitsGfx: PIXI.Container;
@@ -24,6 +24,8 @@ export interface UnitsRenderContext {
   unitTextureRedSkirmisher: PIXI.Texture;
   unitTextureBlueSkirmisher: PIXI.Texture;
   armyTexture: PIXI.Texture;
+  // Soft shadow baked once at boot (PixiApp). Drawn as a plain Sprite per unit.
+  shadowTexture: PIXI.Texture;
   // data
   armies: Armies;
   groupOrders: GroupOrders;
@@ -36,18 +38,14 @@ export interface UnitsRenderContext {
   worldScale: number;
 }
 
-function addUnitSpriteWithShadow(container: PIXI.Container, texture: PIXI.Texture, isFar: boolean): void {
-  const shadow = new PIXI.Sprite(texture);
+function addUnitSpriteWithShadow(container: PIXI.Container, texture: PIXI.Texture, shadowTex: PIXI.Texture, isFar: boolean): void {
+  const shadow = new PIXI.Sprite(shadowTex);
   shadow.anchor.set(0.5);
   shadow.x = UNIT_SHADOW_OFFSET.x;
   shadow.y = UNIT_SHADOW_OFFSET.y;
-  shadow.scale.set(
-    (UNIT_SPRITE_SIZE * UNIT_SHADOW_SCALE.x) / texture.width,
-    (UNIT_SPRITE_SIZE * UNIT_SHADOW_SCALE.y) / texture.height,
-  );
-  shadow.tint = 0x000000;
+  shadow.width = UNIT_SHADOW_W;
+  shadow.height = UNIT_SHADOW_H;
   shadow.alpha = UNIT_SHADOW_ALPHA;
-  shadow.filters = [new PIXI.BlurFilter({ strength: UNIT_SHADOW_BLUR })];
   shadow.label = 'unit-sprite-shadow';
   shadow.visible = !isFar;
   container.addChild(shadow);
@@ -247,7 +245,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     const tex = u.team === 'red'
       ? (unitType === 'skirmisher' ? unitTexRedSkir : unitType === 'cavalry' ? unitTexRedCav : unitTex)
       : (unitType === 'skirmisher' ? unitTexBlueSkir : unitType === 'cavalry' ? unitTexBlueCav : unitTexBlue);
-    addUnitSpriteWithShadow(container, tex, isFar);
+    addUnitSpriteWithShadow(container, tex, ctx.shadowTexture, isFar);
 
     // Per-type denominator so cavalry's 30/60 fills 50% (not the 30% an infantry would).
     const maxHp = MAX_HP_BY_TYPE[unitType];

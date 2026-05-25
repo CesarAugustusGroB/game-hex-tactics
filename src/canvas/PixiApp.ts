@@ -46,6 +46,9 @@ export interface PixiAppCtx {
   unitContainersRef: MutableRefObject<Map<string, PIXI.Container>>;
   // Texture refs (written by hook after load)
   armyTextureRef: MutableRefObject<PIXI.Texture | null>;
+  // Soft unit shadow baked once at boot (a blurred ellipse). Reused by every unit so
+  // shadows are plain Sprites, not per-frame BlurFilter passes.
+  shadowTextureRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureBlueRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureRedCavalryRef: MutableRefObject<PIXI.Texture | null>;
@@ -222,6 +225,17 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       deepSeaTex.source.addressMode = 'repeat';
 
       /* eslint-disable react-hooks/immutability */
+      // Bake a soft elliptical shadow to a texture once — every unit reuses it as a plain
+      // Sprite, so shadows cost zero per-frame filter passes. The 128² frame leaves room
+      // for the blur to fall off inside the texture bounds.
+      const shadowG = new PIXI.Graphics().ellipse(64, 64, 46, 24).fill({ color: 0x000000 });
+      shadowG.filters = [new PIXI.BlurFilter({ strength: 6 })];
+      ctx.shadowTextureRef.current = app.renderer.generateTexture({
+        target: shadowG,
+        resolution: 2,
+        frame: new PIXI.Rectangle(0, 0, 128, 128),
+      });
+      shadowG.destroy(true);
       ctx.armyTextureRef.current = armyTex;
       ctx.unitTextureRef.current = redInfantryTex;
       ctx.unitTextureBlueRef.current = hopliteTex;
@@ -508,6 +522,8 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       for (const child of ctx.terrainOverlayRef.current.children) {
         if ('mask' in child) (child as PIXI.Sprite).mask = null;
       }
+      ctx.shadowTextureRef.current?.destroy(true);
+      ctx.shadowTextureRef.current = null;
       app.destroy(true, { children: true });
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
