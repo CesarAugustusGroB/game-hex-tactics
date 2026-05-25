@@ -130,3 +130,5 @@ All balance- and content-tunable values live in `src/data/`. Each `.json` file i
 ## Worktree note
 
 This is a `git worktree` at `.worktrees/feature-infra` on branch `feature/infra`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+
+**This worktree is permanent — never close or remove it.** It is the standing workspace for presentation / architecture / infra work. Do **not** run `ExitWorktree`, `git worktree remove`, or otherwise tear it down when a task finishes (and don't delete the `feature/infra` branch). Integrate completed work by **rebasing/merging the branch while preserving the worktree**, then keep using this same worktree for the next task.
