@@ -5,7 +5,6 @@ import {
   INITIAL_ROSTER,
   COHORT_SIZE,
   RETREAT_REFUND_FRAC,
-  CAPTURE_TICKS_TO_WIN,
   CAPTURE_CENTER,
   FORMATION_CYCLE,
   FORMATION_LABELS,
@@ -33,7 +32,6 @@ export {
   // refunds this fraction of each unit type back to the team's roster. Engaged groups
   // (any unit with an enemy in an adjacent hex) get a no-op — they have to fight.
   RETREAT_REFUND_FRAC,
-  CAPTURE_TICKS_TO_WIN,
   CAPTURE_CENTER,
   FORMATION_CYCLE,
   FORMATION_LABELS,

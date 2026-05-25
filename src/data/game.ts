@@ -12,7 +12,7 @@ export interface GameConfig {
   retreatRefundFrac: number;
   initialRoster: Record<UnitType, number>;
   cohortSize: number;
-  capture: { ticksToWin: number; center: Hex };
+  capture: { center: Hex };
   teams: Record<Team, { tint: string }>;
   formations: { cycle: FormationType[]; labels: Record<FormationType, string> };
   headingArrows: Record<string, string>;
@@ -28,7 +28,6 @@ export const DEPLOY_ZONE_FRAC     = GAME.deployZoneFrac;
 export const RETREAT_REFUND_FRAC  = GAME.retreatRefundFrac;
 export const INITIAL_ROSTER       = GAME.initialRoster;
 export const COHORT_SIZE          = GAME.cohortSize;
-export const CAPTURE_TICKS_TO_WIN = GAME.capture.ticksToWin;
 export const CAPTURE_CENTER       = GAME.capture.center;
 export const FORMATION_CYCLE      = GAME.formations.cycle;
 export const FORMATION_LABELS     = GAME.formations.labels;
