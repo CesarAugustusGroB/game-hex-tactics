@@ -129,4 +129,6 @@ All balance- and content-tunable values live in `src/data/`. Each `.json` file i
 
 ## Worktree note
 
-This is a `git worktree` at `.worktrees/feature-refactor-gamecanvas` on branch `feature/refactor-gamecanvas`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+This is a `git worktree` at `.worktrees/feature-presentation` on branch `feature/presentation`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+
+**This worktree is permanent — never remove or close it.** It is the standing workspace for all presentation/rendering work. Integrate via `git rebase`/`git merge` only; always preserve the worktree. When finishing a branch here, do NOT run `git worktree remove` — choose merge or PR and leave the worktree in place.
