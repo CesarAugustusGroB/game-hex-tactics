@@ -18,6 +18,8 @@ import {
 import { scoreTick } from '../battle/scoring';
 import { TERRAINS } from './terrain-defs';
 
+const CENTER_ZONE_KEYS = captureZoneKeys();
+
 export interface BattleTickCtx {
   currentStrategicHexRef: MutableRefObject<Hex | null>;
   armiesRef: MutableRefObject<Armies>;
@@ -168,7 +170,7 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       const sc = scoreTick({
         units: next,
         score: ctx.scoreRef.current,
-        centerKeys: captureZoneKeys(),
+        centerKeys: CENTER_ZONE_KEYS,
         scoringZone: { red: deployZones.blue, blue: deployZones.red },
         config: {
           pointsToWin: POINTS_TO_WIN,
@@ -203,16 +205,17 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
         ctx.setWinBanner(sc.winner);
         ctx.setIsBattleRunning(false);
         window.setTimeout(() => ctx.setWinBanner(null), 3000);
-      }
-
-      const teamsAfter = new Set(survivors.map(u => u.team));
-      if (teamsAfter.size === 1 && ctx.lastTickHadBothTeamsRef.current) {
-        const winner = survivors[0]?.team ?? null;
-        if (winner) {
-          ctx.setWinBanner(winner);
-          ctx.setIsBattleRunning(false);
-          ctx.lastTickHadBothTeamsRef.current = false;
-          window.setTimeout(() => ctx.setWinBanner(null), 3000);
+      } else {
+        // Annihilation fallback — only when nobody won on points this tick.
+        const teamsAfter = new Set(survivors.map(u => u.team));
+        if (teamsAfter.size === 1 && ctx.lastTickHadBothTeamsRef.current) {
+          const winner = survivors[0]?.team ?? null;
+          if (winner) {
+            ctx.setWinBanner(winner);
+            ctx.setIsBattleRunning(false);
+            ctx.lastTickHadBothTeamsRef.current = false;
+            window.setTimeout(() => ctx.setWinBanner(null), 3000);
+          }
         }
       }
       ctx.setArmies(prev => {
