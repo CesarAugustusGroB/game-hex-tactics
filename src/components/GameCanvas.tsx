@@ -324,9 +324,9 @@ export const GameCanvas: React.FC = () => {
 
   const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
-  const [captureProgress, setCaptureProgress] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
-  const captureProgressRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
-  useEffect(() => { captureProgressRef.current = captureProgress; }, [captureProgress]);
+  const [score, setScore] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  const scoreRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  useEffect(() => { scoreRef.current = score; }, [score]);
   // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
@@ -452,7 +452,7 @@ export const GameCanvas: React.FC = () => {
     armiesRef,
     groupOrdersRef,
     gridDataRef,
-    captureProgressRef,
+    scoreRef,
     tickCounterRef,
     lastTickHadBothTeamsRef,
     projectilesGfx,
@@ -461,7 +461,8 @@ export const GameCanvas: React.FC = () => {
     clearOrder,
     setArmies,
     setGroupOrders,
-    setCaptureProgress,
+    setScore,
+    setRosters,
     setWinBanner,
     setIsBattleRunning,
     commandPointsRef,
@@ -622,8 +623,8 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
     lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
@@ -641,8 +642,8 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
     lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
@@ -660,8 +661,8 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
     lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
@@ -717,7 +718,7 @@ export const GameCanvas: React.FC = () => {
       inputMode={inputMode}
       winBanner={winBanner}
       isBattleRunning={isBattleRunning}
-      captureProgress={captureProgress}
+      score={score}
       currentStrategicHex={currentStrategicHex}
       armies={armies}
       groupOrders={groupOrders}
