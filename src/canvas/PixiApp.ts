@@ -318,6 +318,10 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       app.stage.eventMode = 'static';
       app.stage.hitArea = app.screen;
 
+      // Last hex the pointer hovered (axial key). Used to skip redundant setHoveredHex
+      // calls — without this, every sub-hex mouse move re-renders GameCanvas + HUD.
+      let lastHoverKey: string | null = null;
+
       const paintCtx: PaintModeCtx = {
         currentStrategicHexRef: ctx.currentStrategicHexRef,
         lastPaintedKeyRef: ctx.lastPaintedKeyRef,
@@ -378,7 +382,11 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         }
         const local = world.toLocal(e.global);
         const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
-        ctx.setHoveredHex(hex);
+        const hoverKey = HexUtils.key(hex);
+        if (hoverKey !== lastHoverKey) {
+          lastHoverKey = hoverKey;
+          ctx.setHoveredHex(hex);
+        }
         if (ctx.isPaintingRef.current) paintAt(hex, paintCtx);
         if (ctx.orderDragRef.current) updateOrderDrag(local.x, local.y, odCtx);
       });
