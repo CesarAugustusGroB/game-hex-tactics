@@ -5,7 +5,7 @@ import type { OrderMode, FormationType, Team, GroupId, UnitType } from '../battl
 import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '../battle/simulate';
 import type { InputMode, Armies, GroupOrders, GroupFormations, Rosters } from './constants';
 import {
-  CAPTURE_TICKS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
+  POINTS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
   FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
@@ -23,7 +23,7 @@ export interface HUDProps {
   winBanner: Team | null;
   // battle state
   isBattleRunning: boolean;
-  captureProgress: { red: number; blue: number };
+  score: { red: number; blue: number };
   currentStrategicHex: Hex | null;
   armies: Armies;
   groupOrders: GroupOrders;
@@ -84,7 +84,7 @@ export const HUD: React.FC<HUDProps> = ({
   inputMode,
   winBanner,
   isBattleRunning,
-  captureProgress,
+  score,
   currentStrategicHex,
   armies,
   groupOrders,
@@ -151,8 +151,9 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* Capture progress strip — top-centre. Two bars race to CAPTURE_TICKS_TO_WIN.
-          Only visible once a battle is in progress (currentStrategicHex is set). */}
+      {/* Victory-points strip — top-centre. Two bars race to POINTS_TO_WIN. Points come from
+          reaching the enemy line (raid & return) + holding the centre uncontested. Only
+          visible once a battle is in progress (currentStrategicHex is set). */}
       {viewMode === 'TACTICAL' && currentStrategicHex && (
         <div style={{
           position: 'absolute',
@@ -172,11 +173,11 @@ export const HUD: React.FC<HUDProps> = ({
             fontSize: '10px', color: '#facc15', fontWeight: 800, letterSpacing: '2px',
             marginBottom: '8px', textAlign: 'center',
           }}>
-            HOLD THE CENTRE — {CAPTURE_TICKS_TO_WIN} TICKS
+            VICTORY POINTS — FIRST TO {POINTS_TO_WIN}
           </div>
           {(['red', 'blue'] as const).map(team => {
-            const v = captureProgress[team];
-            const pct = (v / CAPTURE_TICKS_TO_WIN) * 100;
+            const v = score[team];
+            const pct = Math.min(100, (v / POINTS_TO_WIN) * 100);
             const color = team === 'red' ? '#ef4444' : '#3b82f6';
             return (
               <div key={team} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: team === 'red' ? '6px' : 0 }}>
@@ -189,8 +190,8 @@ export const HUD: React.FC<HUDProps> = ({
                 }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 0.3s ease' }} />
                 </div>
-                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '34px', textAlign: 'right' }}>
-                  {v}/{CAPTURE_TICKS_TO_WIN}
+                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right' }}>
+                  {Math.round(v)}/{POINTS_TO_WIN}
                 </span>
               </div>
             );
