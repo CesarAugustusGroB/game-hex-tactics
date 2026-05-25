@@ -151,9 +151,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* Victory-points strip — top-centre. Two bars race to POINTS_TO_WIN. Points come from
-          reaching the enemy line (raid & return) + holding the centre uncontested. Only
-          visible once a battle is in progress (currentStrategicHex is set). */}
+      {/* Victory-points strip — top-centre. Two bars race to POINTS_TO_WIN; visible once a battle is in progress. */}
       {viewMode === 'TACTICAL' && currentStrategicHex && (
         <div style={{
           position: 'absolute',
