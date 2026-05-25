@@ -15,6 +15,11 @@ import {
   DRAG_THRESHOLD_PX,
   DEPLOY_ZONE_FRAC,
 } from '../data/game';
+import {
+  POINTS_TO_WIN,
+  POINTS_PER_UNIT_REACHED,
+  CENTER_HOLD_POINTS_PER_TICK,
+} from '../data/scoring';
 
 // Re-export under their legacy paths so existing consumers (HUD, render, input handlers,
 // GameCanvas composition root) don't need to migrate import paths. Values live in
@@ -44,6 +49,9 @@ export {
   // instead of a smear of tiny pixelated sprites.
   LOD_THRESHOLD,
   DRAG_THRESHOLD_PX,
+  POINTS_TO_WIN,
+  POINTS_PER_UNIT_REACHED,
+  CENTER_HOLD_POINTS_PER_TICK,
 };
 
 export { STRATEGIC_RESOLUTION, DIVE_ZOOM } from '../data/world-gen';
