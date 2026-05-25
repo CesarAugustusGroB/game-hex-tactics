@@ -38,12 +38,9 @@ export interface ScoreTickResult {
 const TEAMS: readonly Team[] = ['red', 'blue'];
 
 /**
- * One tick of victory-point scoring. Pure: no React/PIXI/I/O.
- *  - Territory reach: a living unit standing in its `scoringZone` (the enemy deploy zone)
- *    scores `pointsPerUnitReached`, refunds 1 of its type to its roster, and is marked for
- *    removal from the field (raid & return).
- *  - Centre hold: uncontested living presence in `centerKeys` accrues `centerHoldPointsPerTick`.
- *    Contested or empty centre scores nobody. Points never decay.
+ * One tick of victory-point scoring (pure). Reaching the enemy back line is raid & return:
+ * the unit scores, refunds to its roster, and leaves the field. Centre-hold points accrue
+ * only while uncontested and never decay.
  */
 export function scoreTick(input: ScoreTickInput): ScoreTickResult {
   const { units, score, centerKeys, scoringZone, config } = input;
@@ -63,8 +60,8 @@ export function scoreTick(input: ScoreTickInput): ScoreTickResult {
     rosterDelta[u.team][u.unitType ?? 'infantry'] += 1;
   }
 
-  // Centre hold. A unit reaching the enemy line can't also sit in the centre, so the two
-  // passes don't double-count.
+  // Centre hold. centerKeys and scoringZone are disjoint by construction (map centre vs.
+  // back strips), so a reached unit is never also counted here.
   let redCenter = 0, blueCenter = 0;
   for (const u of units) {
     if (u.hp <= 0) continue;

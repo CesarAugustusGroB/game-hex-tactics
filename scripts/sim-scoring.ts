@@ -98,6 +98,19 @@ const noZone = { red: new Set<string>(), blue: new Set<string>() };
   check('dead unit: no removal', r.reachedUnitIds.size === 0);
 }
 
+// 6. unitType omitted falls back to infantry for the roster refund.
+{
+  const zoneKey = HexUtils.key({ q: 5, r: -5 });
+  const r = scoreTick({
+    units: [unit('a', 'red', 5, -5, { unitType: undefined })],
+    score: { red: 0, blue: 0 },
+    centerKeys: center,
+    scoringZone: { red: new Set([zoneKey]), blue: new Set<string>() },
+    config: cfg,
+  });
+  check('no unitType: refund falls back to infantry', r.rosterDelta.red.infantry === 1);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
   process.exitCode = 1;
