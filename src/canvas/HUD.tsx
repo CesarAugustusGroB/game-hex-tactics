@@ -687,7 +687,7 @@ export const HUD: React.FC<HUDProps> = ({
         )}
 
         {/* RESET BATTLE — wipe all units on the current tactical map, restore both
-            rosters, clear orders + capture progress + winBanner. Keeps the world and
+            rosters, clear orders + score + winBanner. Keeps the world and
             view; for replaying the same map without regenerating terrain. */}
         {viewMode === 'TACTICAL' && (
           <button

@@ -178,6 +178,10 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
           centerHoldPointsPerTick: CENTER_HOLD_POINTS_PER_TICK,
         },
       });
+      // Units that reached the enemy line leave the field. Removal is async (via setArmies
+      // below → armiesRef mirror), but scoreRef updates synchronously, so single-scoring
+      // relies on React flushing setArmies within one TICK_MS window — otherwise a reached
+      // unit would still be in armiesRef next tick and score again. Safe at 500ms ticks.
       const survivors = sc.reachedUnitIds.size > 0
         ? next.filter(u => !sc.reachedUnitIds.has(u.id))
         : next;
