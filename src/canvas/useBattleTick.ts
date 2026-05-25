@@ -29,7 +29,6 @@ export interface BattleTickCtx {
   // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   tickCounterRef: MutableRefObject<number>;
-  lastTickHadBothTeamsRef: MutableRefObject<boolean>;
   projectilesGfx: RefObject<PIXI.Container>;
   javelinTextureRef: RefObject<PIXI.Texture | null>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
@@ -53,10 +52,6 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       const strategicKey = HexUtils.key(strategic);
       const units = ctx.armiesRef.current.get(strategicKey) ?? [];
       if (units.length === 0) return;
-      // simulateTick BEFORE the setters — reading a closure variable written inside a
-      // setX(prev => ...) on the next line is undefined (the updater hasn't run yet).
-      const teamsBefore = new Set(units.map(u => u.team));
-      if (teamsBefore.size >= 2) ctx.lastTickHadBothTeamsRef.current = true;
       const grid = ctx.gridDataRef.current;
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
@@ -205,22 +200,12 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
           return m;
         });
       }
+      // Victory is only by reaching POINTS_TO_WIN. A team having no units left on the field
+      // is normal (units raid the enemy line and return to roster), so it is not a loss.
       if (sc.winner) {
         ctx.setWinBanner(sc.winner);
         ctx.setIsBattleRunning(false);
         window.setTimeout(() => ctx.setWinBanner(null), 3000);
-      } else {
-        // Annihilation fallback — only when nobody won on points this tick.
-        const teamsAfter = new Set(survivors.map(u => u.team));
-        if (teamsAfter.size === 1 && ctx.lastTickHadBothTeamsRef.current) {
-          const winner = survivors[0]?.team ?? null;
-          if (winner) {
-            ctx.setWinBanner(winner);
-            ctx.setIsBattleRunning(false);
-            ctx.lastTickHadBothTeamsRef.current = false;
-            window.setTimeout(() => ctx.setWinBanner(null), 3000);
-          }
-        }
       }
       ctx.setArmies(prev => {
         const updated = new Map(prev);

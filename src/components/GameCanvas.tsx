@@ -322,7 +322,6 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { gridDataRef.current = gridData; }, [gridData]);
    
 
-  const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
   const [score, setScore] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
   const scoreRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
@@ -454,7 +453,6 @@ export const GameCanvas: React.FC = () => {
     gridDataRef,
     scoreRef,
     tickCounterRef,
-    lastTickHadBothTeamsRef,
     projectilesGfx,
     javelinTextureRef,
     issueOrder,
@@ -626,7 +624,6 @@ export const GameCanvas: React.FC = () => {
     setScore({ red: 0, blue: 0 });
     scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints();
     setCommandPoints(makeInitialCommandPoints());
@@ -645,7 +642,6 @@ export const GameCanvas: React.FC = () => {
     setScore({ red: 0, blue: 0 });
     scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints();
     setCommandPoints(makeInitialCommandPoints());
@@ -664,7 +660,6 @@ export const GameCanvas: React.FC = () => {
     setScore({ red: 0, blue: 0 });
     scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints();
     setCommandPoints(makeInitialCommandPoints());
