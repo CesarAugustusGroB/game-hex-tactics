@@ -73,6 +73,11 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const unitTexRedSkir = ctx.unitTextureRedSkirmisher;
   const unitTexBlueSkir = ctx.unitTextureBlueSkirmisher;
 
+  // Index gridData once per render so the per-unit / per-order tile lookups below are O(1)
+  // instead of O(gridSize). At ~145 units over a ~4000-hex map the old `.find` scan was
+  // ~580k comparisons per frame.
+  const tileByKey = new Map(ctx.gridData.map(d => [HexUtils.key(d.hex), d]));
+
   // Kill GSAP tweens before destroy so they don't touch a freed object next frame.
   const destroyAllUnitContainers = () => {
     ctx.unitContainers.forEach(cont => {
@@ -88,7 +93,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     c.removeChildren();
     ctx.armies.forEach((_units, key) => {
       const strategicHex = HexUtils.fromKey(key);
-      const tile = ctx.gridData.find(d => d.hex.q === strategicHex.q && d.hex.r === strategicHex.r);
+      const tile = tileByKey.get(key);
       if (!tile) return;
       const pos = HexUtils.hexToPixel(strategicHex);
       const sprite = new PIXI.Sprite(armyTex);
@@ -172,11 +177,11 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   }
 
   units.forEach(u => {
-    const tile = ctx.gridData.find(d => d.hex.q === u.tacticalHex.q && d.hex.r === u.tacticalHex.r);
+    const hexKey = HexUtils.key(u.tacticalHex);
+    const tile = tileByKey.get(hexKey);
     if (!tile) return;
     const pos = HexUtils.hexToPixel(u.tacticalHex);
     const topY = pos.y - TERRAINS[tile.type].height;
-    const hexKey = HexUtils.key(u.tacticalHex);
     // Includes topY so world regeneration (same hex, new terrain type) re-targets
     // the container instead of leaving the unit floating at the old elevation.
     const targetKey = `${hexKey}|${Math.round(topY)}`;
@@ -307,7 +312,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   ctx.groupOrders.forEach(order => {
     if (!order.attackTarget) return;
     if (ctx.fogOfWar && order.team !== ctx.selectedTeam) return;
-    const tile = ctx.gridData.find(d => d.hex.q === order.attackTarget!.q && d.hex.r === order.attackTarget!.r);
+    const tile = tileByKey.get(HexUtils.key(order.attackTarget));
     if (!tile) return;
     const pos = HexUtils.hexToPixel(order.attackTarget);
     const topY = pos.y - TERRAINS[tile.type].height;
