@@ -487,7 +487,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         const applyLod = (child: PIXI.Container) => {
           if (child.label === 'unit-sprite' || child.label === 'unit-sprite-shadow') child.visible = !isFar;
           else if (child.label === 'unit-marker') child.visible = isFar;
-          else if (child.label === 'unit-detail') child.visible = !isFar;
         };
         for (const child of ctx.unitsGfx.current.children) {
           if (child.label === 'unit-container') {
