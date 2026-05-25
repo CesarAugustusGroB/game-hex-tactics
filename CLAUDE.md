@@ -129,4 +129,4 @@ All balance- and content-tunable values live in `src/data/`. Each `.json` file i
 
 ## Worktree note
 
-This is a `git worktree` at `.worktrees/feature-refactor-gamecanvas` on branch `feature/refactor-gamecanvas`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+This is a `git worktree` at `.worktrees/feature-infra` on branch `feature/infra`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
