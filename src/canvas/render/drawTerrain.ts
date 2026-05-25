@@ -138,6 +138,11 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
   ctx.waterFilters.length = 0;
   for (const child of overlay.children.slice()) {
     if ('mask' in child) (child as PIXI.Container).mask = null;
+    // Water layer containers live one level down inside the filtered deepSea/coastal
+    // parents now — null their masks too before the recursive destroy.
+    for (const grandchild of (child as PIXI.Container).children ?? []) {
+      if ('mask' in grandchild) (grandchild as PIXI.Container).mask = null;
+    }
     overlay.removeChild(child);
     child.destroy({ children: true, texture: false });
   }
@@ -420,6 +425,23 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       }
     }
   };
+  // One filtered parent per water config → a single render-to-texture pass for all layers
+  // sharing that filter, instead of one pass per layer. Water layers are contiguous at the
+  // start of globalUvOverlays, so these parents are added first = lowest z (correct).
+  const waterParents: Partial<Record<'deepSea' | 'coastal', PIXI.Container>> = {};
+  const ensureWaterParent = (kind: 'deepSea' | 'coastal'): PIXI.Container => {
+    let p = waterParents[kind];
+    if (!p) {
+      p = new PIXI.Container();
+      const handle = createWaterFilter(WATER_FILTER_CONFIGS[kind]);
+      p.filters = [handle.filter];
+      ctx.waterFilters.push(handle);
+      overlay.addChild(p);
+      waterParents[kind] = p;
+    }
+    return p;
+  };
+
   for (const layer of globalUvOverlays) {
     if (layer.paintCliffsBefore) {
       const terrainCliffs = new PIXI.Graphics();
@@ -465,11 +487,6 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     layerContainer.x = minX;
     layerContainer.y = minY;
     layerContainer.addChild(tile);
-    if (layer.waterFilter) {
-      const handle = createWaterFilter(WATER_FILTER_CONFIGS[layer.waterFilter]);
-      layerContainer.filters = [handle.filter];
-      ctx.waterFilters.push(handle);
-    }
     const mask = new PIXI.Graphics();
     for (const d of hexes) {
       const p = HexUtils.hexToPixel(d.hex);
@@ -500,8 +517,9 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
         ]).fill({ color: 0xffffff });
       }
     }
-    overlay.addChild(layerContainer);
-    overlay.addChild(mask);
+    const parent = layer.waterFilter ? ensureWaterParent(layer.waterFilter) : overlay;
+    parent.addChild(layerContainer);
+    parent.addChild(mask);
     layerContainer.mask = mask;
   }
   const riverSeaCliffs = new PIXI.Graphics();

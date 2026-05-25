@@ -63,6 +63,7 @@ export const GameCanvas: React.FC = () => {
   // terrain features.
   const detailDensityNoiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
   const armyTextureRef = useRef<PIXI.Texture | null>(null);
+  const shadowTextureRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRedCavalryRef = useRef<PIXI.Texture | null>(null);
@@ -211,13 +212,14 @@ export const GameCanvas: React.FC = () => {
 
   const drawUnits = useCallback(() => {
     const armyTex = armyTextureRef.current;
+    const shadowTex = shadowTextureRef.current;
     const unitTex = unitTextureRef.current;
     const unitTexBlue = unitTextureBlueRef.current;
     const unitTexRedCav = unitTextureRedCavalryRef.current;
     const unitTexBlueCav = unitTextureBlueCavalryRef.current;
     const unitTexRedSkir = unitTextureRedSkirmisherRef.current;
     const unitTexBlueSkir = unitTextureBlueSkirmisherRef.current;
-    if (!armyTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
+    if (!armyTex || !shadowTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
     drawUnitsRender({
       unitsGfx: unitsGfx.current,
       unitContainers: unitContainersRef.current,
@@ -228,6 +230,7 @@ export const GameCanvas: React.FC = () => {
       unitTextureRedSkirmisher: unitTexRedSkir,
       unitTextureBlueSkirmisher: unitTexBlueSkir,
       armyTexture: armyTex,
+      shadowTexture: shadowTex,
       armies,
       groupOrders,
       gridData,
@@ -374,6 +377,7 @@ export const GameCanvas: React.FC = () => {
     highlightGfx,
     unitContainersRef,
     armyTextureRef,
+    shadowTextureRef,
     unitTextureRef,
     unitTextureBlueRef,
     unitTextureRedCavalryRef,
