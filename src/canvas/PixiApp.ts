@@ -130,7 +130,13 @@ export function usePixiApp(ctx: PixiAppCtx): void {
     let isMounted = true;
     const app = new PIXI.Application();
     const start = async () => {
-      await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
+      await app.init({
+        resizeTo: window,
+        backgroundColor: 0x050a14,
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+      });
 
       // The army SVG is natively 40×40 — too low for high-DPI. Pre-rasterise to a
       // higher-res canvas so PIXI downsamples instead of upsampling.
