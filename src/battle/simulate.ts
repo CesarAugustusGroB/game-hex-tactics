@@ -1098,12 +1098,18 @@ export const simulateTick = (
       // capture hex). Smaller HexUtils.distance wins; ties → enemy.
       const enemies = working.filter(u => u.hp > 0 && u.team !== groupUnits[0].team);
       const captureHexes = config.captureZone ?? [];
-      if (enemies.length === 0 && captureHexes.length === 0) continue;
 
       // Engagement-cap accounting (enemy targets only): allies of this group already
       // adjacent to each enemy at the start of the tick. New attackers spread across
       // less-crowded enemies instead of piling on the nearest.
       const groupTeam = groupUnits[0].team;
+      // Forward beacon: a far hex in the team-forward straight direction (red→N, blue→S).
+      // Unleash marches toward it whenever it has no enemy to chase and can't make forward
+      // progress to a capture hex — i.e. the centre is occupied or now sits BEHIND the
+      // unit because it already trespassed it, and unleash never reverses. Keeps the block
+      // pushing into enemy territory instead of freezing.
+      const fwdDir = HexUtils.directions[groupTeam === 'red' ? 2 : 5];
+      const forwardBeacon = (h: Hex): Hex => ({ q: h.q + fwdDir.q * 64, r: h.r + fwdDir.r * 64 });
       const baseEngagement = new Map<string, number>();
       for (const e of enemies) {
         let count = 0;
@@ -1177,17 +1183,21 @@ export const simulateTick = (
               if (step === 0) claimsThisTick.set(bestEnemy.id, (claimsThisTick.get(bestEnemy.id) ?? 0) + 1);
             } else if (bestHex) {
               u.unleashTarget = { kind: 'hex', q: bestHex.q, r: bestHex.r };
-            } else {
-              break; // nothing to do this tick.
             }
+            // else: no enemy and no free capture hex — leave unleashTarget unset; the
+            // movement step pushes toward the forward beacon instead of freezing.
           }
 
-          // 3. Build a concrete target hex from the lock, used by the movement step.
-          const lock = u.unleashTarget!;
-          const targetHex: Hex = lock.kind === 'enemy'
-            ? byId.get(lock.id)!.tacticalHex
-            : { q: lock.q, r: lock.r };
-          const bestD = HexUtils.distance(u.tacticalHex, targetHex);
+          // 3. Concrete target hex. Enemy/capture come from the lock; with NO lock the
+          //    unit has no enemy and no free capture hex — push toward the forward beacon
+          //    so unleash never freezes.
+          const lock = u.unleashTarget;
+          const chasingEnemy = lock?.kind === 'enemy';
+          let targetHex: Hex;
+          if (lock?.kind === 'enemy') targetHex = byId.get(lock.id)!.tacticalHex;
+          else if (lock?.kind === 'hex') targetHex = { q: lock.q, r: lock.r };
+          else targetHex = forwardBeacon(u.tacticalHex);
+          let bestD = HexUtils.distance(u.tacticalHex, targetHex);
 
           // 4. Movement. Skirmisher hit-and-run only against an enemy lock (no kite vs
           //    a capture hex — there's no projectile thrower-and-runner target).
@@ -1196,10 +1206,10 @@ export const simulateTick = (
           let bestNextD = bestD;
 
           const isSkirm = (u.unitType ?? 'infantry') === 'skirmisher';
-          if (lock.kind === 'enemy' && isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
+          if (chasingEnemy && isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
             break; // stand still — combat phase throws the javelin.
           }
-          if (lock.kind === 'enemy' && isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
+          if (chasingEnemy && isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
             const prev = u.prevTacticalHex;
             let bestRunD = bestD;
             for (const dir of HexUtils.directions) {
@@ -1253,6 +1263,47 @@ export const simulateTick = (
               }
             }
             bestNext = bestLat;
+          }
+          // Stuck and not chasing an enemy → the only capture target is behind us (centre
+          // trespassed) or occupied. Unleash never reverses; redirect to the forward
+          // beacon and retry so the block keeps pushing in. (Skipped when targetHex is
+          // already the beacon — the approach above tried it.)
+          if (!bestNext && !chasingEnemy) {
+            const beacon = forwardBeacon(u.tacticalHex);
+            if (beacon.q !== targetHex.q || beacon.r !== targetHex.r) {
+              targetHex = beacon;
+              bestD = HexUtils.distance(u.tacticalHex, targetHex);
+              bestNextD = bestD;
+              for (const idx of cone) {
+                const dir = HexUtils.directions[idx];
+                const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+                const d = HexUtils.distance(next, targetHex);
+                if (d >= bestNextD) continue;
+                if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+                if (occupancy.get(HexUtils.key(next))) continue;
+                bestNext = next;
+                bestNextD = d;
+              }
+              if (!bestNext) {
+                const prev = u.prevTacticalHex;
+                let bestLat: Hex | null = null;
+                let bestLatKey: string | null = null;
+                for (const idx of cone) {
+                  const dir = HexUtils.directions[idx];
+                  const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+                  if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+                  if (occupancy.get(HexUtils.key(next))) continue;
+                  if (prev && next.q === prev.q && next.r === prev.r) continue;
+                  if (HexUtils.distance(next, targetHex) !== bestD) continue;
+                  const nk = HexUtils.key(next);
+                  if (bestLatKey === null || nk < bestLatKey) {
+                    bestLat = next;
+                    bestLatKey = nk;
+                  }
+                }
+                bestNext = bestLat;
+              }
+            }
           }
           if (!bestNext) break;
           occupancy.delete(HexUtils.key(u.tacticalHex));
