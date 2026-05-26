@@ -1,5 +1,5 @@
 {
-  "pointsToWin": 100,
-  "pointsPerUnitReached": 1,
-  "centerHoldPointsPerSecond": 2
+  "pointsToWin": 200,
+  "pointsPerUnitReached": 2,
+  "centerHoldPointsPerSecond": 1
 }
