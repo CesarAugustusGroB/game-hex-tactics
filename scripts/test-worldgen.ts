@@ -56,6 +56,11 @@ import { shapeMult, type ShapeCtx } from '../src/canvas/world-gen';
   // linear (angle 0 -> along q): land side > sea side
   assert.ok(shapeMult('linear', 35, 0, ctx) > shapeMult('linear', -35, 0, ctx),
     'linear gradient across the coast axis');
+
+  const ctx90: ShapeCtx = { ...ctx, coastAngle: Math.PI / 2 };
+  // angle 90° -> gradient runs along r instead of q
+  assert.ok(shapeMult('linear', 0, 35, ctx90) > shapeMult('linear', 0, -35, ctx90),
+    'linear gradient rotates with coastAngle');
 }
 
 console.log('all worldgen tests passed');

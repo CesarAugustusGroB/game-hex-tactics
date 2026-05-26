@@ -11,7 +11,7 @@ export interface ShapeCtx {
 }
 
 // Elevation-shaping multiplier per macro-shape archetype. Multiplies the
-// normalized [0,1] noise elevation before bucketing. `radial` is byte-identical
+// normalized [0,1] noise elevation before bucketing. `radial` is identical
 // to the original island falloff.
 export function shapeMult(shape: ShapePrimitive, q: number, r: number, ctx: ShapeCtx): number {
   if (shape === 'flat') return 1;
