@@ -23,7 +23,7 @@ for (const mapType of MAP_TYPE_IDS) {
     viewMode: 'STRATEGIC',
   }));
   dump(`TACTICAL:${mapType}`, generateWorldData({
-    settings: { mapType, seed: SEED, noiseOffset: { q: 7, r: -3 }, resolution: STRATEGIC_RESOLUTION / DIVE_ZOOM },
+    settings: { mapType, seed: SEED, noiseOffset: { q: 7 * DIVE_ZOOM, r: -3 * DIVE_ZOOM }, resolution: STRATEGIC_RESOLUTION / DIVE_ZOOM },
     gridRadius: GRID_RADIUS,
     viewMode: 'TACTICAL',
   }));
