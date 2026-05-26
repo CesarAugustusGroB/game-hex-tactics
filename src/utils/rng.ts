@@ -1,5 +1,4 @@
-// mulberry32: tiny, fast, deterministic 32-bit PRNG. Seeds simplex noise and
-// the river RNG so world-gen is reproducible from a single integer seed.
+// Seedable deterministic PRNG — a single integer seed reproduces a world.
 export const mulberry32 = (seed: number): (() => number) => {
   let t = seed >>> 0;
   return () => {
