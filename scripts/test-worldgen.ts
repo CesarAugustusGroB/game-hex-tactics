@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { mulberry32 } from '../src/utils/rng';
 import { MAP_TYPES, MAP_TYPE_IDS, DEFAULT_MAP_TYPE } from '../src/data/world-gen';
 import { shapeMult, type ShapeCtx } from '../src/canvas/world-gen';
+import { generateWorldData, resolveMapType } from '../src/canvas/world-gen';
+import { GRID_RADIUS, STRATEGIC_RESOLUTION } from '../src/data/world-gen';
 
 // mulberry32: deterministic per seed, divergent across seeds
 {
@@ -61,6 +63,23 @@ import { shapeMult, type ShapeCtx } from '../src/canvas/world-gen';
   // angle 90° -> gradient runs along r instead of q
   assert.ok(shapeMult('linear', 0, 35, ctx90) > shapeMult('linear', 0, -35, ctx90),
     'linear gradient rotates with coastAngle');
+}
+
+// generateWorldData: deterministic from seed, island preserves sea edges
+{
+  const base = { mapType: 'island' as const, seed: 12345, noiseOffset: { q: 0, r: 0 }, resolution: STRATEGIC_RESOLUTION };
+  const mk = (settings: typeof base) =>
+    generateWorldData({ settings, gridRadius: GRID_RADIUS, viewMode: 'STRATEGIC' as const }).gridData;
+
+  assert.deepEqual(mk(base), mk(base), 'same seed -> identical map');
+  assert.notDeepEqual(mk(base), mk({ ...base, seed: 999 }), 'different seed -> different map');
+
+  const edge = mk(base).find(d => d.hex.q === GRID_RADIUS && d.hex.r === 0);
+  assert.ok(edge && ['SEA', 'DEEP_SEA'].includes(edge.type), 'island outer ring is sea');
+
+  // resolveMapType: explicit passthrough, random is deterministic per seed
+  assert.equal(resolveMapType('coastline', 1), 'coastline');
+  assert.equal(resolveMapType('random', 555), resolveMapType('random', 555), 'random stable per seed');
 }
 
 console.log('all worldgen tests passed');

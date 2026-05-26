@@ -29,8 +29,8 @@ export function shapeMult(shape: ShapePrimitive, q: number, r: number, ctx: Shap
 }
 
 export interface GenSettings {
-  waterLevel: number;
-  mountainLevel: number;
+  mapType: MapTypeId;
+  seed: number;
   noiseOffset: { q: number; r: number };
   resolution: number;
 }
@@ -39,7 +39,18 @@ export interface WorldGenInput {
   settings: GenSettings;
   gridRadius: number;
   viewMode: 'STRATEGIC' | 'TACTICAL';
-  noise: ReturnType<typeof createNoise2D>;
+}
+
+export type MapTypeChoice = MapTypeId | 'random';
+
+const SHAPE_SALT = 0x9e3779b9;
+const RIVER_SALT = 0x85ebca6b;
+const TYPE_SALT  = 0xc2b2ae35;
+
+export function resolveMapType(choice: MapTypeChoice, seed: number): MapTypeId {
+  if (choice !== 'random') return choice;
+  const idx = Math.floor(mulberry32((seed ^ TYPE_SALT) >>> 0)() * MAP_TYPE_IDS.length);
+  return MAP_TYPE_IDS[idx];
 }
 
 export interface WorldGenOutput {
@@ -57,13 +68,25 @@ const TACTICAL_BBOX_Q = 50;
 const TACTICAL_BBOX_R = 30;
 
 export function generateWorldData(input: WorldGenInput): WorldGenOutput {
-  const { settings, gridRadius, viewMode, noise } = input;
+  const { settings, gridRadius, viewMode } = input;
   const newMap = new Map<string, string>();
   const elevationCache = new Map<string, number>();
 
-  const w = settings.waterLevel;
-  const m = settings.mountainLevel;
+  const noise = createNoise2D(mulberry32(settings.seed));
+  const shapeRng = mulberry32((settings.seed ^ SHAPE_SALT) >>> 0);
+  const riverRng = mulberry32((settings.seed ^ RIVER_SALT) >>> 0);
+
+  const cfg = MAP_TYPES[settings.mapType];
+  const w = cfg.waterLevel;
+  const m = cfg.mountainLevel;
   const b = WORLD_GEN.bucket;
+  const ctx: ShapeCtx = {
+    gridRadius,
+    intercept: WORLD_GEN.falloff.intercept,
+    exponent: WORLD_GEN.falloff.exponent,
+    coastAngle: shapeRng() * Math.PI * 2,
+  };
+
   const bucket = (e: number): string => {
     if (e < w * b.deepSeaMult)    return 'DEEP_SEA';
     if (e < w)                    return 'SEA';
@@ -74,36 +97,24 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     if (e < m + b.mountainOffset) return 'MOUNTAIN';
     return 'SNOW';
   };
-  // Tactical applies the SAME radial falloff multiplier the strategic island used at
-  // the clicked hex, uniformly across every tactical hex. Per-hex variation inside a
-  // dive comes purely from the fine-resolution noise — the island-shape falloff is a
-  // strategic-scale concept and re-evaluating it per tactical hex made the same noise
-  // point bucket higher in tactical than in strategic (because the formerly-used
-  // exponent 4 decays slower than the strategic exponent 2.5 for d ∈ (0,1), so the
-  // mult was always larger). Result: a FOREST in strategic could show up as HILL/
-  // MOUNTAIN in tactical, and the river pass would then spawn rivers from those hills.
+
+  // Tactical applies the SAME shaping multiplier the strategic view used at the
+  // clicked hex, uniformly across every tactical hex (so the dive matches the
+  // strategic patch). For 'flat' this is 1 (tactical == strategic); for the
+  // falloff shapes it is the active primitive evaluated once at the dive point.
   const tacticalElevationMult = (() => {
     if (viewMode === 'STRATEGIC') return 1; // unused
     const diveStrategicQ = settings.noiseOffset.q / DIVE_ZOOM;
     const diveStrategicR = settings.noiseOffset.r / DIVE_ZOOM;
-    const d = Math.sqrt(
-      diveStrategicQ * diveStrategicQ +
-      diveStrategicR * diveStrategicR +
-      diveStrategicQ * diveStrategicR,
-    ) / gridRadius;
-    return Math.max(0, WORLD_GEN.falloff.intercept - Math.pow(d, WORLD_GEN.falloff.exponent));
+    return shapeMult(cfg.shape, diveStrategicQ, diveStrategicR, ctx);
   })();
+
   const sampleElevation = (q: number, r: number): number => {
     const nx = (q + settings.noiseOffset.q) / settings.resolution;
     const ny = (r + settings.noiseOffset.r) / settings.resolution;
     let e = (noise(nx, ny) + 0.4 * noise(nx * 2.2, ny * 2.2)) / 1.4;
     e = (e + 1) / 2;
-    if (viewMode === 'STRATEGIC') {
-      const d = Math.sqrt(q*q + r*r + q*r) / gridRadius;
-      e *= Math.max(0, WORLD_GEN.falloff.intercept - Math.pow(d, WORLD_GEN.falloff.exponent));
-    } else {
-      e *= tacticalElevationMult;
-    }
+    e *= viewMode === 'STRATEGIC' ? shapeMult(cfg.shape, q, r, ctx) : tacticalElevationMult;
     return e;
   };
 
@@ -152,7 +163,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
 
   for (let i = 0; i < riverCount; i++) {
     if (starts.length === 0) break;
-    let curr = starts[Math.floor(Math.random() * starts.length)];
+    let curr = starts[Math.floor(riverRng() * starts.length)];
     const visited = new Set<string>();
 
     for (let s = 0; s < 300; s++) {
@@ -168,7 +179,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
       // Rivers thicken in TACTICAL view so they're walkable but visually substantial.
       if (viewMode === 'TACTICAL') {
         HexUtils.getNeighbors(curr).forEach(n => {
-          if (smoothedMap.has(HexUtils.key(n)) && Math.random() > 0.3) smoothedMap.set(HexUtils.key(n), 'RIVER');
+          if (smoothedMap.has(HexUtils.key(n)) && riverRng() > 0.3) smoothedMap.set(HexUtils.key(n), 'RIVER');
         });
       }
 
