@@ -1,5 +1,13 @@
 import raw from './world-gen.json';
 
+export type ShapePrimitive = 'radial' | 'linear' | 'flat' | 'invertedRadial';
+
+export interface MapTypeConfig {
+  shape: ShapePrimitive;
+  waterLevel: number;
+  mountainLevel: number;
+}
+
 export interface WorldGenConfig {
   bucket: {
     deepSeaMult: number;
@@ -12,12 +20,18 @@ export interface WorldGenConfig {
   strategicResolution: number;
   diveZoom: number;
   gridRadius: number;
-  defaultGenSettings: { waterLevel: number; mountainLevel: number };
+  mapTypes: Record<string, MapTypeConfig>;
+  defaultMapType: string;
 }
 
-export const WORLD_GEN: WorldGenConfig = raw;
+export const WORLD_GEN: WorldGenConfig = raw as WorldGenConfig;
 
 export const STRATEGIC_RESOLUTION = WORLD_GEN.strategicResolution;
 export const DIVE_ZOOM            = WORLD_GEN.diveZoom;
 export const GRID_RADIUS          = WORLD_GEN.gridRadius;
-export const DEFAULT_GEN_SETTINGS = WORLD_GEN.defaultGenSettings;
+
+export const MAP_TYPES = WORLD_GEN.mapTypes as Record<MapTypeId, MapTypeConfig>;
+export const MAP_TYPE_IDS = Object.keys(WORLD_GEN.mapTypes) as MapTypeId[];
+export const DEFAULT_MAP_TYPE = WORLD_GEN.defaultMapType as MapTypeId;
+
+export type MapTypeId = 'island' | 'coastline' | 'archipelago' | 'plains' | 'inlandSea';

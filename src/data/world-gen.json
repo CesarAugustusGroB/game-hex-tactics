@@ -13,8 +13,12 @@
   "strategicResolution": 40,
   "diveZoom":            4.5,
   "gridRadius":          35,
-  "defaultGenSettings": {
-    "waterLevel":    0.4,
-    "mountainLevel": 0.85
-  }
+  "mapTypes": {
+    "island":      { "shape": "radial",         "waterLevel": 0.40, "mountainLevel": 0.85 },
+    "coastline":   { "shape": "linear",         "waterLevel": 0.42, "mountainLevel": 0.85 },
+    "archipelago": { "shape": "flat",           "waterLevel": 0.55, "mountainLevel": 0.88 },
+    "plains":      { "shape": "flat",           "waterLevel": 0.25, "mountainLevel": 0.90 },
+    "inlandSea":   { "shape": "invertedRadial", "waterLevel": 0.45, "mountainLevel": 0.88 }
+  },
+  "defaultMapType": "island"
 }
