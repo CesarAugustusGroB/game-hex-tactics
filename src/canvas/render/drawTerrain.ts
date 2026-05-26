@@ -92,12 +92,12 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     // PIXI v8 gotcha: `Color.multiply(number)` treats the number as a hex int via
     // bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
     const drawSide = (v1: number, v2: number, shade: number, bottomH = 0, color = tDef.color) => {
-      tGfx.beginFill(PIXI.Color.shared.setValue(color).multiply([shade, shade, shade, 1]).toNumber());
-      tGfx.moveTo(top[v1].x, top[v1].y)
-          .lineTo(top[v2].x, top[v2].y)
-          .lineTo(base[v2].x, base[v2].y - bottomH)
-          .lineTo(base[v1].x, base[v1].y - bottomH)
-          .closePath().endFill();
+      tGfx.poly([
+        top[v1].x, top[v1].y,
+        top[v2].x, top[v2].y,
+        base[v2].x, base[v2].y - bottomH,
+        base[v1].x, base[v1].y - bottomH,
+      ]).fill(PIXI.Color.shared.setValue(color).multiply([shade, shade, shade, 1]).toNumber());
     };
     // S / SE / SW only — N / NE / NW are hidden inside the hex top from top-down view.
     const sType  = terrainAt.get(HexUtils.key({ q: item.hex.q,     r: item.hex.r + 1 }));
