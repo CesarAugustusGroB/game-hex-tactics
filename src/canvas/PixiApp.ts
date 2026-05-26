@@ -320,6 +320,9 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       world.y = app.screen.height / 2;
       world.scale.set(ctx.zoom.current);
       app.stage.addChild(world);
+      // GPU render group: pan/zoom applies the world transform on the GPU instead of
+      // re-walking every descendant. cacheAsTexture is unsuitable at 0.05–6x zoom.
+      world.enableRenderGroup();
 
       // World z-order: terrain → painted overlay → scatter details → grid → units →
       // projectiles → drag previews → hover highlights.
