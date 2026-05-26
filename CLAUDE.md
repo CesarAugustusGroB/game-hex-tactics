@@ -112,7 +112,9 @@ All balance- and content-tunable values live in `src/data/`. Each `.json` file i
 - `combat.json` / `combat.ts` — `DAMAGE_PER_TICK`, charge (`durationTicks`, `impactRange`), hold (`reductionPerTick`, `reductionCap`, `autoIdleAfterTicks`), `UNLEASH_MAX_ENGAGERS`, height bonus (`bonusPerUnit`, `bonusCap`).
 - `units.json` / `units.ts` — per-unitType `maxHp`, `marchSpeed`, `chargeSpeed`, `chargeImpactDamage`, plus skirmisher-only `missileRange`, `missileDamage`, `kiteThreshold`.
 - `terrain.json` / `terrain.ts` (canvas) + `terrain-mods.ts` (sim) — single source for both visual (`color`, `label`, `height`, `walkable`) and mechanical fields (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`). Two wrappers project different views so `src/battle/` does not import canvas.
-- `game.json` / `game.ts` — `TICK_MS`, `LOD_THRESHOLD`, `DRAG_THRESHOLD_PX`, deploy zone fraction, retreat refund, initial roster, cohort size, capture (`ticksToWin`, `center`), team tints, formation cycle/labels, heading arrows.
+- `game.json` / `game.ts` — `TICK_MS`, `LOD_THRESHOLD`, `DRAG_THRESHOLD_PX`, deploy zone fraction, retreat refund, initial roster, cohort size, capture `center` (the central flower), team tints, formation cycle/labels, heading arrows.
+- `scoring.json` / `scoring.ts` — victory-points loop: `pointsToWin`, `pointsPerUnitReached` (raid the enemy line), `centerHoldPointsPerSecond` (wrapper derives `CENTER_HOLD_POINTS_PER_TICK` from `TICK_MS`).
+- `command-points.json` / `command-points.ts` — CP economy: `cap`, `initial`, `regenPerNTicks` (gain rate). Re-exported by `src/battle/command-points.ts` (which still owns `CP_COSTS` / `CpIntent`).
 - `world-gen.json` / `world-gen.ts` — `bucket` thresholds (deepSeaMult, sandOffset, forestMult, hillMult, mountainOffset), falloff (intercept, exponent), `STRATEGIC_RESOLUTION`, `DIVE_ZOOM`, `GRID_RADIUS`, default `GenSettings`.
 - `details.json` / `details.ts` — sprite catalog (categories, counts, asset paths) and per-terrain scatter rules. Pools use compact `{category, weight, firstN?}` form; the wrapper expands to flat per-key entries.
 

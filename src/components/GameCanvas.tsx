@@ -17,6 +17,7 @@ import {
 import {
   type CommandPoints, type CpIntent,
   makeInitialCommandPoints, debit, canAfford as canAffordPure,
+  CP_CAP, CP_REGEN_N,
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
@@ -325,11 +326,10 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { gridDataRef.current = gridData; }, [gridData]);
    
 
-  const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
-  const [captureProgress, setCaptureProgress] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
-  const captureProgressRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
-  useEffect(() => { captureProgressRef.current = captureProgress; }, [captureProgress]);
+  const [score, setScore] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  const scoreRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  useEffect(() => { scoreRef.current = score; }, [score]);
   // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
@@ -337,6 +337,29 @@ export const GameCanvas: React.FC = () => {
   const commandPointsRef = useRef<CommandPoints>(makeInitialCommandPoints());
   const [commandPoints, setCommandPoints] = useState<CommandPoints>(makeInitialCommandPoints());
   const [brokeFlash, setBrokeFlash] = useState<{ red: boolean; blue: boolean }>({ red: false, blue: false });
+
+  // Runtime-tunable CP economy (defaults from command-points.json). `cpMax` is the CP
+  // capacity: it's both the starting/reset pool AND the regen cap (one number sets start
+  // + max). `cpRegenTicks` is the gain rate (1 CP every N ticks). Mirrored into refs so
+  // the long-lived tick loop and the reset callbacks read current values.
+  const [cpMax, setCpMaxState] = useState(CP_CAP);
+  const [cpRegenN, setCpRegenNState] = useState(CP_REGEN_N);
+  const cpMaxRef = useRef(CP_CAP);
+  const cpRegenRef = useRef(CP_REGEN_N);
+  const setCpMax = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(999, Math.round(v || 0)));
+    cpMaxRef.current = clamped;
+    setCpMaxState(clamped);
+    // Also the cap, so start both teams full at it (visible immediately).
+    const next: CommandPoints = { red: clamped, blue: clamped };
+    commandPointsRef.current = next;
+    setCommandPoints(next);
+  }, []);
+  const setCpRegenN = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(50, Math.round(v || 0)));
+    cpRegenRef.current = clamped;
+    setCpRegenNState(clamped);
+  }, []);
 
   const canAfford = useCallback((team: Team, intent: CpIntent): boolean => {
     return canAffordPure(commandPointsRef.current, team, intent);
@@ -456,20 +479,22 @@ export const GameCanvas: React.FC = () => {
     armiesRef,
     groupOrdersRef,
     gridDataRef,
-    captureProgressRef,
+    scoreRef,
     tickCounterRef,
-    lastTickHadBothTeamsRef,
     projectilesGfx,
     javelinTextureRef,
     issueOrder,
     clearOrder,
     setArmies,
     setGroupOrders,
-    setCaptureProgress,
+    setScore,
+    setRosters,
     setWinBanner,
     setIsBattleRunning,
     commandPointsRef,
     setCommandPoints,
+    cpRegenRef,
+    cpMaxRef,
   };
   useBattleTick(battleCtx, isBattleRunning);
 
@@ -626,13 +651,12 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints();
-    setCommandPoints(makeInitialCommandPoints());
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const returnToStrategic = useCallback(() => {
@@ -645,13 +669,12 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints();
-    setCommandPoints(makeInitialCommandPoints());
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const regenerateWorld = useCallback(() => {
@@ -664,13 +687,12 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints();
-    setCommandPoints(makeInitialCommandPoints());
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
     generateWorldData();
   }, [generateWorldData]);
 
@@ -721,7 +743,7 @@ export const GameCanvas: React.FC = () => {
       inputMode={inputMode}
       winBanner={winBanner}
       isBattleRunning={isBattleRunning}
-      captureProgress={captureProgress}
+      score={score}
       currentStrategicHex={currentStrategicHex}
       armies={armies}
       groupOrders={groupOrders}
@@ -749,6 +771,10 @@ export const GameCanvas: React.FC = () => {
       commandPoints={commandPoints}
       brokeFlash={brokeFlash}
       canAfford={canAfford}
+      cpMax={cpMax}
+      cpRegenN={cpRegenN}
+      setCpMax={setCpMax}
+      setCpRegenN={setCpRegenN}
     />
   );
 };

@@ -5,11 +5,11 @@ import type { OrderMode, FormationType, Team, GroupId, UnitType } from '../battl
 import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '../battle/simulate';
 import type { InputMode, Armies, GroupOrders, GroupFormations, Rosters } from './constants';
 import {
-  CAPTURE_TICKS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
+  POINTS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
   FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
-import { CP_CAP, CP_COSTS, type CpIntent } from '../battle/command-points';
+import { CP_COSTS, type CpIntent } from '../battle/command-points';
 
 export interface HUDProps {
   // ref
@@ -23,7 +23,7 @@ export interface HUDProps {
   winBanner: Team | null;
   // battle state
   isBattleRunning: boolean;
-  captureProgress: { red: number; blue: number };
+  score: { red: number; blue: number };
   currentStrategicHex: Hex | null;
   armies: Armies;
   groupOrders: GroupOrders;
@@ -36,6 +36,10 @@ export interface HUDProps {
   commandPoints: { red: number; blue: number };
   brokeFlash: { red: boolean; blue: boolean };
   canAfford: (team: Team, intent: CpIntent) => boolean;
+  cpMax: number;
+  cpRegenN: number;
+  setCpMax: (v: number) => void;
+  setCpRegenN: (v: number) => void;
   // computed
   curT: TerrainDef | null;
   // setters
@@ -75,6 +79,13 @@ const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affor
   );
 };
 
+const cpInputStyle: React.CSSProperties = {
+  width: '40px', marginLeft: '4px', padding: '2px 4px',
+  background: 'rgba(0,0,0,0.5)', color: '#f8fafc',
+  border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px',
+  fontSize: '11px', fontWeight: 800, textAlign: 'center',
+};
+
 export const HUD: React.FC<HUDProps> = ({
   containerRef,
   viewMode,
@@ -84,7 +95,7 @@ export const HUD: React.FC<HUDProps> = ({
   inputMode,
   winBanner,
   isBattleRunning,
-  captureProgress,
+  score,
   currentStrategicHex,
   armies,
   groupOrders,
@@ -96,6 +107,10 @@ export const HUD: React.FC<HUDProps> = ({
   commandPoints,
   brokeFlash,
   canAfford,
+  cpMax,
+  cpRegenN,
+  setCpMax,
+  setCpRegenN,
   curT,
   setIsScanning,
   setShowGrid,
@@ -151,8 +166,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* Capture progress strip — top-centre. Two bars race to CAPTURE_TICKS_TO_WIN.
-          Only visible once a battle is in progress (currentStrategicHex is set). */}
+      {/* Victory-points strip — top-centre. Two bars race to POINTS_TO_WIN; visible once a battle is in progress. */}
       {viewMode === 'TACTICAL' && currentStrategicHex && (
         <div style={{
           position: 'absolute',
@@ -172,11 +186,11 @@ export const HUD: React.FC<HUDProps> = ({
             fontSize: '10px', color: '#facc15', fontWeight: 800, letterSpacing: '2px',
             marginBottom: '8px', textAlign: 'center',
           }}>
-            HOLD THE CENTRE — {CAPTURE_TICKS_TO_WIN} TICKS
+            VICTORY POINTS — FIRST TO {POINTS_TO_WIN}
           </div>
           {(['red', 'blue'] as const).map(team => {
-            const v = captureProgress[team];
-            const pct = (v / CAPTURE_TICKS_TO_WIN) * 100;
+            const v = score[team];
+            const pct = Math.min(100, (v / POINTS_TO_WIN) * 100);
             const color = team === 'red' ? '#ef4444' : '#3b82f6';
             return (
               <div key={team} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: team === 'red' ? '6px' : 0 }}>
@@ -189,8 +203,8 @@ export const HUD: React.FC<HUDProps> = ({
                 }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 0.3s ease' }} />
                 </div>
-                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '34px', textAlign: 'right' }}>
-                  {v}/{CAPTURE_TICKS_TO_WIN}
+                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right' }}>
+                  {Math.round(v)}/{POINTS_TO_WIN}
                 </span>
               </div>
             );
@@ -221,7 +235,7 @@ export const HUD: React.FC<HUDProps> = ({
           }}>COMMAND POINTS</div>
           {(['red', 'blue'] as const).map(team => {
             const v = commandPoints[team];
-            const pct = (v / CP_CAP) * 100;
+            const pct = Math.min(100, (v / cpMax) * 100);
             const baseColor = team === 'red' ? '#ef4444' : '#3b82f6';
             const flashing = brokeFlash[team];
             return (
@@ -248,10 +262,34 @@ export const HUD: React.FC<HUDProps> = ({
                 </div>
                 <span style={{
                   fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right',
-                }}>{v}/{CP_CAP}</span>
+                }}>{Math.floor(v)}/{cpMax}</span>
               </div>
             );
           })}
+          {/* Simple CP economy config — interactive (parent strip is pointerEvents:none). */}
+          <div style={{
+            display: 'flex', gap: '16px', justifyContent: 'center',
+            marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)',
+            pointerEvents: 'auto',
+          }}>
+            <label
+              title="CP capacity: both teams start full at this and regen is capped to it (applied immediately)"
+              style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.5px', display: 'flex', alignItems: 'center' }}
+            >
+              MAX
+              <input type="number" min={1} max={999} value={cpMax}
+                onChange={e => setCpMax(Number(e.target.value))} style={cpInputStyle} />
+            </label>
+            <label
+              title="Gain rate: each team gains 0.1 × n CP per tick (higher = faster). Applies live."
+              style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.5px', display: 'flex', alignItems: 'center' }}
+            >
+              REGEN
+              <input type="number" min={1} max={50} value={cpRegenN}
+                onChange={e => setCpRegenN(Number(e.target.value))} style={cpInputStyle} />
+              <span style={{ marginLeft: '3px', color: '#64748b' }}>×0.1/t</span>
+            </label>
+          </div>
         </div>
       )}
 
@@ -688,7 +726,7 @@ export const HUD: React.FC<HUDProps> = ({
         )}
 
         {/* RESET BATTLE — wipe all units on the current tactical map, restore both
-            rosters, clear orders + capture progress + winBanner. Keeps the world and
+            rosters, clear orders + score + winBanner. Keeps the world and
             view; for replaying the same map without regenerating terrain. */}
         {viewMode === 'TACTICAL' && (
           <button

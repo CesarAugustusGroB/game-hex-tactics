@@ -394,6 +394,18 @@ But mipmap alone doesn't solve "145 tiny pixelated soldiers read as a smear." At
 
 - **The defend formation algorithm has 6 distinct steps**: blob BFS → border filter (by `defendFrom`) → segment BFS from anchor (barrier-aware) → rank BFS (now including back-rank extension when surplus exists) → perimeter walk for rank-0 slotIndex → slotIndex inheritance for deeper ranks → sort allSlots by (rank, slotIndex, key) → pair sorted units to first-N slots. If you're modifying this, do one step at a time; the interactions are tricky.
 
+## Victory points & scoring (`feature/systems`)
+
+The win condition changed from a single "hold the centre" tug-of-war to a victory-points race (`src/battle/scoring.ts` pure `scoreTick`, tunables in `src/data/scoring.json`): a living unit reaching the **enemy** deploy zone scores a point and a unit holding the centre uncontested accrues points per tick; first team to `pointsToWin` (default 100) wins. Two non-obvious things came out of it.
+
+### "No units on the field" is not a loss — raid-and-return makes it normal
+
+A unit that reaches the enemy back line doesn't just score; it **leaves the field and returns to that team's roster** (raid & return — `scoreTick` puts it in `reachedUnitIds`, the tick filters it out of `survivors`, and `setRosters` adds it back). So a team can legitimately have zero units on the map mid-battle while sitting on a full roster, about to redeploy. The old annihilation fallback ("one team has no units left → declare the other the winner") therefore became actively wrong — it would call a winner during a routine raid lull. We removed it: **victory is points-only.** A stalemate (neither side reaching the threshold) just continues; the player pauses/resets. Lesson: when you add a mechanic that makes a unit legitimately vanish from the board, audit every "board is empty / one side is empty" terminal check — they were written assuming presence-on-board equals alive-in-game, and that equivalence no longer holds.
+
+### Single-scoring relies on a sub-`TICK_MS` React-flush timing invariant
+
+The tick reads its units from `armiesRef.current`, but `armiesRef` is only ever written by the async mirror effect (`useEffect(() => { armiesRef.current = armies }, [armies])` in `GameCanvas.tsx`). A reached unit is removed only via `setArmies(survivors)` — also async. Meanwhile `scoreRef.current` is updated **synchronously** in the tick. So the no-double-count guarantee rests entirely on React committing the `setArmies` update *and* running the mirror effect within one `TICK_MS` window (500 ms): if two interval callbacks ever ran before the flush, the same unit would still be in `armiesRef`, sit in the enemy zone again, and score a second time (score advances synchronously, board lags). At 500 ms ticks this never happens, and it's the same `setArmies → armiesRef` removal path that `retreat` already relies on safely — but it's load-bearing and silent. There's a WHY comment at the `survivors` filter in `useBattleTick.ts` flagging it. Lesson: when correctness depends on an async state-setter winning a race against a timer, and a sibling ref updates synchronously, the asymmetry is a real invariant — document it at the site, or a future "let's lower the tick interval" / "let's batch differently" change silently reintroduces the bug.
+
 ## Known limitations (deferred — see PLAN.md)
 
 - Combat depth (F1): one-line damage formula. No unit types, no flanking, no terrain modifiers, no morale. Roman vs hoplite is cosmetic only.

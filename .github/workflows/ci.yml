@@ -22,3 +22,5 @@ jobs:
       - run: npm run sim
       # Command Points — assertion-based, exits non-zero on any failed check.
       - run: npm run test:cp
+      # Victory-points scoring — assertion-based, exits non-zero on any failed check.
+      - run: npm run test:scoring
