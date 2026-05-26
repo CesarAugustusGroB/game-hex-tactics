@@ -9,7 +9,7 @@ import {
   FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
-import { CP_CAP, CP_COSTS, type CpIntent } from '../battle/command-points';
+import { CP_COSTS, type CpIntent } from '../battle/command-points';
 
 export interface HUDProps {
   // ref
@@ -36,9 +36,9 @@ export interface HUDProps {
   commandPoints: { red: number; blue: number };
   brokeFlash: { red: boolean; blue: boolean };
   canAfford: (team: Team, intent: CpIntent) => boolean;
-  cpInitial: number;
+  cpMax: number;
   cpRegenTicks: number;
-  setCpInitial: (v: number) => void;
+  setCpMax: (v: number) => void;
   setCpRegenTicks: (v: number) => void;
   // computed
   curT: TerrainDef | null;
@@ -107,9 +107,9 @@ export const HUD: React.FC<HUDProps> = ({
   commandPoints,
   brokeFlash,
   canAfford,
-  cpInitial,
+  cpMax,
   cpRegenTicks,
-  setCpInitial,
+  setCpMax,
   setCpRegenTicks,
   curT,
   setIsScanning,
@@ -235,7 +235,7 @@ export const HUD: React.FC<HUDProps> = ({
           }}>COMMAND POINTS</div>
           {(['red', 'blue'] as const).map(team => {
             const v = commandPoints[team];
-            const pct = (v / CP_CAP) * 100;
+            const pct = Math.min(100, (v / cpMax) * 100);
             const baseColor = team === 'red' ? '#ef4444' : '#3b82f6';
             const flashing = brokeFlash[team];
             return (
@@ -262,7 +262,7 @@ export const HUD: React.FC<HUDProps> = ({
                 </div>
                 <span style={{
                   fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right',
-                }}>{v}/{CP_CAP}</span>
+                }}>{v}/{cpMax}</span>
               </div>
             );
           })}
@@ -273,12 +273,12 @@ export const HUD: React.FC<HUDProps> = ({
             pointerEvents: 'auto',
           }}>
             <label
-              title="Starting / reset CP for both teams (applied immediately)"
+              title="CP capacity: both teams start full at this and regen is capped to it (applied immediately)"
               style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.5px', display: 'flex', alignItems: 'center' }}
             >
-              INIT
-              <input type="number" min={0} max={CP_CAP} value={cpInitial}
-                onChange={e => setCpInitial(Number(e.target.value))} style={cpInputStyle} />
+              MAX
+              <input type="number" min={1} max={999} value={cpMax}
+                onChange={e => setCpMax(Number(e.target.value))} style={cpInputStyle} />
             </label>
             <label
               title="Gain rate: 1 CP every N ticks (lower = faster). Applies live."

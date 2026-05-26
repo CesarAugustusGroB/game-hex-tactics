@@ -17,7 +17,7 @@ import {
 import {
   type CommandPoints, type CpIntent,
   makeInitialCommandPoints, debit, canAfford as canAffordPure,
-  CP_CAP, CP_INITIAL, CP_REGEN_PER_N_TICKS,
+  CP_CAP, CP_REGEN_PER_N_TICKS,
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
@@ -335,24 +335,25 @@ export const GameCanvas: React.FC = () => {
   const [commandPoints, setCommandPoints] = useState<CommandPoints>(makeInitialCommandPoints());
   const [brokeFlash, setBrokeFlash] = useState<{ red: boolean; blue: boolean }>({ red: false, blue: false });
 
-  // Runtime-tunable CP economy (defaults from command-points.json). `cpInitial` is the
-  // starting/reset pool; `cpRegenTicks` is the gain rate (1 CP every N ticks). Mirrored
-  // into refs so the long-lived tick loop and the reset callbacks read current values.
-  const [cpInitial, setCpInitialState] = useState(CP_INITIAL);
+  // Runtime-tunable CP economy (defaults from command-points.json). `cpMax` is the CP
+  // capacity: it's both the starting/reset pool AND the regen cap (one number sets start
+  // + max). `cpRegenTicks` is the gain rate (1 CP every N ticks). Mirrored into refs so
+  // the long-lived tick loop and the reset callbacks read current values.
+  const [cpMax, setCpMaxState] = useState(CP_CAP);
   const [cpRegenTicks, setCpRegenTicksState] = useState(CP_REGEN_PER_N_TICKS);
-  const cpInitialRef = useRef(CP_INITIAL);
+  const cpMaxRef = useRef(CP_CAP);
   const cpRegenTicksRef = useRef(CP_REGEN_PER_N_TICKS);
-  const setCpInitial = useCallback((v: number) => {
-    const clamped = Math.max(0, Math.min(CP_CAP, Math.round(v)));
-    cpInitialRef.current = clamped;
-    setCpInitialState(clamped);
-    // Apply immediately to both teams' current pool so the change is visible.
+  const setCpMax = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(999, Math.round(v || 0)));
+    cpMaxRef.current = clamped;
+    setCpMaxState(clamped);
+    // Also the cap, so start both teams full at it (visible immediately).
     const next: CommandPoints = { red: clamped, blue: clamped };
     commandPointsRef.current = next;
     setCommandPoints(next);
   }, []);
   const setCpRegenTicks = useCallback((v: number) => {
-    const clamped = Math.max(1, Math.min(60, Math.round(v)));
+    const clamped = Math.max(1, Math.min(60, Math.round(v || 0)));
     cpRegenTicksRef.current = clamped;
     setCpRegenTicksState(clamped);
   }, []);
@@ -489,6 +490,7 @@ export const GameCanvas: React.FC = () => {
     commandPointsRef,
     setCommandPoints,
     cpRegenTicksRef,
+    cpMaxRef,
   };
   useBattleTick(battleCtx, isBattleRunning);
 
@@ -649,8 +651,8 @@ export const GameCanvas: React.FC = () => {
     scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints(cpInitialRef.current);
-    setCommandPoints(makeInitialCommandPoints(cpInitialRef.current));
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const returnToStrategic = useCallback(() => {
@@ -667,8 +669,8 @@ export const GameCanvas: React.FC = () => {
     scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints(cpInitialRef.current);
-    setCommandPoints(makeInitialCommandPoints(cpInitialRef.current));
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const regenerateWorld = useCallback(() => {
@@ -685,8 +687,8 @@ export const GameCanvas: React.FC = () => {
     scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints(cpInitialRef.current);
-    setCommandPoints(makeInitialCommandPoints(cpInitialRef.current));
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
     generateWorldData();
   }, [generateWorldData]);
 
@@ -765,9 +767,9 @@ export const GameCanvas: React.FC = () => {
       commandPoints={commandPoints}
       brokeFlash={brokeFlash}
       canAfford={canAfford}
-      cpInitial={cpInitial}
+      cpMax={cpMax}
       cpRegenTicks={cpRegenTicks}
-      setCpInitial={setCpInitial}
+      setCpMax={setCpMax}
       setCpRegenTicks={setCpRegenTicks}
     />
   );
