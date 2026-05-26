@@ -535,6 +535,13 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       containers.forEach(cont => {
         gsap.killTweensOf(cont);
         gsap.killTweensOf(cont.position);
+        // Children carry tweens too (the unit-sprite's melee lunge) — kill them or GSAP
+        // updates a freed object and throws after app.destroy.
+        for (const child of cont.children) {
+          gsap.killTweensOf(child);
+          gsap.killTweensOf((child as PIXI.Container).position);
+          gsap.killTweensOf((child as PIXI.Container).scale);
+        }
       });
       containers.clear();
       for (const child of ctx.projectilesGfx.current.children) {

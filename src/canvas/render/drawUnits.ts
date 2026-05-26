@@ -154,11 +154,23 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const c = ctx.unitsGfx;
   const armyTex = ctx.armyTexture;
 
-  // Kill GSAP tweens before destroy so they don't touch a freed object next frame.
+  // Kill EVERY GSAP tween bound to a unit before destroy. Killing only the container +
+  // its position MISSED the children — the unit-sprite carries the melee lunge tween, and
+  // a surviving tween keeps setting .x/.y on a freed (null) object every frame, throwing
+  // inside GSAP's rAF. One such throw aborts that frame's whole tween pass → ALL units
+  // freeze for a frame and then jump = the "teleport". Children must be killed too.
+  const killUnitTweens = (cont: PIXI.Container) => {
+    gsap.killTweensOf(cont);
+    gsap.killTweensOf(cont.position);
+    for (const child of cont.children) {
+      gsap.killTweensOf(child);
+      gsap.killTweensOf((child as PIXI.Container).position);
+      gsap.killTweensOf((child as PIXI.Container).scale);
+    }
+  };
   const destroyAllUnitContainers = () => {
     ctx.unitContainers.forEach(cont => {
-      gsap.killTweensOf(cont);
-      gsap.killTweensOf(cont.position);
+      killUnitTweens(cont);
       cont.destroy({ children: true });
     });
     ctx.unitContainers.clear();
@@ -198,8 +210,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const wantedIds = new Set(units.map(u => u.id));
   ctx.unitContainers.forEach((cont, id) => {
     if (!wantedIds.has(id)) {
-      gsap.killTweensOf(cont);
-      gsap.killTweensOf(cont.position);
+      killUnitTweens(cont);
       cont.destroy({ children: true });
       ctx.unitContainers.delete(id);
     }
@@ -266,6 +277,12 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     const teamColor = TEAM_TINTS[u.team];
 
     let container = ctx.unitContainers.get(u.id) as UnitContainer | undefined;
+    // Defensive: a destroyed container left in the map has a null .position; tweening it
+    // throws inside GSAP's rAF. Drop it and rebuild fresh.
+    if (container?.destroyed) {
+      ctx.unitContainers.delete(u.id);
+      container = undefined;
+    }
     if (!container) {
       container = new PIXI.Container() as UnitContainer;
       container.label = 'unit-container';
