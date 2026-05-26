@@ -10,6 +10,8 @@ import {
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
 import { CP_CAP, CP_COSTS, type CpIntent } from '../battle/command-points';
+import { MAP_TYPE_IDS, type MapTypeId } from '../data/world-gen';
+import type { MapTypeChoice } from './world-gen';
 
 export interface HUDProps {
   // ref
@@ -55,7 +57,23 @@ export interface HUDProps {
   resetBattle: () => void;
   returnToStrategic: () => void;
   regenerateWorld: () => void;
+  // world-gen
+  mapTypeChoice: MapTypeChoice;
+  resolvedMapType: MapTypeId;
+  seed: number;
+  setMapTypeChoice: (c: MapTypeChoice) => void;
+  setSeed: (n: number) => void;
+  rerollSeed: () => void;
 }
+
+const MAP_TYPE_LABELS: Record<string, string> = {
+  island: 'ISLAND',
+  coastline: 'COAST',
+  archipelago: 'ISLES',
+  plains: 'PLAINS',
+  inlandSea: 'INLAND SEA',
+  random: 'RANDOM',
+};
 
 const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affordable }) => {
   if (cost === 0) return null;
@@ -112,6 +130,12 @@ export const HUD: React.FC<HUDProps> = ({
   resetBattle,
   returnToStrategic,
   regenerateWorld,
+  mapTypeChoice,
+  resolvedMapType,
+  seed,
+  setMapTypeChoice,
+  setSeed,
+  rerollSeed,
 }) => {
   const isPlacing = inputMode === 'place';
 
@@ -702,6 +726,55 @@ export const HUD: React.FC<HUDProps> = ({
           style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '32px' }}
         >RETURN TO STRATEGIC OVERVIEW</button>
 
+        {viewMode === 'STRATEGIC' && (
+          <div style={{ background: 'rgba(0,0,0,0.4)', padding: '16px', borderRadius: '16px', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
+              WORLD TYPE{mapTypeChoice === 'random' ? ` → ${MAP_TYPE_LABELS[resolvedMapType]}` : ''}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+              {([...MAP_TYPE_IDS, 'random'] as MapTypeChoice[]).map(choice => {
+                const active = mapTypeChoice === choice;
+                return (
+                  <button
+                    key={choice}
+                    onClick={() => setMapTypeChoice(choice)}
+                    style={{
+                      flex: '1 0 30%', padding: '8px 4px', borderRadius: '8px',
+                      fontSize: '10px', fontWeight: 800, letterSpacing: '0.5px',
+                      background: active ? '#10b981' : 'rgba(255,255,255,0.04)',
+                      color: active ? 'white' : '#94a3b8',
+                      border: active ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                      cursor: 'pointer', transition: '0.2s',
+                    }}
+                  >
+                    {MAP_TYPE_LABELS[choice]}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700 }}>SEED</span>
+              <input
+                type="number"
+                value={seed}
+                onChange={e => setSeed(Number(e.target.value) >>> 0)}
+                style={{
+                  flex: 1, minWidth: 0, padding: '8px', borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                  border: '1px solid rgba(255,255,255,0.1)', fontSize: '11px', fontWeight: 700,
+                }}
+              />
+              <button
+                onClick={rerollSeed}
+                title="New random seed + regenerate"
+                style={{
+                  padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.04)', color: '#94a3b8', cursor: 'pointer', fontSize: '13px',
+                }}
+              >🎲</button>
+            </div>
+          </div>
+        )}
         <button onClick={regenerateWorld} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
           REGENERATE ECOSYSTEM
         </button>

@@ -21,7 +21,7 @@ import {
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
 import { HUD } from '../canvas/HUD';
-import { generateWorldData as generateWorldDataPure, type GenSettings } from '../canvas/world-gen';
+import { generateWorldData as generateWorldDataPure, resolveMapType, type GenSettings, type MapTypeChoice } from '../canvas/world-gen';
 import { drawTerrain } from '../canvas/render/drawTerrain';
 import { drawDetails as drawDetailsRender } from '../canvas/render/drawDetails';
 import { drawUnits as drawUnitsRender } from '../canvas/render/drawUnits';
@@ -30,7 +30,9 @@ import { useGlobalShortcuts } from '../canvas/input/useGlobalShortcuts';
 import { type OrderDrag } from '../canvas/input/orderDrag';
 import { usePixiApp, type PixiAppCtx } from '../canvas/PixiApp';
 import { useBattleTick, type BattleTickCtx } from '../canvas/useBattleTick';
-import { GRID_RADIUS, DEFAULT_GEN_SETTINGS } from '../data/world-gen';
+import { GRID_RADIUS, DEFAULT_MAP_TYPE, type MapTypeId } from '../data/world-gen';
+
+const INITIAL_SEED = Math.floor(Math.random() * 0x100000000);
 
 export const GameCanvas: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,7 +60,6 @@ export const GameCanvas: React.FC = () => {
   const unitContainersRef = useRef<Map<string, PIXI.Container>>(new Map());
   const previewGfx = useRef<PIXI.Container>(new PIXI.Container());
   
-  const noiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
   // Separate noise instance for scatter-detail density so its zones don't align with
   // terrain features.
   const detailDensityNoiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
@@ -133,8 +134,12 @@ export const GameCanvas: React.FC = () => {
   // drawMap reads it via deps so the map redraws once textures are ready.
   const [terrainTexturesLoaded, setTerrainTexturesLoaded] = useState(false);
   const [fogOfWar, setFogOfWar] = useState(false);
+  const [mapTypeChoice, setMapTypeChoice] = useState<MapTypeChoice>(DEFAULT_MAP_TYPE);
+  const [resolvedMapType, setResolvedMapType] = useState<MapTypeId>(DEFAULT_MAP_TYPE);
+  const [seed, setSeed] = useState<number>(INITIAL_SEED);
   const [genSettings, setSettings] = useState<GenSettings>({
-    ...DEFAULT_GEN_SETTINGS,
+    mapType: DEFAULT_MAP_TYPE,
+    seed: INITIAL_SEED,
     noiseOffset: { q: 0, r: 0 },
     resolution: STRATEGIC_RESOLUTION,
   });
@@ -143,13 +148,11 @@ export const GameCanvas: React.FC = () => {
 
   // --- Smooth Tactical Generator ---
   const generateWorldData = useCallback(() => {
-    if (!noiseRef.current) noiseRef.current = createNoise2D();
     if (!detailDensityNoiseRef.current) detailDensityNoiseRef.current = createNoise2D();
     const { gridData } = generateWorldDataPure({
       settings: genSettings,
       gridRadius,
       viewMode,
-      noise: noiseRef.current,
     });
     setGridData(gridData);
   }, [genSettings, gridRadius, viewMode]);
@@ -650,8 +653,12 @@ export const GameCanvas: React.FC = () => {
     setCommandPoints(makeInitialCommandPoints());
   }, []);
 
-  const regenerateWorld = useCallback(() => {
-    noiseRef.current = null;
+  const regenerateWith = useCallback((nextSeed: number, choice: MapTypeChoice) => {
+    const resolved = resolveMapType(choice, nextSeed);
+    setResolvedMapType(resolved);
+    setSeed(nextSeed);
+    setMapTypeChoice(choice);
+    setSettings(s => ({ ...s, mapType: resolved, seed: nextSeed }));
     setArmies(new Map());
     setCurrentStrategicHex(null);
     setInputMode(null);
@@ -667,8 +674,10 @@ export const GameCanvas: React.FC = () => {
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints();
     setCommandPoints(makeInitialCommandPoints());
-    generateWorldData();
-  }, [generateWorldData]);
+  }, []);
+
+  const regenerateWorld = useCallback(() => regenerateWith(seed, mapTypeChoice), [regenerateWith, seed, mapTypeChoice]);
+  const rerollSeed = useCallback(() => regenerateWith(Math.floor(Math.random() * 0x100000000), mapTypeChoice), [regenerateWith, mapTypeChoice]);
 
   useTacticalKeyboard({
     viewMode, selectedGroupRef, selectedTeamRef, currentStrategicHexRef, armiesRef,
@@ -745,6 +754,12 @@ export const GameCanvas: React.FC = () => {
       commandPoints={commandPoints}
       brokeFlash={brokeFlash}
       canAfford={canAfford}
+      mapTypeChoice={mapTypeChoice}
+      resolvedMapType={resolvedMapType}
+      seed={seed}
+      setMapTypeChoice={setMapTypeChoice}
+      setSeed={setSeed}
+      rerollSeed={rerollSeed}
     />
   );
 };
