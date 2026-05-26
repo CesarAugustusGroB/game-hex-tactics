@@ -1,6 +1,32 @@
 import { createNoise2D } from 'simplex-noise';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import { WORLD_GEN, DIVE_ZOOM } from '../data/world-gen';
+import { WORLD_GEN, DIVE_ZOOM, MAP_TYPES, MAP_TYPE_IDS, DEFAULT_MAP_TYPE, type MapTypeId, type ShapePrimitive } from '../data/world-gen';
+import { mulberry32 } from '../utils/rng';
+
+export interface ShapeCtx {
+  gridRadius: number;
+  intercept: number;
+  exponent: number;
+  coastAngle: number; // radians; seed-derived, used by the 'linear' primitive
+}
+
+// Elevation-shaping multiplier per macro-shape archetype. Multiplies the
+// normalized [0,1] noise elevation before bucketing. `radial` is byte-identical
+// to the original island falloff.
+export function shapeMult(shape: ShapePrimitive, q: number, r: number, ctx: ShapeCtx): number {
+  if (shape === 'flat') return 1;
+  if (shape === 'linear') {
+    const proj = q * Math.cos(ctx.coastAngle) + r * Math.sin(ctx.coastAngle);
+    const tNorm = Math.min(1, Math.max(0, (proj / ctx.gridRadius + 1) / 2));
+    return Math.max(0, ctx.intercept - Math.pow(1 - tNorm, ctx.exponent));
+  }
+  const d = Math.sqrt(q * q + r * r + q * r) / ctx.gridRadius;
+  if (shape === 'invertedRadial') {
+    return Math.max(0, ctx.intercept - Math.pow(1 - Math.min(1, d), ctx.exponent));
+  }
+  // radial
+  return Math.max(0, ctx.intercept - Math.pow(d, ctx.exponent));
+}
 
 export interface GenSettings {
   waterLevel: number;
