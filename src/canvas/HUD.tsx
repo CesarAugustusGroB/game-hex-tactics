@@ -37,9 +37,9 @@ export interface HUDProps {
   brokeFlash: { red: boolean; blue: boolean };
   canAfford: (team: Team, intent: CpIntent) => boolean;
   cpMax: number;
-  cpRegenTicks: number;
+  cpRegenN: number;
   setCpMax: (v: number) => void;
-  setCpRegenTicks: (v: number) => void;
+  setCpRegenN: (v: number) => void;
   // computed
   curT: TerrainDef | null;
   // setters
@@ -108,9 +108,9 @@ export const HUD: React.FC<HUDProps> = ({
   brokeFlash,
   canAfford,
   cpMax,
-  cpRegenTicks,
+  cpRegenN,
   setCpMax,
-  setCpRegenTicks,
+  setCpRegenN,
   curT,
   setIsScanning,
   setShowGrid,
@@ -262,7 +262,7 @@ export const HUD: React.FC<HUDProps> = ({
                 </div>
                 <span style={{
                   fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right',
-                }}>{v}/{cpMax}</span>
+                }}>{Math.floor(v)}/{cpMax}</span>
               </div>
             );
           })}
@@ -281,13 +281,13 @@ export const HUD: React.FC<HUDProps> = ({
                 onChange={e => setCpMax(Number(e.target.value))} style={cpInputStyle} />
             </label>
             <label
-              title="Gain rate: 1 CP every N ticks (lower = faster). Applies live."
+              title="Gain rate: each team gains 0.1 × n CP per tick (higher = faster). Applies live."
               style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.5px', display: 'flex', alignItems: 'center' }}
             >
-              REGEN 1/
-              <input type="number" min={1} max={60} value={cpRegenTicks}
-                onChange={e => setCpRegenTicks(Number(e.target.value))} style={cpInputStyle} />
-              <span style={{ marginLeft: '3px', color: '#64748b' }}>t</span>
+              REGEN
+              <input type="number" min={1} max={50} value={cpRegenN}
+                onChange={e => setCpRegenN(Number(e.target.value))} style={cpInputStyle} />
+              <span style={{ marginLeft: '3px', color: '#64748b' }}>×0.1/t</span>
             </label>
           </div>
         </div>

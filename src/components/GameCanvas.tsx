@@ -17,7 +17,7 @@ import {
 import {
   type CommandPoints, type CpIntent,
   makeInitialCommandPoints, debit, canAfford as canAffordPure,
-  CP_CAP, CP_REGEN_PER_N_TICKS,
+  CP_CAP, CP_REGEN_N,
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
@@ -340,9 +340,9 @@ export const GameCanvas: React.FC = () => {
   // + max). `cpRegenTicks` is the gain rate (1 CP every N ticks). Mirrored into refs so
   // the long-lived tick loop and the reset callbacks read current values.
   const [cpMax, setCpMaxState] = useState(CP_CAP);
-  const [cpRegenTicks, setCpRegenTicksState] = useState(CP_REGEN_PER_N_TICKS);
+  const [cpRegenN, setCpRegenNState] = useState(CP_REGEN_N);
   const cpMaxRef = useRef(CP_CAP);
-  const cpRegenTicksRef = useRef(CP_REGEN_PER_N_TICKS);
+  const cpRegenRef = useRef(CP_REGEN_N);
   const setCpMax = useCallback((v: number) => {
     const clamped = Math.max(1, Math.min(999, Math.round(v || 0)));
     cpMaxRef.current = clamped;
@@ -352,10 +352,10 @@ export const GameCanvas: React.FC = () => {
     commandPointsRef.current = next;
     setCommandPoints(next);
   }, []);
-  const setCpRegenTicks = useCallback((v: number) => {
-    const clamped = Math.max(1, Math.min(60, Math.round(v || 0)));
-    cpRegenTicksRef.current = clamped;
-    setCpRegenTicksState(clamped);
+  const setCpRegenN = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(50, Math.round(v || 0)));
+    cpRegenRef.current = clamped;
+    setCpRegenNState(clamped);
   }, []);
 
   const canAfford = useCallback((team: Team, intent: CpIntent): boolean => {
@@ -489,7 +489,7 @@ export const GameCanvas: React.FC = () => {
     setIsBattleRunning,
     commandPointsRef,
     setCommandPoints,
-    cpRegenTicksRef,
+    cpRegenRef,
     cpMaxRef,
   };
   useBattleTick(battleCtx, isBattleRunning);
@@ -768,9 +768,9 @@ export const GameCanvas: React.FC = () => {
       brokeFlash={brokeFlash}
       canAfford={canAfford}
       cpMax={cpMax}
-      cpRegenTicks={cpRegenTicks}
+      cpRegenN={cpRegenN}
       setCpMax={setCpMax}
-      setCpRegenTicks={setCpRegenTicks}
+      setCpRegenN={setCpRegenN}
     />
   );
 };

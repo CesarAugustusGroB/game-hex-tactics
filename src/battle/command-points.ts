@@ -1,9 +1,9 @@
 import type { Team } from './simulate';
-import { CP_CAP, CP_INITIAL, CP_REGEN_PER_N_TICKS } from '../data/command-points';
+import { CP_CAP, CP_INITIAL, CP_REGEN_N, CP_REGEN_PER_TICK_STEP } from '../data/command-points';
 
-// Economy (cap / initial / regen rate) is tunable via src/data/command-points.json.
+// Economy (cap / initial / regen) is tunable via src/data/command-points.json.
 // Re-exported so existing consumers keep importing it from '../battle/command-points'.
-export { CP_CAP, CP_INITIAL, CP_REGEN_PER_N_TICKS };
+export { CP_CAP, CP_INITIAL, CP_REGEN_N, CP_REGEN_PER_TICK_STEP };
 
 export const CP_COSTS = {
   assign: 0,
@@ -41,12 +41,14 @@ export function debit(cp: CommandPoints, team: Team, intent: CpIntent): CommandP
   return { ...cp, [team]: cp[team] - cost };
 }
 
-/** Returns new CommandPoints with both teams incremented by 1 (clamped to CP_CAP)
- *  if `tick % regenPerNTicks === 0`. Otherwise returns the input unchanged. */
-export function applyRegen(cp: CommandPoints, tick: number, regenPerNTicks: number = CP_REGEN_PER_N_TICKS, cap: number = CP_CAP): CommandPoints {
-  if (tick === 0 || regenPerNTicks <= 0 || tick % regenPerNTicks !== 0) return cp;
-  const r = Math.min(cap, cp.red + 1);
-  const b = Math.min(cap, cp.blue + 1);
+/** Returns new CommandPoints with both teams gaining `amountPerTick` CP, clamped to `cap`.
+ *  Called every tick; CP accrues fractionally (rounded to 0.01 to avoid float drift).
+ *  Returns the input unchanged when nothing moves. */
+export function applyRegen(cp: CommandPoints, amountPerTick: number, cap: number = CP_CAP): CommandPoints {
+  if (amountPerTick <= 0) return cp;
+  const grow = (v: number) => Math.min(cap, Math.round((v + amountPerTick) * 100) / 100);
+  const r = grow(cp.red);
+  const b = grow(cp.blue);
   if (r === cp.red && b === cp.blue) return cp;
   return { red: r, blue: b };
 }

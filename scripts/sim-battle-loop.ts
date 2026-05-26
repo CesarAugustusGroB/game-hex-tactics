@@ -17,7 +17,7 @@ import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
 import { deployZoneFor, captureZoneKeys, groupOrderKey, COHORT_SIZE } from '../src/canvas/constants';
 import { TICK_MS } from '../src/data/game';
 import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK } from '../src/data/scoring';
-import { CP_CAP, CP_REGEN_PER_N_TICKS, CP_COSTS } from '../src/battle/command-points';
+import { CP_CAP, CP_REGEN_N, CP_REGEN_PER_TICK_STEP, CP_COSTS } from '../src/battle/command-points';
 
 const GRID_RADIUS = 35;
 
@@ -102,7 +102,7 @@ for (const type of ['infantry', 'cavalry', 'skirmisher'] as const) {
 }
 
 // --- Point-rate model ---
-const cpPerSec = (1 / CP_REGEN_PER_N_TICKS) * (1000 / TICK_MS); // CP regenerated per second
+const cpPerSec = CP_REGEN_PER_TICK_STEP * CP_REGEN_N * (1000 / TICK_MS); // CP regenerated per second (0.1·n per tick)
 const raidLaunchCP = CP_COSTS.placeCohort + CP_COSTS.march;     // deploy a cohort + order it to march
 console.log(`\nScoring config: pointsToWin=${POINTS_TO_WIN}  perUnitReached=${POINTS_PER_UNIT_REACHED}  centreHold=${CENTER_HOLD_POINTS_PER_TICK}/tick (${CENTER_HOLD_POINTS_PER_TICK * 1000 / TICK_MS}/s)`);
 console.log(`CP economy: cap=${CP_CAP}  regen=${cpPerSec.toFixed(2)} CP/s  raid launch cost=${raidLaunchCP} CP (placeCohort ${CP_COSTS.placeCohort} + march ${CP_COSTS.march})`);

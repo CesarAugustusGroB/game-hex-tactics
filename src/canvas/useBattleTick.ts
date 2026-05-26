@@ -8,7 +8,7 @@ import type { Team, GroupId } from '../battle/simulate';
 import { getAiController } from '../battle/ai';
 import type { OrderChange } from '../battle/ai';
 import { getTerrainMods } from '../battle/terrain';
-import { applyRegen, debit, type CommandPoints } from '../battle/command-points';
+import { applyRegen, debit, CP_REGEN_PER_TICK_STEP, type CommandPoints } from '../battle/command-points';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
   POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
@@ -41,7 +41,7 @@ export interface BattleTickCtx {
   setIsBattleRunning: Dispatch<SetStateAction<boolean>>;
   commandPointsRef: MutableRefObject<CommandPoints>;
   setCommandPoints: Dispatch<SetStateAction<CommandPoints>>;
-  cpRegenTicksRef: MutableRefObject<number>;
+  cpRegenRef: MutableRefObject<number>;
   cpMaxRef: MutableRefObject<number>;
 }
 
@@ -64,7 +64,7 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       };
       ctx.tickCounterRef.current += 1;
       const cpBefore = ctx.commandPointsRef.current;
-      const cpAfter = applyRegen(cpBefore, ctx.tickCounterRef.current, ctx.cpRegenTicksRef.current, ctx.cpMaxRef.current);
+      const cpAfter = applyRegen(cpBefore, CP_REGEN_PER_TICK_STEP * ctx.cpRegenRef.current, ctx.cpMaxRef.current);
       if (cpAfter !== cpBefore) {
         ctx.commandPointsRef.current = cpAfter;
         ctx.setCommandPoints(cpAfter);
