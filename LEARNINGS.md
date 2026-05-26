@@ -380,6 +380,14 @@ Mipmaps (`source.autoGenerateMipmaps = true`, then `updateMipmaps()`) pre-build 
 
 But mipmap alone doesn't solve "145 tiny pixelated soldiers read as a smear." At extreme zoom-out, no amount of filtering makes individual soldier features legible — they shouldn't be drawn at all. That's LOD's job. The two are complements, not alternatives.
 
+### Render groups + nested filters/masks: verify off-center, not just centered
+
+`world.enableRenderGroup()` moves the panned/zoomed world transform onto the GPU (pan/zoom no longer re-walks every descendant's world transform on the CPU). It's a near-free win for a big static scene — but it interacts with two things already living *inside* `world`: the water displacement filters (on the `deepSea`/`coastal` containers in `terrainOverlay`) and the per-biome hex masks. Filters + Graphics masks nested inside a render group is a combination with open bugs in the PIXI v8 line (#11577, #11607) where a filter's output frame / viewport can get computed relative to the render-group root instead of the screen — which makes the filtered content (here, the animated water) offset or vanish, but **only once the world is translated away from the origin or pushed to an extreme zoom**.
+
+The trap: a smoke test that just loads the page checks the world at its initial transform, where the render-group viewport and the screen happen to coincide — so the bug is invisible. To actually rule it out you must **pan the world far off-center and zoom to both extremes (≈0.05× and ≈6×)** and confirm the water is still present, masked to its hexes, correctly positioned, and animating. We did, and the water shader (which maps via the canonical `uOutputFrame`/`uOutputTexture` uniforms — see `water-filter.ts`) holds up; but the next person who adds a filter under `world` should re-run that off-center check, not trust a centered screenshot.
+
+Related: `cacheAsTexture` was deliberately *not* used to batch the static terrain/details. It rasterizes at the current resolution, and this world zooms freely 0.05×–6×, so a cache either blurs when you zoom in past it or — at HiDPI resolution over the whole `gridRadius=35` map — produces a texture near/over the 8192px GPU limit. The render group captures most of the CPU-transform benefit without rasterizing, so the scene stays vector-sharp at every zoom.
+
 ## Gotchas worth remembering
 
 - **Pointer events on `world.scale`**: gsap mutates `world.scale.x/y` directly during the dive animation. `zoom.current` is NOT updated mid-animation. Anything that needs the live zoom must read `world.scale.x`, not the ref.
