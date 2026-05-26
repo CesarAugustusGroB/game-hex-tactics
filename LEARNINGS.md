@@ -388,6 +388,16 @@ The trap: a smoke test that just loads the page checks the world at its initial 
 
 Related: `cacheAsTexture` was deliberately *not* used to batch the static terrain/details. It rasterizes at the current resolution, and this world zooms freely 0.05×–6×, so a cache either blurs when you zoom in past it or — at HiDPI resolution over the whole `gridRadius=35` map — produces a texture near/over the 8192px GPU limit. The render group captures most of the CPU-transform benefit without rasterizing, so the scene stays vector-sharp at every zoom.
 
+### Render groups don't flush GSAP-animated CHILD transforms per frame — so we removed it
+
+**Update: `world.enableRenderGroup()` was ultimately removed.** The off-center/filter check above passed, but a render group has a second, worse interaction we only caught once a real battle ran: it breaks the smooth per-frame motion of anything inside it that you animate with GSAP.
+
+A render group caches its draw-instruction set and re-uploads a child's transform only when the group **rebuilds** (on a structural change — child added/removed/reordered). Our unit containers and dust particles move by GSAP mutating `container.position` **every frame**, but the group only flushes those transforms to the GPU when it rebuilds — which here happens ≈once per tick (the attack-ring churn in `drawUnits` adds/removes children each tick). Net effect: units **jump once per tick instead of gliding per frame** — they look stuck between ticks, then teleport to the tween's advanced position. Pan/zoom and the dive tween were fine (those animate `world` itself — the group *root* — not a child), so a check that only exercised those missed it. It only showed when units marched in battle.
+
+Rule of thumb: **do not put GSAP-per-frame-animated objects inside a render group.** A render group is for a subtree whose internal transforms are static (or change only structurally) and that you move/scale as a unit. Our `world` is panned/zoomed as a unit, but it *contains* per-frame-animated children, so it's disqualified. The CPU-transform win wasn't worth it anyway: the per-tick ring churn already forced a rebuild every tick.
+
+(Same reason the FX/dust containers must NOT be render groups either — the dust is GSAP-animated, so isolating it in its own group would freeze/teleport the particles.)
+
 ## Gotchas worth remembering
 
 - **Pointer events on `world.scale`**: gsap mutates `world.scale.x/y` directly during the dive animation. `zoom.current` is NOT updated mid-animation. Anything that needs the live zoom must read `world.scale.x`, not the ref.
