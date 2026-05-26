@@ -36,6 +36,10 @@ export interface HUDProps {
   commandPoints: { red: number; blue: number };
   brokeFlash: { red: boolean; blue: boolean };
   canAfford: (team: Team, intent: CpIntent) => boolean;
+  cpInitial: number;
+  cpRegenTicks: number;
+  setCpInitial: (v: number) => void;
+  setCpRegenTicks: (v: number) => void;
   // computed
   curT: TerrainDef | null;
   // setters
@@ -75,6 +79,13 @@ const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affor
   );
 };
 
+const cpInputStyle: React.CSSProperties = {
+  width: '40px', marginLeft: '4px', padding: '2px 4px',
+  background: 'rgba(0,0,0,0.5)', color: '#f8fafc',
+  border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px',
+  fontSize: '11px', fontWeight: 800, textAlign: 'center',
+};
+
 export const HUD: React.FC<HUDProps> = ({
   containerRef,
   viewMode,
@@ -96,6 +107,10 @@ export const HUD: React.FC<HUDProps> = ({
   commandPoints,
   brokeFlash,
   canAfford,
+  cpInitial,
+  cpRegenTicks,
+  setCpInitial,
+  setCpRegenTicks,
   curT,
   setIsScanning,
   setShowGrid,
@@ -251,6 +266,30 @@ export const HUD: React.FC<HUDProps> = ({
               </div>
             );
           })}
+          {/* Simple CP economy config — interactive (parent strip is pointerEvents:none). */}
+          <div style={{
+            display: 'flex', gap: '16px', justifyContent: 'center',
+            marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)',
+            pointerEvents: 'auto',
+          }}>
+            <label
+              title="Starting / reset CP for both teams (applied immediately)"
+              style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.5px', display: 'flex', alignItems: 'center' }}
+            >
+              INIT
+              <input type="number" min={0} max={CP_CAP} value={cpInitial}
+                onChange={e => setCpInitial(Number(e.target.value))} style={cpInputStyle} />
+            </label>
+            <label
+              title="Gain rate: 1 CP every N ticks (lower = faster). Applies live."
+              style={{ fontSize: '9px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.5px', display: 'flex', alignItems: 'center' }}
+            >
+              REGEN 1/
+              <input type="number" min={1} max={60} value={cpRegenTicks}
+                onChange={e => setCpRegenTicks(Number(e.target.value))} style={cpInputStyle} />
+              <span style={{ marginLeft: '3px', color: '#64748b' }}>t</span>
+            </label>
+          </div>
         </div>
       )}
 

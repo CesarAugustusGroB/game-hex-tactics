@@ -41,6 +41,7 @@ export interface BattleTickCtx {
   setIsBattleRunning: Dispatch<SetStateAction<boolean>>;
   commandPointsRef: MutableRefObject<CommandPoints>;
   setCommandPoints: Dispatch<SetStateAction<CommandPoints>>;
+  cpRegenTicksRef: MutableRefObject<number>;
 }
 
 export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
@@ -62,7 +63,7 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       };
       ctx.tickCounterRef.current += 1;
       const cpBefore = ctx.commandPointsRef.current;
-      const cpAfter = applyRegen(cpBefore, ctx.tickCounterRef.current);
+      const cpAfter = applyRegen(cpBefore, ctx.tickCounterRef.current, ctx.cpRegenTicksRef.current);
       if (cpAfter !== cpBefore) {
         ctx.commandPointsRef.current = cpAfter;
         ctx.setCommandPoints(cpAfter);
