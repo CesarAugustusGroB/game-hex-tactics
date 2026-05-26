@@ -398,6 +398,21 @@ Rule of thumb: **do not put GSAP-per-frame-animated objects inside a render grou
 
 (Same reason the FX/dust containers must NOT be render groups either — the dust is GSAP-animated, so isolating it in its own group would freeze/teleport the particles.)
 
+### A GSAP tween on a PIXI child must be killed before destroy — or it crashes the whole tween pass
+
+A surviving GSAP tween whose target was destroyed is not a quiet leak — it's an exception **every frame**. After `container.destroy()`, PIXI nulls the object's fields, so GSAP's next rAF update does `target.y = …` on `null` and throws. Critically, **one uncaught throw inside GSAP's rAF tick aborts that tick's entire tween pass**: every *other* unit's position tween stops updating for that frame, then jumps to its caught-up value next frame. So the symptom is **stutter / "teleport," not a leak and not an FPS drop** — and it scales with churn (the more units dying/spawning, the more orphaned tweens, the more frames get aborted).
+
+The trap is that killing tweens on the container + its `position` is *not enough* if you also animate a CHILD. Our melee lunge tweens the `unit-sprite` child, so destroying a unit mid-lunge (e.g. attrition deaths while many units march) orphaned that child's tween. Every destroy path must kill the container, its `position`, AND every child's tweens (`position`/`scale` too):
+
+```ts
+const killUnitTweens = (cont) => {
+  gsap.killTweensOf(cont); gsap.killTweensOf(cont.position);
+  for (const ch of cont.children) { gsap.killTweensOf(ch); gsap.killTweensOf(ch.position); gsap.killTweensOf(ch.scale); }
+};
+```
+
+Apply it in *all* teardown paths (per-unit death, destroy-all on view change, AND the unmount cleanup), and guard get-or-create against a destroyed container left in a map (`if (cont?.destroyed) recreate`). Debugging tip: this presents as a perf problem ("everything stutters with many units") but the console TypeError (`Cannot set properties of null (setting 'y')` from a rAF) is the real tell — check the console before chasing frame budgets.
+
 ## Gotchas worth remembering
 
 - **Pointer events on `world.scale`**: gsap mutates `world.scale.x/y` directly during the dive animation. `zoom.current` is NOT updated mid-animation. Anything that needs the live zoom must read `world.scale.x`, not the ref.
