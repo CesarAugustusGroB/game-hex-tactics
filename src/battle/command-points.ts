@@ -1,8 +1,9 @@
 import type { Team } from './simulate';
+import { CP_CAP, CP_INITIAL, CP_REGEN_PER_N_TICKS } from '../data/command-points';
 
-export const CP_CAP = 20;
-export const CP_REGEN_PER_N_TICKS = 4;
-export const CP_INITIAL = CP_CAP;
+// Economy (cap / initial / regen rate) is tunable via src/data/command-points.json.
+// Re-exported so existing consumers keep importing it from '../battle/command-points'.
+export { CP_CAP, CP_INITIAL, CP_REGEN_PER_N_TICKS };
 
 export const CP_COSTS = {
   assign: 0,
