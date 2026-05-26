@@ -67,32 +67,26 @@ export const spawnMovementDust = (ctx: MovementDustContext): void => {
     ctx.movementDustGfx.addChild(dust);
 
     const delay = along * activeDuration;
-    gsap.to(dust, {
-      alpha: spec.alpha,
-      duration: 0.05,
-      delay,
-      ease: 'none',
-    });
-    gsap.to(dust, {
-      x: dust.x - nx * drift + px * side * 9,
-      y: dust.y - ny * drift + py * side * 5 + 3,
-      alpha: 0,
-      duration: 0.26,
-      delay: delay + 0.05,
-      ease: 'power2.out',
+    // ONE timeline owns all of this dust's sub-tweens, so cleanup runs exactly once — after
+    // EVERY sub-tween is done. Previously three independent tweens each ran, and the move
+    // tween's onComplete destroyed the sprite; under frame lag GSAP completes all three in
+    // the same tick, so destroying the sprite mid-tick nulled its `.position` and the still-
+    // queued scale tween then set `.y` on null — throwing inside GSAP's rAF, which aborts
+    // the whole tween pass (every unit's movement tween stops → freeze, then jumps →
+    // teleport) and stops FX cleanup (dust leaks, compounding the lag). A timeline can't
+    // destroy the target while a sibling is still pending.
+    gsap.timeline({
       onComplete: () => {
-        gsap.killTweensOf(dust);
-        gsap.killTweensOf(dust.scale);
         if (dust.parent) dust.parent.removeChild(dust);
         dust.destroy();
       },
-    });
-    gsap.to(dust.scale, {
-      x: 0.34 + spec.size * 0.12,
-      y: 0.28 + spec.size * 0.1,
-      duration: 0.28,
-      delay,
-      ease: 'power2.out',
-    });
+    })
+      .to(dust, { alpha: spec.alpha, duration: 0.05, ease: 'none' }, delay)
+      .to(dust.scale, { x: 0.34 + spec.size * 0.12, y: 0.28 + spec.size * 0.1, duration: 0.28, ease: 'power2.out' }, delay)
+      .to(dust, {
+        x: dust.x - nx * drift + px * side * 9,
+        y: dust.y - ny * drift + py * side * 5 + 3,
+        alpha: 0, duration: 0.26, ease: 'power2.out',
+      }, delay + 0.05);
   }
 };
