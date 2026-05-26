@@ -6,6 +6,7 @@ import type { Unit, Team } from '../../battle/simulate';
 import { getTerrainMods } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
 import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, type Armies, type GroupOrders } from '../constants';
+import { spawnMovementDust } from './movementFx';
 
 const UNIT_SPRITE_SIZE = 112;
 const UNIT_SHADOW_OFFSET = { x: 8, y: 18 };
@@ -31,11 +32,13 @@ interface UnitVisual {
   arrow: PIXI.Text;
   arrowHeading: string;
 }
-type UnitContainer = PIXI.Container & { _targetKey?: string; _visual?: UnitVisual };
+type UnitContainer = PIXI.Container & { _targetKey?: string; _hexKey?: string; _visual?: UnitVisual };
 
 export interface UnitsRenderContext {
   unitsGfx: PIXI.Container;
+  movementDustGfx: PIXI.Container;
   unitContainers: Map<string, PIXI.Container>;
+  dustTexture: PIXI.Texture | null;
   // textures per (team, unit type)
   unitTextureRed: PIXI.Texture;
   unitTextureBlue: PIXI.Texture;
@@ -151,11 +154,23 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const c = ctx.unitsGfx;
   const armyTex = ctx.armyTexture;
 
-  // Kill GSAP tweens before destroy so they don't touch a freed object next frame.
+  // Kill EVERY GSAP tween bound to a unit before destroy. Killing only the container +
+  // its position MISSED the children — the unit-sprite carries the melee lunge tween, and
+  // a surviving tween keeps setting .x/.y on a freed (null) object every frame, throwing
+  // inside GSAP's rAF. One such throw aborts that frame's whole tween pass → ALL units
+  // freeze for a frame and then jump = the "teleport". Children must be killed too.
+  const killUnitTweens = (cont: PIXI.Container) => {
+    gsap.killTweensOf(cont);
+    gsap.killTweensOf(cont.position);
+    for (const child of cont.children) {
+      gsap.killTweensOf(child);
+      gsap.killTweensOf((child as PIXI.Container).position);
+      gsap.killTweensOf((child as PIXI.Container).scale);
+    }
+  };
   const destroyAllUnitContainers = () => {
     ctx.unitContainers.forEach(cont => {
-      gsap.killTweensOf(cont);
-      gsap.killTweensOf(cont.position);
+      killUnitTweens(cont);
       cont.destroy({ children: true });
     });
     ctx.unitContainers.clear();
@@ -195,8 +210,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const wantedIds = new Set(units.map(u => u.id));
   ctx.unitContainers.forEach((cont, id) => {
     if (!wantedIds.has(id)) {
-      gsap.killTweensOf(cont);
-      gsap.killTweensOf(cont.position);
+      killUnitTweens(cont);
       cont.destroy({ children: true });
       ctx.unitContainers.delete(id);
     }
@@ -263,11 +277,19 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     const teamColor = TEAM_TINTS[u.team];
 
     let container = ctx.unitContainers.get(u.id) as UnitContainer | undefined;
+    // Defensive: a destroyed container left in the map has a null .position; tweening it
+    // throws inside GSAP's rAF. Drop it and rebuild fresh.
+    if (container?.destroyed) {
+      ctx.unitContainers.delete(u.id);
+      container = undefined;
+    }
     if (!container) {
       container = new PIXI.Container() as UnitContainer;
       container.label = 'unit-container';
       container.position.set(pos.x, topY);
+      container.zIndex = topY;
       container._targetKey = targetKey;
+      container._hexKey = hexKey;
       const tex = u.team === 'red'
         ? (unitType === 'skirmisher' ? ctx.unitTextureRedSkirmisher : unitType === 'cavalry' ? ctx.unitTextureRedCavalry : ctx.unitTextureRed)
         : (unitType === 'skirmisher' ? ctx.unitTextureBlueSkirmisher : unitType === 'cavalry' ? ctx.unitTextureBlueCavalry : ctx.unitTextureBlue);
@@ -275,14 +297,33 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       ctx.unitContainers.set(u.id, container);
       c.addChild(container);
     } else if (container._targetKey !== targetKey) {
+      const from = { x: container.position.x, y: container.position.y };
+      const movedHex = container._hexKey !== hexKey;
       container._targetKey = targetKey;
+      container._hexKey = hexKey;
+      container.zIndex = topY;
       // Stretch the tween over the destination terrain's cooldown so the unit GLIDES
       // across rough hexes instead of teleporting in TICK_MS then sitting idle.
       const moveCost = getTerrainMods(tileType).moveCost;
+      const duration = (TICK_MS * (1 + moveCost)) / 1000;
+      const isHiddenMove = ctx.fogOfWar && u.team !== ctx.selectedTeam && !visibleHexes.has(hexKey);
+      if (movedHex && !isFar && !isHiddenMove) {
+        spawnMovementDust({
+          movementDustGfx: ctx.movementDustGfx,
+          dustTexture: ctx.dustTexture,
+          from,
+          to: { x: pos.x, y: topY },
+          unitType,
+          worldScale: ctx.worldScale,
+          duration,
+          zIndex: topY,
+          seed: `${u.id}:${hexKey}`,
+        });
+      }
       gsap.to(container.position, {
         x: pos.x,
         y: topY,
-        duration: (TICK_MS * (1 + moveCost)) / 1000,
+        duration,
         ease: 'linear',
         overwrite: true,
       });
@@ -351,6 +392,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     ring.circle(pos.x, topY, 22).stroke({ width: 3, color: TEAM_TINTS[order.team], alpha: 0.85 });
     ring.label = 'unit-detail';
     ring.visible = !isFar;
+    ring.zIndex = topY;
     c.addChild(ring);
   });
 }

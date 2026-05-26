@@ -380,6 +380,39 @@ Mipmaps (`source.autoGenerateMipmaps = true`, then `updateMipmaps()`) pre-build 
 
 But mipmap alone doesn't solve "145 tiny pixelated soldiers read as a smear." At extreme zoom-out, no amount of filtering makes individual soldier features legible — they shouldn't be drawn at all. That's LOD's job. The two are complements, not alternatives.
 
+### Render groups + nested filters/masks: verify off-center, not just centered
+
+`world.enableRenderGroup()` moves the panned/zoomed world transform onto the GPU (pan/zoom no longer re-walks every descendant's world transform on the CPU). It's a near-free win for a big static scene — but it interacts with two things already living *inside* `world`: the water displacement filters (on the `deepSea`/`coastal` containers in `terrainOverlay`) and the per-biome hex masks. Filters + Graphics masks nested inside a render group is a combination with open bugs in the PIXI v8 line (#11577, #11607) where a filter's output frame / viewport can get computed relative to the render-group root instead of the screen — which makes the filtered content (here, the animated water) offset or vanish, but **only once the world is translated away from the origin or pushed to an extreme zoom**.
+
+The trap: a smoke test that just loads the page checks the world at its initial transform, where the render-group viewport and the screen happen to coincide — so the bug is invisible. To actually rule it out you must **pan the world far off-center and zoom to both extremes (≈0.05× and ≈6×)** and confirm the water is still present, masked to its hexes, correctly positioned, and animating. We did, and the water shader (which maps via the canonical `uOutputFrame`/`uOutputTexture` uniforms — see `water-filter.ts`) holds up; but the next person who adds a filter under `world` should re-run that off-center check, not trust a centered screenshot.
+
+Related: `cacheAsTexture` was deliberately *not* used to batch the static terrain/details. It rasterizes at the current resolution, and this world zooms freely 0.05×–6×, so a cache either blurs when you zoom in past it or — at HiDPI resolution over the whole `gridRadius=35` map — produces a texture near/over the 8192px GPU limit. The render group captures most of the CPU-transform benefit without rasterizing, so the scene stays vector-sharp at every zoom.
+
+### Render groups don't flush GSAP-animated CHILD transforms per frame — so we removed it
+
+**Update: `world.enableRenderGroup()` was ultimately removed.** The off-center/filter check above passed, but a render group has a second, worse interaction we only caught once a real battle ran: it breaks the smooth per-frame motion of anything inside it that you animate with GSAP.
+
+A render group caches its draw-instruction set and re-uploads a child's transform only when the group **rebuilds** (on a structural change — child added/removed/reordered). Our unit containers and dust particles move by GSAP mutating `container.position` **every frame**, but the group only flushes those transforms to the GPU when it rebuilds — which here happens ≈once per tick (the attack-ring churn in `drawUnits` adds/removes children each tick). Net effect: units **jump once per tick instead of gliding per frame** — they look stuck between ticks, then teleport to the tween's advanced position. Pan/zoom and the dive tween were fine (those animate `world` itself — the group *root* — not a child), so a check that only exercised those missed it. It only showed when units marched in battle.
+
+Rule of thumb: **do not put GSAP-per-frame-animated objects inside a render group.** A render group is for a subtree whose internal transforms are static (or change only structurally) and that you move/scale as a unit. Our `world` is panned/zoomed as a unit, but it *contains* per-frame-animated children, so it's disqualified. The CPU-transform win wasn't worth it anyway: the per-tick ring churn already forced a rebuild every tick.
+
+(Same reason the FX/dust containers must NOT be render groups either — the dust is GSAP-animated, so isolating it in its own group would freeze/teleport the particles.)
+
+### A GSAP tween on a PIXI child must be killed before destroy — or it crashes the whole tween pass
+
+A surviving GSAP tween whose target was destroyed is not a quiet leak — it's an exception **every frame**. After `container.destroy()`, PIXI nulls the object's fields, so GSAP's next rAF update does `target.y = …` on `null` and throws. Critically, **one uncaught throw inside GSAP's rAF tick aborts that tick's entire tween pass**: every *other* unit's position tween stops updating for that frame, then jumps to its caught-up value next frame. So the symptom is **stutter / "teleport," not a leak and not an FPS drop** — and it scales with churn (the more units dying/spawning, the more orphaned tweens, the more frames get aborted).
+
+The trap is that killing tweens on the container + its `position` is *not enough* if you also animate a CHILD. Our melee lunge tweens the `unit-sprite` child, so destroying a unit mid-lunge (e.g. attrition deaths while many units march) orphaned that child's tween. Every destroy path must kill the container, its `position`, AND every child's tweens (`position`/`scale` too):
+
+```ts
+const killUnitTweens = (cont) => {
+  gsap.killTweensOf(cont); gsap.killTweensOf(cont.position);
+  for (const ch of cont.children) { gsap.killTweensOf(ch); gsap.killTweensOf(ch.position); gsap.killTweensOf(ch.scale); }
+};
+```
+
+Apply it in *all* teardown paths (per-unit death, destroy-all on view change, AND the unmount cleanup), and guard get-or-create against a destroyed container left in a map (`if (cont?.destroyed) recreate`). Debugging tip: this presents as a perf problem ("everything stutters with many units") but the console TypeError (`Cannot set properties of null (setting 'y')` from a rAF) is the real tell — check the console before chasing frame budgets.
+
 ## Gotchas worth remembering
 
 - **Pointer events on `world.scale`**: gsap mutates `world.scale.x/y` directly during the dive animation. `zoom.current` is NOT updated mid-animation. Anything that needs the live zoom must read `world.scale.x`, not the ref.

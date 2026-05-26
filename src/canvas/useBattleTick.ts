@@ -9,6 +9,7 @@ import { getAiController } from '../battle/ai';
 import type { OrderChange } from '../battle/ai';
 import { getTerrainMods } from '../battle/terrain';
 import { applyRegen, debit, CP_REGEN_PER_TICK_STEP, type CommandPoints } from '../battle/command-points';
+import { spawnMeleeEffects } from './render/meleeFx';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
   POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
@@ -29,8 +30,12 @@ export interface BattleTickCtx {
   // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   tickCounterRef: MutableRefObject<number>;
+  worldRef: MutableRefObject<PIXI.Container>;
+  unitContainersRef: MutableRefObject<Map<string, PIXI.Container>>;
+  combatFxGfx: RefObject<PIXI.Container>;
   projectilesGfx: RefObject<PIXI.Container>;
   javelinTextureRef: RefObject<PIXI.Texture | null>;
+  dustTextureRef: RefObject<PIXI.Texture | null>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
   clearOrder: (team: Team, groupId: GroupId) => void;
   setArmies: Dispatch<SetStateAction<Armies>>;
@@ -155,6 +160,15 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
             },
           });
         }
+      }
+      if (result.meleeEvents.length > 0) {
+        spawnMeleeEffects({
+          combatFxGfx: ctx.combatFxGfx.current!,
+          unitContainers: ctx.unitContainersRef.current,
+          dustTexture: ctx.dustTextureRef.current,
+          events: result.meleeEvents,
+          worldScale: ctx.worldRef.current.scale.x,
+        });
       }
 
       const next = result.units;

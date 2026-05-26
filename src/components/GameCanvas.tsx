@@ -72,6 +72,7 @@ export const GameCanvas: React.FC = () => {
   const unitTextureRedSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
+  const dustTextureRef = useRef<PIXI.Texture | null>(null);
   const grassTextureRef = useRef<PIXI.Texture | null>(null);
   const grassNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const grassMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
@@ -100,6 +101,8 @@ export const GameCanvas: React.FC = () => {
   const seaDepthPatchTextureRef = useRef<PIXI.Texture | null>(null);
   const seaMicroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const deepSeaTextureRef = useRef<PIXI.Texture | null>(null);
+  const movementDustGfx = useRef<PIXI.Container>(new PIXI.Container());
+  const combatFxGfx = useRef<PIXI.Container>(new PIXI.Container());
   const projectilesGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Tiled-texture overlay container. Uses world-space UV tiling (TilingSprite + hex mask)
   // because PIXI's Graphics fill normalises UVs per polygon bbox, which produces visible
@@ -223,7 +226,9 @@ export const GameCanvas: React.FC = () => {
     if (!armyTex || !shadowTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
     drawUnitsRender({
       unitsGfx: unitsGfx.current,
+      movementDustGfx: movementDustGfx.current,
       unitContainers: unitContainersRef.current,
+      dustTexture: dustTextureRef.current,
       unitTextureRed: unitTex,
       unitTextureBlue: unitTexBlue,
       unitTextureRedCavalry: unitTexRedCav,
@@ -394,7 +399,9 @@ export const GameCanvas: React.FC = () => {
     captureFlagSpriteRef,
     captureFlagTextureRef,
     gridGfx,
+    movementDustGfx,
     unitsGfx,
+    combatFxGfx,
     projectilesGfx,
     previewGfx,
     highlightGfx,
@@ -408,6 +415,7 @@ export const GameCanvas: React.FC = () => {
     unitTextureRedSkirmisherRef,
     unitTextureBlueSkirmisherRef,
     javelinTextureRef,
+    dustTextureRef,
     grassTextureRef,
     grassNoiseTextureRef,
     grassMacroNoiseTextureRef,
@@ -481,8 +489,12 @@ export const GameCanvas: React.FC = () => {
     gridDataRef,
     scoreRef,
     tickCounterRef,
+    worldRef,
+    unitContainersRef,
+    combatFxGfx,
     projectilesGfx,
     javelinTextureRef,
+    dustTextureRef,
     issueOrder,
     clearOrder,
     setArmies,
@@ -717,13 +729,18 @@ export const GameCanvas: React.FC = () => {
     const hexData = gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r);
     const pos = HexUtils.hexToPixel(hoveredHex);
     const topY = pos.y - (hexData ? TERRAINS[hexData.type].height : 0);
-    if (isScanning) { h.lineStyle(4, 0x00e6ff, 0.9).beginFill(0x00e6ff, 0.1).drawCircle(pos.x, topY, HexUtils.size * 6.5).endFill(); }
-    else {
-      h.lineStyle(4, 0xffffff, 0.9); const s = HexUtils.size; for (let i = 0; i < 6; i++) {
+    if (isScanning) {
+      h.circle(pos.x, topY, HexUtils.size * 6.5)
+        .fill({ color: 0x00e6ff, alpha: 0.1 })
+        .stroke({ width: 4, color: 0x00e6ff, alpha: 0.9 });
+    } else {
+      const s = HexUtils.size;
+      const pts: number[] = [];
+      for (let i = 0; i < 6; i++) {
         const r = Math.PI / 180 * (60 * i);
-        if (i === 0) h.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r)); else h.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
+        pts.push(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
       }
-      h.closePath();
+      h.poly(pts).stroke({ width: 4, color: 0xffffff, alpha: 0.9 });
     }
   };
   // No deps: intentionally runs every render to keep updateHighlightsRef pointing at the
