@@ -157,14 +157,14 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, redInfantryTex, hopliteTex, redCavalryTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
+      const [armyTex, redInfantryTex, hopliteTex, redCavalryTex, blueCavalryTex, romanSkirmisherTex, blueSkirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-infantry.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/hoplite.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-cavalry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/cavalry-hoplite.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/blue-cavalry.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/roman_skirmisher.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/skirmisher.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/blue-skirmisher.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/javelin.png'),
         PIXI.Assets.load<PIXI.Texture>('/fx/dust-puff.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass.png'),
@@ -199,7 +199,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       if (!isMounted) return;
 
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [redInfantryTex, hopliteTex, redCavalryTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
+      for (const tex of [redInfantryTex, hopliteTex, redCavalryTex, blueCavalryTex, romanSkirmisherTex, blueSkirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -250,9 +250,9 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       ctx.unitTextureRef.current = redInfantryTex;
       ctx.unitTextureBlueRef.current = hopliteTex;
       ctx.unitTextureRedCavalryRef.current = redCavalryTex;
-      ctx.unitTextureBlueCavalryRef.current = cavalryHopliteTex;
+      ctx.unitTextureBlueCavalryRef.current = blueCavalryTex;
       ctx.unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
-      ctx.unitTextureBlueSkirmisherRef.current = skirmisherTex;
+      ctx.unitTextureBlueSkirmisherRef.current = blueSkirmisherTex;
       ctx.javelinTextureRef.current = javelinTex;
       ctx.dustTextureRef.current = dustTex;
 
