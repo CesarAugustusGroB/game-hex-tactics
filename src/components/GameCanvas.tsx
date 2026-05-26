@@ -71,6 +71,7 @@ export const GameCanvas: React.FC = () => {
   const unitTextureRedSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
+  const dustTextureRef = useRef<PIXI.Texture | null>(null);
   const grassTextureRef = useRef<PIXI.Texture | null>(null);
   const grassNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const grassMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
@@ -99,6 +100,8 @@ export const GameCanvas: React.FC = () => {
   const seaDepthPatchTextureRef = useRef<PIXI.Texture | null>(null);
   const seaMicroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const deepSeaTextureRef = useRef<PIXI.Texture | null>(null);
+  const movementDustGfx = useRef<PIXI.Container>(new PIXI.Container());
+  const combatFxGfx = useRef<PIXI.Container>(new PIXI.Container());
   const projectilesGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Tiled-texture overlay container. Uses world-space UV tiling (TilingSprite + hex mask)
   // because PIXI's Graphics fill normalises UVs per polygon bbox, which produces visible
@@ -222,7 +225,9 @@ export const GameCanvas: React.FC = () => {
     if (!armyTex || !shadowTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
     drawUnitsRender({
       unitsGfx: unitsGfx.current,
+      movementDustGfx: movementDustGfx.current,
       unitContainers: unitContainersRef.current,
+      dustTexture: dustTextureRef.current,
       unitTextureRed: unitTex,
       unitTextureBlue: unitTexBlue,
       unitTextureRedCavalry: unitTexRedCav,
@@ -371,7 +376,9 @@ export const GameCanvas: React.FC = () => {
     captureFlagSpriteRef,
     captureFlagTextureRef,
     gridGfx,
+    movementDustGfx,
     unitsGfx,
+    combatFxGfx,
     projectilesGfx,
     previewGfx,
     highlightGfx,
@@ -385,6 +392,7 @@ export const GameCanvas: React.FC = () => {
     unitTextureRedSkirmisherRef,
     unitTextureBlueSkirmisherRef,
     javelinTextureRef,
+    dustTextureRef,
     grassTextureRef,
     grassNoiseTextureRef,
     grassMacroNoiseTextureRef,
@@ -459,8 +467,12 @@ export const GameCanvas: React.FC = () => {
     captureProgressRef,
     tickCounterRef,
     lastTickHadBothTeamsRef,
+    worldRef,
+    unitContainersRef,
+    combatFxGfx,
     projectilesGfx,
     javelinTextureRef,
+    dustTextureRef,
     issueOrder,
     clearOrder,
     setArmies,

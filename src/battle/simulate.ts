@@ -159,6 +159,22 @@ export interface Projectile {
   targetId: string;
 }
 
+/** A melee hit resolved during this tick, surfaced to the renderer for short impact FX.
+ *  Damage has already been applied by the sim; the canvas uses this as visual metadata. */
+export interface MeleeEvent {
+  attackerId: string;
+  targetId: string;
+  attackerTeam: Team;
+  targetTeam: Team;
+  attackerType: UnitType;
+  targetType: UnitType;
+  fromHex: Hex;
+  toHex: Hex;
+  damage: number;
+  heightBonus: number;
+  killed: boolean;
+}
+
 export interface SimulationResult {
   units: Unit[];
   /** Reference-equal to the input orders Map when no order needed mutation this tick,
@@ -167,6 +183,8 @@ export interface SimulationResult {
   /** Ranged attacks fired this tick. Empty when no skirmisher threw. The renderer reads
    *  this each tick; consumers that don't draw projectiles (the sim harness) ignore it. */
   projectiles: Projectile[];
+  /** Hand-to-hand hits resolved this tick. Empty when no adjacent enemies fought. */
+  meleeEvents: MeleeEvent[];
 }
 
 // CHARGE + HOLD + UNLEASH tunables — values in src/data/combat.json. Re-exported
@@ -850,6 +868,7 @@ export const simulateTick = (
   // same defensive levers, no height bonus (throwing parabolic javelins).
   const damage = new Map<string, number>();
   const projectiles: Projectile[] = [];
+  const meleeEvents: MeleeEvent[] = [];
   for (const u of working) {
     const adjacentEnemies = HexUtils.getNeighbors(u.tacticalHex)
       .map(h => occupiedByHex.get(HexUtils.key(h)))
@@ -864,8 +883,22 @@ export const simulateTick = (
       const hDef = config.mapApi.getTerrainHeight(target.tacticalHex);
       const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
       const holdRed = holdReductionByUnit.get(target.id) ?? 0;
-      const dmg = ((config.damagePerTick * (1 + heightDamageBonus(hAtt, hDef))) / defenseMult) * (1 - holdRed);
+      const heightBonus = heightDamageBonus(hAtt, hDef);
+      const dmg = ((config.damagePerTick * (1 + heightBonus)) / defenseMult) * (1 - holdRed);
       damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
+      meleeEvents.push({
+        attackerId: u.id,
+        targetId: target.id,
+        attackerTeam: u.team,
+        targetTeam: target.team,
+        attackerType: u.unitType ?? 'infantry',
+        targetType: target.unitType ?? 'infantry',
+        fromHex: u.tacticalHex,
+        toHex: target.tacticalHex,
+        damage: dmg,
+        heightBonus,
+        killed: false,
+      });
       u.state = 'fighting';
     } else if ((u.unitType ?? 'infantry') === 'skirmisher') {
       // RANGED: find closest enemy within SKIRMISHER_MISSILE_RANGE. Distance>=2 because
@@ -900,6 +933,26 @@ export const simulateTick = (
   damage.forEach((dmg, id) => {
     const t = byId.get(id);
     if (t) t.hp -= dmg;
+  });
+  const killedIds = new Set<string>();
+  damage.forEach((_dmg, id) => {
+    const t = byId.get(id);
+    if (t && t.hp <= 0) killedIds.add(id);
+  });
+  killedIds.forEach(id => {
+    let chosenIdx = -1;
+    for (let i = 0; i < meleeEvents.length; i++) {
+      const evt = meleeEvents[i];
+      if (evt.targetId !== id) continue;
+      if (
+        chosenIdx === -1
+        || evt.damage > meleeEvents[chosenIdx].damage
+        || (evt.damage === meleeEvents[chosenIdx].damage && evt.attackerId < meleeEvents[chosenIdx].attackerId)
+      ) {
+        chosenIdx = i;
+      }
+    }
+    if (chosenIdx >= 0) meleeEvents[chosenIdx].killed = true;
   });
 
   // Build occupancy of living units (dying ones drop out of collision checks immediately).
@@ -1317,5 +1370,5 @@ export const simulateTick = (
     if (t) t.hp -= dmg;
   });
 
-  return { units: working.filter(u => u.hp > 0), orders: ordersOut, projectiles };
+  return { units: working.filter(u => u.hp > 0), orders: ordersOut, projectiles, meleeEvents };
 };
