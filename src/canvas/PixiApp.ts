@@ -320,9 +320,10 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       world.y = app.screen.height / 2;
       world.scale.set(ctx.zoom.current);
       app.stage.addChild(world);
-      // GPU render group: pan/zoom applies the world transform on the GPU instead of
-      // re-walking every descendant. cacheAsTexture is unsuitable at 0.05–6x zoom.
-      world.enableRenderGroup();
+      // NOTE: do NOT enableRenderGroup() on `world`. A render group only flushes its
+      // descendants' transforms to the GPU on a structural rebuild (≈per tick here, from
+      // ring/unit churn), so GSAP-animated unit and dust positions jump once per tick
+      // instead of gliding per frame — units visibly teleport. See LEARNINGS.md.
 
       // World z-order: terrain → painted overlay → scatter details → grid → units →
       // projectiles → drag previews → hover highlights.
