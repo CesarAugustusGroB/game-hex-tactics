@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import { WORLD_GEN, DIVE_ZOOM, MAP_TYPES, MAP_TYPE_IDS, DEFAULT_MAP_TYPE, type MapTypeId, type ShapePrimitive } from '../data/world-gen';
+import { WORLD_GEN, DIVE_ZOOM, MAP_TYPES, MAP_TYPE_IDS, type MapTypeId, type ShapePrimitive } from '../data/world-gen';
 import { mulberry32 } from '../utils/rng';
 
 export interface ShapeCtx {
