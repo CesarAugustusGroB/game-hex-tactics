@@ -330,6 +330,9 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       world.addChild(ctx.captureZoneGfx.current);
       if (ctx.captureFlagSpriteRef.current) world.addChild(ctx.captureFlagSpriteRef.current);
       world.addChild(ctx.gridGfx.current);
+      // Units overlap neighbours (112px sprite over a 40px hex), so render them
+      // back-to-front: zIndex = screen-Y is assigned per container in drawUnits.
+      ctx.unitsGfx.current.sortableChildren = true;
       world.addChild(ctx.unitsGfx.current);
       world.addChild(ctx.projectilesGfx.current);
       world.addChild(ctx.previewGfx.current);

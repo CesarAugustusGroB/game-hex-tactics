@@ -267,6 +267,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       container = new PIXI.Container() as UnitContainer;
       container.label = 'unit-container';
       container.position.set(pos.x, topY);
+      container.zIndex = topY;
       container._targetKey = targetKey;
       const tex = u.team === 'red'
         ? (unitType === 'skirmisher' ? ctx.unitTextureRedSkirmisher : unitType === 'cavalry' ? ctx.unitTextureRedCavalry : ctx.unitTextureRed)
@@ -276,6 +277,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       c.addChild(container);
     } else if (container._targetKey !== targetKey) {
       container._targetKey = targetKey;
+      container.zIndex = topY;
       // Stretch the tween over the destination terrain's cooldown so the unit GLIDES
       // across rough hexes instead of teleporting in TICK_MS then sitting idle.
       const moveCost = getTerrainMods(tileType).moveCost;
@@ -351,6 +353,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     ring.circle(pos.x, topY, 22).stroke({ width: 3, color: TEAM_TINTS[order.team], alpha: 0.85 });
     ring.label = 'unit-detail';
     ring.visible = !isFar;
+    ring.zIndex = topY;
     c.addChild(ring);
   });
 }
