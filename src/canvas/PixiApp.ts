@@ -39,13 +39,18 @@ export interface PixiAppCtx {
   captureFlagSpriteRef: MutableRefObject<PIXI.Sprite | null>;
   captureFlagTextureRef: MutableRefObject<PIXI.Texture | null>;
   gridGfx: MutableRefObject<PIXI.Graphics>;
+  movementDustGfx: MutableRefObject<PIXI.Container>;
   unitsGfx: MutableRefObject<PIXI.Container>;
+  combatFxGfx: MutableRefObject<PIXI.Container>;
   projectilesGfx: MutableRefObject<PIXI.Container>;
   previewGfx: MutableRefObject<PIXI.Container>;
   highlightGfx: MutableRefObject<PIXI.Graphics>;
   unitContainersRef: MutableRefObject<Map<string, PIXI.Container>>;
   // Texture refs (written by hook after load)
   armyTextureRef: MutableRefObject<PIXI.Texture | null>;
+  // Soft unit shadow baked once at boot (a blurred ellipse). Reused by every unit so
+  // shadows are plain Sprites, not per-frame BlurFilter passes.
+  shadowTextureRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureBlueRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureRedCavalryRef: MutableRefObject<PIXI.Texture | null>;
@@ -53,6 +58,7 @@ export interface PixiAppCtx {
   unitTextureRedSkirmisherRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureBlueSkirmisherRef: MutableRefObject<PIXI.Texture | null>;
   javelinTextureRef: MutableRefObject<PIXI.Texture | null>;
+  dustTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassNoiseTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassMacroNoiseTextureRef: MutableRefObject<PIXI.Texture | null>;
@@ -127,7 +133,13 @@ export function usePixiApp(ctx: PixiAppCtx): void {
     let isMounted = true;
     const app = new PIXI.Application();
     const start = async () => {
-      await app.init({ resizeTo: window, backgroundColor: 0x050a14, antialias: true });
+      await app.init({
+        resizeTo: window,
+        backgroundColor: 0x050a14,
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+      });
 
       // The army SVG is natively 40×40 — too low for high-DPI. Pre-rasterise to a
       // higher-res canvas so PIXI downsamples instead of upsampling.
@@ -145,15 +157,16 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, redInfantryTex, hopliteTex, redCavalryTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
+      const [armyTex, redInfantryTex, hopliteTex, redCavalryTex, blueCavalryTex, romanSkirmisherTex, blueSkirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
         loadHighResSvgTexture('/units/army.svg', 160),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-infantry.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/hoplite.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-cavalry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/cavalry-hoplite.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/blue-cavalry.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/normalized/roman_skirmisher.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/skirmisher.png'),
+        PIXI.Assets.load<PIXI.Texture>('/units/normalized/blue-skirmisher.png'),
         PIXI.Assets.load<PIXI.Texture>('/units/javelin.png'),
+        PIXI.Assets.load<PIXI.Texture>('/fx/dust-puff.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass-noise.png'),
         PIXI.Assets.load<PIXI.Texture>('/terrain/grass-macro-noise.png'),
@@ -186,7 +199,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       if (!isMounted) return;
 
       // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [redInfantryTex, hopliteTex, redCavalryTex, cavalryHopliteTex, romanSkirmisherTex, skirmisherTex, javelinTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
+      for (const tex of [redInfantryTex, hopliteTex, redCavalryTex, blueCavalryTex, romanSkirmisherTex, blueSkirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
         tex.source.scaleMode = 'linear';
         tex.source.autoGenerateMipmaps = true;
         tex.source.updateMipmaps();
@@ -222,14 +235,26 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       deepSeaTex.source.addressMode = 'repeat';
 
       /* eslint-disable react-hooks/immutability */
+      // Bake a soft elliptical shadow to a texture once — every unit reuses it as a plain
+      // Sprite, so shadows cost zero per-frame filter passes. The 128² frame leaves room
+      // for the blur to fall off inside the texture bounds.
+      const shadowG = new PIXI.Graphics().ellipse(64, 64, 46, 24).fill({ color: 0x000000 });
+      shadowG.filters = [new PIXI.BlurFilter({ strength: 6 })];
+      ctx.shadowTextureRef.current = app.renderer.generateTexture({
+        target: shadowG,
+        resolution: 2,
+        frame: new PIXI.Rectangle(0, 0, 128, 128),
+      });
+      shadowG.destroy(true);
       ctx.armyTextureRef.current = armyTex;
       ctx.unitTextureRef.current = redInfantryTex;
       ctx.unitTextureBlueRef.current = hopliteTex;
       ctx.unitTextureRedCavalryRef.current = redCavalryTex;
-      ctx.unitTextureBlueCavalryRef.current = cavalryHopliteTex;
+      ctx.unitTextureBlueCavalryRef.current = blueCavalryTex;
       ctx.unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
-      ctx.unitTextureBlueSkirmisherRef.current = skirmisherTex;
+      ctx.unitTextureBlueSkirmisherRef.current = blueSkirmisherTex;
       ctx.javelinTextureRef.current = javelinTex;
+      ctx.dustTextureRef.current = dustTex;
 
       // Capture-the-flag marker — loaded once at mount, positioned at hex (0,0).
       const winFlagTex = await PIXI.Assets.load<PIXI.Texture>('/assets/win-flag.png');
@@ -300,6 +325,10 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       world.y = app.screen.height / 2;
       world.scale.set(ctx.zoom.current);
       app.stage.addChild(world);
+      // NOTE: do NOT enableRenderGroup() on `world`. A render group only flushes its
+      // descendants' transforms to the GPU on a structural rebuild (≈per tick here, from
+      // ring/unit churn), so GSAP-animated unit and dust positions jump once per tick
+      // instead of gliding per frame — units visibly teleport. See LEARNINGS.md.
 
       // World z-order: terrain → painted overlay → scatter details → grid → units →
       // projectiles → drag previews → hover highlights.
@@ -310,13 +339,24 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       world.addChild(ctx.captureZoneGfx.current);
       if (ctx.captureFlagSpriteRef.current) world.addChild(ctx.captureFlagSpriteRef.current);
       world.addChild(ctx.gridGfx.current);
+      ctx.movementDustGfx.current.sortableChildren = true;
+      world.addChild(ctx.movementDustGfx.current);
+      // Units overlap neighbours (112px sprite over a 40px hex), so render them
+      // back-to-front: zIndex = screen-Y is assigned per container in drawUnits.
+      ctx.unitsGfx.current.sortableChildren = true;
       world.addChild(ctx.unitsGfx.current);
+      ctx.combatFxGfx.current.sortableChildren = true;
+      world.addChild(ctx.combatFxGfx.current);
       world.addChild(ctx.projectilesGfx.current);
       world.addChild(ctx.previewGfx.current);
       world.addChild(ctx.highlightGfx.current);
 
       app.stage.eventMode = 'static';
       app.stage.hitArea = app.screen;
+
+      // Last hex the pointer hovered (axial key). Used to skip redundant setHoveredHex
+      // calls — without this, every sub-hex mouse move re-renders GameCanvas + HUD.
+      let lastHoverKey: string | null = null;
 
       const paintCtx: PaintModeCtx = {
         currentStrategicHexRef: ctx.currentStrategicHexRef,
@@ -378,7 +418,11 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         }
         const local = world.toLocal(e.global);
         const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
-        ctx.setHoveredHex(hex);
+        const hoverKey = HexUtils.key(hex);
+        if (hoverKey !== lastHoverKey) {
+          lastHoverKey = hoverKey;
+          ctx.setHoveredHex(hex);
+        }
         if (ctx.isPaintingRef.current) paintAt(hex, paintCtx);
         if (ctx.orderDragRef.current) updateOrderDrag(local.x, local.y, odCtx);
       });
@@ -465,7 +509,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         const applyLod = (child: PIXI.Container) => {
           if (child.label === 'unit-sprite' || child.label === 'unit-sprite-shadow') child.visible = !isFar;
           else if (child.label === 'unit-marker') child.visible = isFar;
-          else if (child.label === 'unit-detail') child.visible = !isFar;
         };
         for (const child of ctx.unitsGfx.current.children) {
           if (child.label === 'unit-container') {
@@ -492,14 +535,29 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       containers.forEach(cont => {
         gsap.killTweensOf(cont);
         gsap.killTweensOf(cont.position);
+        // Children carry tweens too (the unit-sprite's melee lunge) — kill them or GSAP
+        // updates a freed object and throws after app.destroy.
+        for (const child of cont.children) {
+          gsap.killTweensOf(child);
+          gsap.killTweensOf((child as PIXI.Container).position);
+          gsap.killTweensOf((child as PIXI.Container).scale);
+        }
       });
       containers.clear();
       for (const child of ctx.projectilesGfx.current.children) {
         gsap.killTweensOf(child);
       }
+      for (const child of ctx.movementDustGfx.current.children) {
+        gsap.killTweensOf(child);
+      }
+      for (const child of ctx.combatFxGfx.current.children) {
+        gsap.killTweensOf(child);
+      }
       for (const child of ctx.terrainOverlayRef.current.children) {
         if ('mask' in child) (child as PIXI.Sprite).mask = null;
       }
+      ctx.shadowTextureRef.current?.destroy(true);
+      ctx.shadowTextureRef.current = null;
       app.destroy(true, { children: true });
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

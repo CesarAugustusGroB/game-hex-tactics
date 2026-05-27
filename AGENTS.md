@@ -1,56 +1,65 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Guidance for AI coding agents working in this repository. `CLAUDE.md` is the deeper
+companion to this file (full rendering-pipeline detail, data-layer conventions, world-gen
+internals); `LEARNINGS.md` records gotchas worth not re-discovering. Read those when a
+change touches their area.
+
+## Style
+
+**Less is more.** Concise replies (answer, result, stop). Minimal code — no comments that
+restate the code, no defensive checks for impossible states, no abstractions for
+hypothetical reuse. Only comment when the *why* is non-obvious (a library gotcha, a
+load-bearing invariant, a workaround). Delete dead code instead of commenting it out.
 
 ## Commands
 
-- `npm run dev` — Vite dev server (default http://localhost:5173). The parent worktree may already be using this port; pass `-- --port 5174` if needed.
+- `npm run dev` — Vite dev server (default http://localhost:5173). Pass `-- --port 5174` if the port is taken.
 - `npm run build` — `tsc -b` (project references) then `vite build`. Type errors fail the build.
-- `npm run lint` — ESLint over the repo (config: `eslint.config.js`, flat config).
+- `npm run lint` — ESLint over the repo (`eslint.config.js`, flat config).
 - `npm run preview` — serve the production build.
+- `npm run sim` — headless battle harness over ~21 scenarios. Run after any change to `src/battle/*`. On Windows where `tsx` isn't on PATH, run `npx tsx scripts/sim-formations.ts`.
+- `npm run test:cp` — assertion-based test for the Command Points module.
 
-There is no test runner configured.
+There is no test runner; the two scripts above are the regression gate.
 
 ## Architecture
 
-Single-canvas PIXI.js application with a thin React HUD. Three files hold essentially all logic:
+Single-canvas PIXI.js v8 application with a thin React 19 HUD. The codebase is decomposed
+by responsibility — no longer a single god-file.
 
-- `src/main.tsx` — React root.
-- `src/App.tsx` — renders only `<GameCanvas />`.
-- `src/components/GameCanvas.tsx` — the entire app: world generation, rendering, input, HUD.
-- `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (pointy-top, `size = 40`).
+- `src/main.tsx` / `src/App.tsx` — React bootstrap.
+- `src/components/GameCanvas.tsx` — composition root: owns React state + mirrored refs, wires the hooks and render callbacks, renders `<HUD>`.
+- `src/canvas/` — the PIXI layer:
+  - `PixiApp.ts` (`usePixiApp`) — Application lifecycle, texture loading, container hierarchy, pointer/wheel/ticker wiring, cleanup.
+  - `useBattleTick.ts` (`useBattleTick`) — `setInterval` tick driver: `simulateTick` + projectile animation + capture/win detection.
+  - `HUD.tsx` — pure React HUD panel.
+  - `world-gen.ts` — pure `generateWorldData()` (noise + cohesion + rivers).
+  - `constants.ts` — re-exports from `src/data/game.ts` plus canvas-side derived helpers (deploy-zone, capture-zone, key formatters).
+  - `render/` — pure draw functions: `drawTerrain.ts`, `drawDetails.ts`, `drawUnits.ts`.
+  - `input/` — `useTacticalKeyboard.ts`, `useGlobalShortcuts.ts`, `orderDrag.ts`, `paintMode.ts`.
+- `src/battle/` — pure, no React/PIXI:
+  - `simulate.ts` — `simulateTick(units, orders, config) → { units, orders }`. Five order modes (`march`/`charge`/`retreat`/`unleash`/`defendHeight`), three unit types, per-type tunables.
+  - `terrain.ts` — terrain modifier table (defense/moveCost/attrition/vision + downhill bonus).
+  - `ai.ts` — per-team AI controller registry (`registerAiController`); the tick loop polls it before each sim step.
+  - `command-points.ts` — pure CP cost/`debit`/`applyRegen` helpers (cap 20, regen +1 every 4 ticks).
+- `src/hex-engine/HexUtils.ts` — pure axial hex math, **flat-top**, `size = 40`. Flat edges face N/S, vertices point E/W. `HexUtils.key({q,r})` is the canonical `Map` key — always use it.
+- `src/data/` — every balance/content value as `*.json` paired with a typed `*.ts` wrapper. Consumers import from the `.ts`, never the `.json`. Single source of truth; do not duplicate a tunable table elsewhere.
 
 ### Two coordinate systems
 
-1. **Axial hex coordinates** (`q`, `r`) — the logical grid. Convert with `HexUtils.hexToPixel` / `pixelToHex`. `HexUtils.key({q,r})` is the canonical `Map` key — always use it instead of stringifying ad-hoc.
-2. **PIXI world coordinates** — the `worldRef` container is panned/zoomed; its children (`terrainGfx`, `highlightGfx`) are drawn in world space. Convert screen → world with `world.toLocal(...)` before doing hex lookups.
+1. **Axial hex** (`q`, `r`) — the logical grid. Convert with `HexUtils.hexToPixel` / `pixelToHex`.
+2. **PIXI world** — `worldRef` is panned/zoomed; convert screen → world with `world.toLocal(...)` before hex lookups.
 
-### Rendering pipeline (`GameCanvas.tsx`)
+## Load-bearing invariants
 
-`gridData` (state) → `drawMap()` rebuilds `terrainGfx` from scratch on every change. Each hex is a faux-3D prism: two side quads (shaded 0.6× / 0.4×) plus a top hexagon. Heights come from `TERRAINS[type].height`. `highlightGfx` is redrawn every tick from the ticker, not from React state, so hover updates don't re-run `drawMap`.
-
-A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`). The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
-
-### World generation (`generateWorldData`)
-
-Three passes over a `gridRadius = 35` axial disk:
-1. **Elevation sampling** — `simplex-noise` 2-octave field at `(q + offset.q) / resolution`. In `STRATEGIC` view a radial falloff turns it into an island; in `TACTICAL` view the falloff is skipped. Elevation is bucketed into 10 terrain types using `waterLevel` and `mountainLevel` thresholds in `genSettings`.
-2. **Cohesion** — single-hex specks are replaced with the majority neighbor type (>3 of 6) to reduce noise.
-3. **Rivers** — start from MOUNTAIN/SNOW/HILL hexes, walk to the lowest neighbor for up to 300 steps, stop at sea. In TACTICAL mode rivers thicken by tagging neighbors.
-
-### Strategic ↔ Tactical "dive"
-
-The same procedural function produces both views. Clicking a hex while `isScanning` is true:
-- captures that hex's noise-space coordinates (`hex.q + noiseOffset.q`, etc.) so the new view samples *that exact patch* of the noise field,
-- bumps `resolution` ×4.5 (smaller divisor = zoomed-into-noise = more detail),
-- flips `viewMode` to `TACTICAL`.
-
-`RETURN TO STRATEGIC OVERVIEW` resets `noiseOffset` and `resolution` to defaults.
-
-### Refs that mirror state
-
-`isScanningRef` and `noiseOffsetRef` are kept in sync via `useEffect` because the `pointertap` handler is registered once at mount and would otherwise close over stale state. **When you add new state that is read inside the long-lived PIXI handlers, mirror it the same way** — don't re-register handlers per render.
+- **Monotonic tick counter.** `tickCounterRef` (in `GameCanvas.tsx`) is monotonic. Reset it ONLY on regenerate-world and return-to-strategic. **Never** reset it when a battle starts — units carry absolute `nextMoveTick` values, so a reset strands the whole army on a multi-hundred-tick cooldown.
+- **Mirror state into refs for long-lived handlers.** PIXI pointer/ticker handlers are registered once at mount and would close over stale state. New state read inside those handlers must be mirrored into a ref via `useEffect` (see the block of `*Ref` mirrors in `GameCanvas.tsx`). Don't re-register handlers per render.
+- **Keep `simulateTick` pure.** No I/O, no React, no PIXI — that purity is what lets the harness and the AI registry drive it. The caller owns the tick counter.
+- **PIXI v8 `Color.multiply(number)`** treats the number as a hex int via bit-shifts (`0.7 | 0 === 0` → black). Always pass an RGB-normalised array `[s, s, s, 1]` when shading. See `LEARNINGS.md`.
 
 ## Worktree note
 
-This is a `git worktree` at `.worktrees/feature-units` on branch `feature/units`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
+This repo uses `git worktree`. The current worktree is `.worktrees/feature-infra` on branch
+`feature/infra`; the shared repo lives one level up. `.worktrees/` and `.playwright-mcp/`
+are gitignored.

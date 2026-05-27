@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      # Battle harness — smoke test (runs the pure sim end-to-end; fails on crash/type
+      # error). Does not yet assert outcomes; see ARCHITECTURAL_REVIEW.md (I3).
+      - run: npm run sim
+      # Command Points — assertion-based, exits non-zero on any failed check.
+      - run: npm run test:cp
+      # Victory-points scoring — assertion-based, exits non-zero on any failed check.
+      - run: npm run test:scoring

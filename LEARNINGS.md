@@ -380,6 +380,39 @@ Mipmaps (`source.autoGenerateMipmaps = true`, then `updateMipmaps()`) pre-build 
 
 But mipmap alone doesn't solve "145 tiny pixelated soldiers read as a smear." At extreme zoom-out, no amount of filtering makes individual soldier features legible — they shouldn't be drawn at all. That's LOD's job. The two are complements, not alternatives.
 
+### Render groups + nested filters/masks: verify off-center, not just centered
+
+`world.enableRenderGroup()` moves the panned/zoomed world transform onto the GPU (pan/zoom no longer re-walks every descendant's world transform on the CPU). It's a near-free win for a big static scene — but it interacts with two things already living *inside* `world`: the water displacement filters (on the `deepSea`/`coastal` containers in `terrainOverlay`) and the per-biome hex masks. Filters + Graphics masks nested inside a render group is a combination with open bugs in the PIXI v8 line (#11577, #11607) where a filter's output frame / viewport can get computed relative to the render-group root instead of the screen — which makes the filtered content (here, the animated water) offset or vanish, but **only once the world is translated away from the origin or pushed to an extreme zoom**.
+
+The trap: a smoke test that just loads the page checks the world at its initial transform, where the render-group viewport and the screen happen to coincide — so the bug is invisible. To actually rule it out you must **pan the world far off-center and zoom to both extremes (≈0.05× and ≈6×)** and confirm the water is still present, masked to its hexes, correctly positioned, and animating. We did, and the water shader (which maps via the canonical `uOutputFrame`/`uOutputTexture` uniforms — see `water-filter.ts`) holds up; but the next person who adds a filter under `world` should re-run that off-center check, not trust a centered screenshot.
+
+Related: `cacheAsTexture` was deliberately *not* used to batch the static terrain/details. It rasterizes at the current resolution, and this world zooms freely 0.05×–6×, so a cache either blurs when you zoom in past it or — at HiDPI resolution over the whole `gridRadius=35` map — produces a texture near/over the 8192px GPU limit. The render group captures most of the CPU-transform benefit without rasterizing, so the scene stays vector-sharp at every zoom.
+
+### Render groups don't flush GSAP-animated CHILD transforms per frame — so we removed it
+
+**Update: `world.enableRenderGroup()` was ultimately removed.** The off-center/filter check above passed, but a render group has a second, worse interaction we only caught once a real battle ran: it breaks the smooth per-frame motion of anything inside it that you animate with GSAP.
+
+A render group caches its draw-instruction set and re-uploads a child's transform only when the group **rebuilds** (on a structural change — child added/removed/reordered). Our unit containers and dust particles move by GSAP mutating `container.position` **every frame**, but the group only flushes those transforms to the GPU when it rebuilds — which here happens ≈once per tick (the attack-ring churn in `drawUnits` adds/removes children each tick). Net effect: units **jump once per tick instead of gliding per frame** — they look stuck between ticks, then teleport to the tween's advanced position. Pan/zoom and the dive tween were fine (those animate `world` itself — the group *root* — not a child), so a check that only exercised those missed it. It only showed when units marched in battle.
+
+Rule of thumb: **do not put GSAP-per-frame-animated objects inside a render group.** A render group is for a subtree whose internal transforms are static (or change only structurally) and that you move/scale as a unit. Our `world` is panned/zoomed as a unit, but it *contains* per-frame-animated children, so it's disqualified. The CPU-transform win wasn't worth it anyway: the per-tick ring churn already forced a rebuild every tick.
+
+(Same reason the FX/dust containers must NOT be render groups either — the dust is GSAP-animated, so isolating it in its own group would freeze/teleport the particles.)
+
+### A GSAP tween on a PIXI child must be killed before destroy — or it crashes the whole tween pass
+
+A surviving GSAP tween whose target was destroyed is not a quiet leak — it's an exception **every frame**. After `container.destroy()`, PIXI nulls the object's fields, so GSAP's next rAF update does `target.y = …` on `null` and throws. Critically, **one uncaught throw inside GSAP's rAF tick aborts that tick's entire tween pass**: every *other* unit's position tween stops updating for that frame, then jumps to its caught-up value next frame. So the symptom is **stutter / "teleport," not a leak and not an FPS drop** — and it scales with churn (the more units dying/spawning, the more orphaned tweens, the more frames get aborted).
+
+The trap is that killing tweens on the container + its `position` is *not enough* if you also animate a CHILD. Our melee lunge tweens the `unit-sprite` child, so destroying a unit mid-lunge (e.g. attrition deaths while many units march) orphaned that child's tween. Every destroy path must kill the container, its `position`, AND every child's tweens (`position`/`scale` too):
+
+```ts
+const killUnitTweens = (cont) => {
+  gsap.killTweensOf(cont); gsap.killTweensOf(cont.position);
+  for (const ch of cont.children) { gsap.killTweensOf(ch); gsap.killTweensOf(ch.position); gsap.killTweensOf(ch.scale); }
+};
+```
+
+Apply it in *all* teardown paths (per-unit death, destroy-all on view change, AND the unmount cleanup), and guard get-or-create against a destroyed container left in a map (`if (cont?.destroyed) recreate`). Debugging tip: this presents as a perf problem ("everything stutters with many units") but the console TypeError (`Cannot set properties of null (setting 'y')` from a rAF) is the real tell — check the console before chasing frame budgets.
+
 ## Gotchas worth remembering
 
 - **Pointer events on `world.scale`**: gsap mutates `world.scale.x/y` directly during the dive animation. `zoom.current` is NOT updated mid-animation. Anything that needs the live zoom must read `world.scale.x`, not the ref.
@@ -393,6 +426,28 @@ But mipmap alone doesn't solve "145 tiny pixelated soldiers read as a smear." At
 - **`onFormation` (defend) vs `onBlob`**: the defend tick check was renamed from `onBlob` to `onFormation` when the rank BFS was extended outside the blob. `onFormation` means "the unit is currently on a ranked hex (blob OR back-rank extension)." Units only constrained to stay in formation if currently in formation; outsiders march in freely.
 
 - **The defend formation algorithm has 6 distinct steps**: blob BFS → border filter (by `defendFrom`) → segment BFS from anchor (barrier-aware) → rank BFS (now including back-rank extension when surplus exists) → perimeter walk for rank-0 slotIndex → slotIndex inheritance for deeper ranks → sort allSlots by (rank, slotIndex, key) → pair sorted units to first-N slots. If you're modifying this, do one step at a time; the interactions are tricky.
+
+## Victory points & scoring (`feature/systems`)
+
+The win condition changed from a single "hold the centre" tug-of-war to a victory-points race (`src/battle/scoring.ts` pure `scoreTick`, tunables in `src/data/scoring.json`): a living unit reaching the **enemy** deploy zone scores a point and a unit holding the centre uncontested accrues points per tick; first team to `pointsToWin` (default 100) wins. Two non-obvious things came out of it.
+
+### "No units on the field" is not a loss — raid-and-return makes it normal
+
+A unit that reaches the enemy back line doesn't just score; it **leaves the field and returns to that team's roster** (raid & return — `scoreTick` puts it in `reachedUnitIds`, the tick filters it out of `survivors`, and `setRosters` adds it back). So a team can legitimately have zero units on the map mid-battle while sitting on a full roster, about to redeploy. The old annihilation fallback ("one team has no units left → declare the other the winner") therefore became actively wrong — it would call a winner during a routine raid lull. We removed it: **victory is points-only.** A stalemate (neither side reaching the threshold) just continues; the player pauses/resets. Lesson: when you add a mechanic that makes a unit legitimately vanish from the board, audit every "board is empty / one side is empty" terminal check — they were written assuming presence-on-board equals alive-in-game, and that equivalence no longer holds.
+
+### Single-scoring relies on a sub-`TICK_MS` React-flush timing invariant
+
+The tick reads its units from `armiesRef.current`, but `armiesRef` is only ever written by the async mirror effect (`useEffect(() => { armiesRef.current = armies }, [armies])` in `GameCanvas.tsx`). A reached unit is removed only via `setArmies(survivors)` — also async. Meanwhile `scoreRef.current` is updated **synchronously** in the tick. So the no-double-count guarantee rests entirely on React committing the `setArmies` update *and* running the mirror effect within one `TICK_MS` window (500 ms): if two interval callbacks ever ran before the flush, the same unit would still be in `armiesRef`, sit in the enemy zone again, and score a second time (score advances synchronously, board lags). At 500 ms ticks this never happens, and it's the same `setArmies → armiesRef` removal path that `retreat` already relies on safely — but it's load-bearing and silent. There's a WHY comment at the `survivors` filter in `useBattleTick.ts` flagging it. Lesson: when correctness depends on an async state-setter winning a race against a timer, and a sibling ref updates synchronously, the asymmetry is a real invariant — document it at the site, or a future "let's lower the tick interval" / "let's batch differently" change silently reintroduces the bug.
+
+### GSAP: never destroy a PIXI object inside one tween's `onComplete` while a sibling tween on it is still queued
+
+Movement dust ran three independent tweens per sprite — `alpha`, `scale`, and a `move` tween whose `onComplete` did `dust.destroy()`. They normally complete on separate frames, so by the time `move` finishes the others are long done. But in any frame long enough to complete more than one at once (a GC pause, a heavy combat frame, or a tab whose rAF is being throttled), GSAP renders them all in a single tick. Tween creation order is `alpha, move, scale`, so within that tick GSAP renders `move` → its `onComplete` destroys the sprite (PIXI nulls `sprite.position`) → GSAP then renders the still-queued `scale` tween → the `dust.scale` / `.y` setter hits the null position → **`TypeError: Cannot set properties of null (setting 'y')` thrown inside GSAP's `_tick`**. That throw aborts the *entire* tween pass for the frame: every unit's position tween stops (units freeze), then jumps on the next good frame (teleport), and FX `onComplete` cleanup stops firing so dust piles up and compounds the lag. Same failure class as the unit-sprite version (kill child tweens before `destroy`), but the trigger here is sibling tweens on the *same* object, not a stale tween across a destroy.
+
+Fix: give each FX object a single `gsap.timeline()` holding all its sub-tweens and destroy in the **timeline's** `onComplete` — it fires only after every child is done, so the target is never destroyed while a sibling is still pending. Rule: if an object has multiple concurrent tweens and one of them destroys it, that's a latent rAF-throw; co-own them in one timeline (or destroy outside the tick). A cleanup created *last* (e.g. a separate `gsap.delayedCall` after all the element's tweens, as `meleeFx` does) is safe because it renders after its siblings in the same tick.
+
+### Diagnosing render perf under Playwright: rAF is throttled, timers are not
+
+Driving the app with the Playwright MCP, a battle looked frozen at ~1 FPS — `requestAnimationFrame` fired ~once per ~1000 ms and GSAP-driven FX never drained, which looks exactly like a render death-spiral. It isn't. The controlled browser window isn't the OS-foreground window, so Chromium throttles rAF (and therefore PIXI's ticker and GSAP) to ~1 Hz **even though `document.visibilityState` is `visible` and `document.hasFocus()` returns `true`**. Give-aways: an exactly-`1000 ms` rAF gap, and the decisive check — run a `setInterval(…, 50)` alongside an rAF counter; the timer fires its full ~32/1.6 s (thread is healthy) while rAF fires ~1–2 (only the frame loop is throttled). With rAF clamped, GSAP's `lagSmoothing` makes tweens crawl, so any "FX leak / 1 FPS / freeze" measured under Playwright is a tooling artifact, not the game. Lesson: you can't measure real frame-rate or animation smoothness through Playwright — use it to drive state and read the **console** (thrown errors are real), and confirm smoothness on a real foreground window.
 
 ## Known limitations (deferred — see PLAN.md)
 

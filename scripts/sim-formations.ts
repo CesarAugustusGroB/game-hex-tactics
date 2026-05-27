@@ -305,6 +305,21 @@ const scenarios: Scenario[] = [
     mode: 'unleash',
   },
   {
+    // UNLEASH no-target: 3 reds, NO enemies and (harness) no capture zone. Before the
+    // forward-beacon fallback this group FROZE (no enemy, no capture hex → marched=0).
+    // Now it marches toward the forward beacon (team-forward = N for red), so the block
+    // keeps pushing in instead of standing still. Expect marched > 0 (centroid moves N).
+    name: 'unleash-no-target-advances',
+    units: [
+      ...rowAt(1, 0, 0, 'red', 1).map(u => ({ ...u, id: id(1) })),
+      ...rowAt(1, 0, 1, 'red', 1).map(u => ({ ...u, id: id(2) })),
+      ...rowAt(1, 0, 2, 'red', 1).map(u => ({ ...u, id: id(3) })),
+    ],
+    attackTarget: { q: 0, r: -8 },
+    team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 6,
+    mode: 'unleash',
+  },
+  {
     // TERRAIN MODS: equal-size infantry groups, one on HILL (h=35) facing one on
     // GRASSLAND (h=12), already in melee contact. Verifies the per-pair damage
     // formula end-to-end:

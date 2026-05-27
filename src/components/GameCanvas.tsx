@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import { createNoise2D } from 'simplex-noise';
@@ -17,6 +17,7 @@ import {
 import {
   type CommandPoints, type CpIntent,
   makeInitialCommandPoints, debit, canAfford as canAffordPure,
+  CP_CAP, CP_REGEN_N,
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
@@ -64,6 +65,7 @@ export const GameCanvas: React.FC = () => {
   // terrain features.
   const detailDensityNoiseRef = useRef<ReturnType<typeof createNoise2D> | null>(null);
   const armyTextureRef = useRef<PIXI.Texture | null>(null);
+  const shadowTextureRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRedCavalryRef = useRef<PIXI.Texture | null>(null);
@@ -71,6 +73,7 @@ export const GameCanvas: React.FC = () => {
   const unitTextureRedSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
+  const dustTextureRef = useRef<PIXI.Texture | null>(null);
   const grassTextureRef = useRef<PIXI.Texture | null>(null);
   const grassNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const grassMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
@@ -99,6 +102,8 @@ export const GameCanvas: React.FC = () => {
   const seaDepthPatchTextureRef = useRef<PIXI.Texture | null>(null);
   const seaMicroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const deepSeaTextureRef = useRef<PIXI.Texture | null>(null);
+  const movementDustGfx = useRef<PIXI.Container>(new PIXI.Container());
+  const combatFxGfx = useRef<PIXI.Container>(new PIXI.Container());
   const projectilesGfx = useRef<PIXI.Container>(new PIXI.Container());
   // Tiled-texture overlay container. Uses world-space UV tiling (TilingSprite + hex mask)
   // because PIXI's Graphics fill normalises UVs per polygon bbox, which produces visible
@@ -214,16 +219,19 @@ export const GameCanvas: React.FC = () => {
 
   const drawUnits = useCallback(() => {
     const armyTex = armyTextureRef.current;
+    const shadowTex = shadowTextureRef.current;
     const unitTex = unitTextureRef.current;
     const unitTexBlue = unitTextureBlueRef.current;
     const unitTexRedCav = unitTextureRedCavalryRef.current;
     const unitTexBlueCav = unitTextureBlueCavalryRef.current;
     const unitTexRedSkir = unitTextureRedSkirmisherRef.current;
     const unitTexBlueSkir = unitTextureBlueSkirmisherRef.current;
-    if (!armyTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
+    if (!armyTex || !shadowTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
     drawUnitsRender({
       unitsGfx: unitsGfx.current,
+      movementDustGfx: movementDustGfx.current,
       unitContainers: unitContainersRef.current,
+      dustTexture: dustTextureRef.current,
       unitTextureRed: unitTex,
       unitTextureBlue: unitTexBlue,
       unitTextureRedCavalry: unitTexRedCav,
@@ -231,6 +239,7 @@ export const GameCanvas: React.FC = () => {
       unitTextureRedSkirmisher: unitTexRedSkir,
       unitTextureBlueSkirmisher: unitTexBlueSkir,
       armyTexture: armyTex,
+      shadowTexture: shadowTex,
       armies,
       groupOrders,
       gridData,
@@ -325,11 +334,10 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { gridDataRef.current = gridData; }, [gridData]);
    
 
-  const lastTickHadBothTeamsRef = useRef(false);
   const [winBanner, setWinBanner] = useState<Team | null>(null);
-  const [captureProgress, setCaptureProgress] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
-  const captureProgressRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
-  useEffect(() => { captureProgressRef.current = captureProgress; }, [captureProgress]);
+  const [score, setScore] = useState<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  const scoreRef = useRef<{ red: number; blue: number }>({ red: 0, blue: 0 });
+  useEffect(() => { scoreRef.current = score; }, [score]);
   // MUST stay monotonic across battle pauses/restarts — units carry absolute
   // `nextMoveTick` values; resetting strands them on multi-hundred-tick cooldowns.
   // Only reset on regenerate / return-to-strategic (where armies are also wiped).
@@ -337,6 +345,29 @@ export const GameCanvas: React.FC = () => {
   const commandPointsRef = useRef<CommandPoints>(makeInitialCommandPoints());
   const [commandPoints, setCommandPoints] = useState<CommandPoints>(makeInitialCommandPoints());
   const [brokeFlash, setBrokeFlash] = useState<{ red: boolean; blue: boolean }>({ red: false, blue: false });
+
+  // Runtime-tunable CP economy (defaults from command-points.json). `cpMax` is the CP
+  // capacity: it's both the starting/reset pool AND the regen cap (one number sets start
+  // + max). `cpRegenTicks` is the gain rate (1 CP every N ticks). Mirrored into refs so
+  // the long-lived tick loop and the reset callbacks read current values.
+  const [cpMax, setCpMaxState] = useState(CP_CAP);
+  const [cpRegenN, setCpRegenNState] = useState(CP_REGEN_N);
+  const cpMaxRef = useRef(CP_CAP);
+  const cpRegenRef = useRef(CP_REGEN_N);
+  const setCpMax = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(999, Math.round(v || 0)));
+    cpMaxRef.current = clamped;
+    setCpMaxState(clamped);
+    // Also the cap, so start both teams full at it (visible immediately).
+    const next: CommandPoints = { red: clamped, blue: clamped };
+    commandPointsRef.current = next;
+    setCommandPoints(next);
+  }, []);
+  const setCpRegenN = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(50, Math.round(v || 0)));
+    cpRegenRef.current = clamped;
+    setCpRegenNState(clamped);
+  }, []);
 
   const canAfford = useCallback((team: Team, intent: CpIntent): boolean => {
     return canAffordPure(commandPointsRef.current, team, intent);
@@ -371,12 +402,15 @@ export const GameCanvas: React.FC = () => {
     captureFlagSpriteRef,
     captureFlagTextureRef,
     gridGfx,
+    movementDustGfx,
     unitsGfx,
+    combatFxGfx,
     projectilesGfx,
     previewGfx,
     highlightGfx,
     unitContainersRef,
     armyTextureRef,
+    shadowTextureRef,
     unitTextureRef,
     unitTextureBlueRef,
     unitTextureRedCavalryRef,
@@ -384,6 +418,7 @@ export const GameCanvas: React.FC = () => {
     unitTextureRedSkirmisherRef,
     unitTextureBlueSkirmisherRef,
     javelinTextureRef,
+    dustTextureRef,
     grassTextureRef,
     grassNoiseTextureRef,
     grassMacroNoiseTextureRef,
@@ -455,20 +490,26 @@ export const GameCanvas: React.FC = () => {
     armiesRef,
     groupOrdersRef,
     gridDataRef,
-    captureProgressRef,
+    scoreRef,
     tickCounterRef,
-    lastTickHadBothTeamsRef,
+    worldRef,
+    unitContainersRef,
+    combatFxGfx,
     projectilesGfx,
     javelinTextureRef,
+    dustTextureRef,
     issueOrder,
     clearOrder,
     setArmies,
     setGroupOrders,
-    setCaptureProgress,
+    setScore,
+    setRosters,
     setWinBanner,
     setIsBattleRunning,
     commandPointsRef,
     setCommandPoints,
+    cpRegenRef,
+    cpMaxRef,
   };
   useBattleTick(battleCtx, isBattleRunning);
 
@@ -625,13 +666,12 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints();
-    setCommandPoints(makeInitialCommandPoints());
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const returnToStrategic = useCallback(() => {
@@ -644,13 +684,12 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints();
-    setCommandPoints(makeInitialCommandPoints());
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const regenerateWith = useCallback((nextSeed: number, choice: MapTypeChoice) => {
@@ -667,13 +706,12 @@ export const GameCanvas: React.FC = () => {
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
-    setCaptureProgress({ red: 0, blue: 0 });
-    captureProgressRef.current = { red: 0, blue: 0 };
+    setScore({ red: 0, blue: 0 });
+    scoreRef.current = { red: 0, blue: 0 };
     setWinBanner(null);
-    lastTickHadBothTeamsRef.current = false;
     tickCounterRef.current = 0;
-    commandPointsRef.current = makeInitialCommandPoints();
-    setCommandPoints(makeInitialCommandPoints());
+    commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
+    setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
   }, []);
 
   const regenerateWorld = useCallback(() => regenerateWith(seed, mapTypeChoice), [regenerateWith, seed, mapTypeChoice]);
@@ -695,18 +733,30 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { drawUnits(); }, [drawUnits]);
   useEffect(() => { generateWorldData(); }, [generateWorldData]);
 
+  // key → terrain type, rebuilt only when the world changes. updateHighlights runs every
+  // frame via the ticker, so a per-frame gridData.find over ~3.8k hexes is a real hotspot.
+  const tileTypeByKey = useMemo(
+    () => new Map(gridData.map(d => [HexUtils.key(d.hex), d.type])),
+    [gridData],
+  );
+
   const updateHighlights = () => {
     const h = highlightGfx.current; h.clear(); if (!hoveredHex) return;
-    const hexData = gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r);
+    const hexType = tileTypeByKey.get(HexUtils.key(hoveredHex));
     const pos = HexUtils.hexToPixel(hoveredHex);
-    const topY = pos.y - (hexData ? TERRAINS[hexData.type].height : 0);
-    if (isScanning) { h.lineStyle(4, 0x00e6ff, 0.9).beginFill(0x00e6ff, 0.1).drawCircle(pos.x, topY, HexUtils.size * 6.5).endFill(); }
-    else {
-      h.lineStyle(4, 0xffffff, 0.9); const s = HexUtils.size; for (let i = 0; i < 6; i++) {
+    const topY = pos.y - (hexType ? TERRAINS[hexType].height : 0);
+    if (isScanning) {
+      h.circle(pos.x, topY, HexUtils.size * 6.5)
+        .fill({ color: 0x00e6ff, alpha: 0.1 })
+        .stroke({ width: 4, color: 0x00e6ff, alpha: 0.9 });
+    } else {
+      const s = HexUtils.size;
+      const pts: number[] = [];
+      for (let i = 0; i < 6; i++) {
         const r = Math.PI / 180 * (60 * i);
-        if (i === 0) h.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r)); else h.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
+        pts.push(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
       }
-      h.closePath();
+      h.poly(pts).stroke({ width: 4, color: 0xffffff, alpha: 0.9 });
     }
   };
   // No deps: intentionally runs every render to keep updateHighlightsRef pointing at the
@@ -714,7 +764,7 @@ export const GameCanvas: React.FC = () => {
   // gridData / isScanning instead of the mount-time stale values. See LEARNINGS.md.
   useEffect(() => { updateHighlightsRef.current = updateHighlights; });
 
-  const curT = hoveredHex ? TERRAINS[gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r)?.type || 'SEA'] : null;
+  const curT = hoveredHex ? TERRAINS[tileTypeByKey.get(HexUtils.key(hoveredHex)) || 'SEA'] : null;
 
   return (
     <HUD
@@ -726,7 +776,7 @@ export const GameCanvas: React.FC = () => {
       inputMode={inputMode}
       winBanner={winBanner}
       isBattleRunning={isBattleRunning}
-      captureProgress={captureProgress}
+      score={score}
       currentStrategicHex={currentStrategicHex}
       armies={armies}
       groupOrders={groupOrders}
@@ -760,6 +810,10 @@ export const GameCanvas: React.FC = () => {
       setMapTypeChoice={setMapTypeChoice}
       setSeed={setSeed}
       rerollSeed={rerollSeed}
+      cpMax={cpMax}
+      cpRegenN={cpRegenN}
+      setCpMax={setCpMax}
+      setCpRegenN={setCpRegenN}
     />
   );
 };

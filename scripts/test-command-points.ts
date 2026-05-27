@@ -1,12 +1,13 @@
 /**
  * Headless harness for the pure Command Points module. Verifies cost table, debit
- * (success + broke + immutability), regen cadence and cap clamping, initial state.
+ * (success + broke + immutability), the fractional regen model (accrual + cap clamp +
+ * no-op guards), and initial state.
  *
  * Mirrors the pattern of scripts/sim-formations.ts. Run with: npm run test:cp
  */
 import {
-  CP_CAP, CP_COSTS, CP_REGEN_PER_N_TICKS, makeInitialCommandPoints,
-  canAfford, debit, applyRegen,
+  CP_CAP, CP_INITIAL, CP_COSTS, CP_REGEN_N, CP_REGEN_PER_TICK_STEP,
+  makeInitialCommandPoints, canAfford, debit, applyRegen,
 } from '../src/battle/command-points';
 
 type Result = { name: string; pass: boolean; detail?: string };
@@ -19,8 +20,10 @@ function check(name: string, cond: boolean, detail?: string) {
 // makeInitialCommandPoints
 {
   const cp = makeInitialCommandPoints();
-  check('initial both teams at cap', cp.red === CP_CAP && cp.blue === CP_CAP,
+  check('initial defaults both teams to CP_INITIAL', cp.red === CP_INITIAL && cp.blue === CP_INITIAL,
     `red=${cp.red} blue=${cp.blue}`);
+  const cp7 = makeInitialCommandPoints(7);
+  check('initial honors explicit pool arg', cp7.red === 7 && cp7.blue === 7);
 }
 
 // canAfford
@@ -55,39 +58,39 @@ function check(name: string, cond: boolean, detail?: string) {
   check('debit with 0-cost at 0 CP still succeeds', after !== null && after.red === 0);
 }
 
-// applyRegen — off-cadence
+// applyRegen — non-positive amount is a no-op (same ref)
 {
   const cp = { red: 5, blue: 5 };
-  const t = applyRegen(cp, 1);
-  check('regen no-op on off-cadence tick', t === cp);
+  check('regen no-op when amount is 0', applyRegen(cp, 0) === cp);
+  check('regen no-op when amount is negative', applyRegen(cp, -1) === cp);
 }
 
-// applyRegen — tick 0 never regens (avoid free first-tick bonus)
+// applyRegen — fractional accrual on both teams, rounded to 0.01 (no float drift)
 {
-  const cp = { red: 5, blue: 5 };
-  const t = applyRegen(cp, 0);
-  check('regen no-op at tick 0 even on partial CP', t === cp);
+  const t = applyRegen({ red: 5, blue: 5 }, 0.3);
+  check('regen adds amount to both teams', t.red === 5.3 && t.blue === 5.3,
+    `red=${t.red} blue=${t.blue}`);
+  const f = applyRegen({ red: 0, blue: 0 }, 0.1);
+  check('regen rounds to 0.01 (0 + 0.1 = 0.1, no drift)', f.red === 0.1 && f.blue === 0.1,
+    `red=${f.red}`);
 }
 
-// applyRegen — on-cadence
-{
-  const cp = { red: 5, blue: 5 };
-  const t = applyRegen(cp, CP_REGEN_PER_N_TICKS);
-  check('regen +1 both teams on cadence tick', t.red === 6 && t.blue === 6);
-}
-
-// applyRegen — clamp at cap
+// applyRegen — clamp at cap (both already at cap → same ref)
 {
   const cp = { red: CP_CAP, blue: CP_CAP };
-  const t = applyRegen(cp, CP_REGEN_PER_N_TICKS);
-  check('regen clamped at cap (no-op same ref)', t === cp);
+  check('regen clamped at cap (no-op same ref)', applyRegen(cp, 1) === cp);
 }
 
 // applyRegen — one capped, one not
 {
-  const cp = { red: CP_CAP - 1, blue: CP_CAP };
-  const t = applyRegen(cp, CP_REGEN_PER_N_TICKS);
-  check('regen one team capped, other ticks up', t.red === CP_CAP && t.blue === CP_CAP);
+  const t = applyRegen({ red: CP_CAP, blue: CP_CAP - 1 }, 1, CP_CAP);
+  check('regen caps the high team, ticks up the other', t.red === CP_CAP && t.blue === CP_CAP);
+}
+
+// regen knob sanity
+{
+  check('CP_REGEN_PER_TICK_STEP is 0.1', CP_REGEN_PER_TICK_STEP === 0.1);
+  check('CP_REGEN_N is a positive multiplier', CP_REGEN_N > 0);
 }
 
 // CP_COSTS table consistency

@@ -7,8 +7,7 @@
   "initialRoster":     { "infantry": 50, "cavalry": 50, "skirmisher": 50 },
   "cohortSize":        4,
   "capture": {
-    "ticksToWin": 20,
-    "center":     { "q": 0, "r": 0 }
+    "center": { "q": 0, "r": 0 }
   },
   "teams": {
     "red":  { "tint": "#ef4444" },

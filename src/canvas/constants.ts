@@ -5,7 +5,6 @@ import {
   INITIAL_ROSTER,
   COHORT_SIZE,
   RETREAT_REFUND_FRAC,
-  CAPTURE_TICKS_TO_WIN,
   CAPTURE_CENTER,
   FORMATION_CYCLE,
   FORMATION_LABELS,
@@ -15,6 +14,11 @@ import {
   DRAG_THRESHOLD_PX,
   DEPLOY_ZONE_FRAC,
 } from '../data/game';
+import {
+  POINTS_TO_WIN,
+  POINTS_PER_UNIT_REACHED,
+  CENTER_HOLD_POINTS_PER_TICK,
+} from '../data/scoring';
 
 // Re-export under their legacy paths so existing consumers (HUD, render, input handlers,
 // GameCanvas composition root) don't need to migrate import paths. Values live in
@@ -28,11 +32,6 @@ export {
   // refunds this fraction of each unit type back to the team's roster. Engaged groups
   // (any unit with an enemy in an adjacent hex) get a no-op — they have to fight.
   RETREAT_REFUND_FRAC,
-  // Capture-the-flag win condition. A team holds the central 7-hex flower (centre + 6
-  // neighbours) UNCONTESTED to gain a tick of progress; contested or enemy-held ticks
-  // decay -1 per tick; empty zone leaves both counters alone. Hits CAPTURE_TICKS_TO_WIN
-  // → that team wins. Annihilation still applies as a fallback.
-  CAPTURE_TICKS_TO_WIN,
   CAPTURE_CENTER,
   FORMATION_CYCLE,
   FORMATION_LABELS,
@@ -44,6 +43,9 @@ export {
   // instead of a smear of tiny pixelated sprites.
   LOD_THRESHOLD,
   DRAG_THRESHOLD_PX,
+  POINTS_TO_WIN,
+  POINTS_PER_UNIT_REACHED,
+  CENTER_HOLD_POINTS_PER_TICK,
 };
 
 export { STRATEGIC_RESOLUTION, DIVE_ZOOM } from '../data/world-gen';

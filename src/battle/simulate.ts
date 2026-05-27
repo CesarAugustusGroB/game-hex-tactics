@@ -159,6 +159,22 @@ export interface Projectile {
   targetId: string;
 }
 
+/** A melee hit resolved during this tick, surfaced to the renderer for short impact FX.
+ *  Damage has already been applied by the sim; the canvas uses this as visual metadata. */
+export interface MeleeEvent {
+  attackerId: string;
+  targetId: string;
+  attackerTeam: Team;
+  targetTeam: Team;
+  attackerType: UnitType;
+  targetType: UnitType;
+  fromHex: Hex;
+  toHex: Hex;
+  damage: number;
+  heightBonus: number;
+  killed: boolean;
+}
+
 export interface SimulationResult {
   units: Unit[];
   /** Reference-equal to the input orders Map when no order needed mutation this tick,
@@ -167,6 +183,8 @@ export interface SimulationResult {
   /** Ranged attacks fired this tick. Empty when no skirmisher threw. The renderer reads
    *  this each tick; consumers that don't draw projectiles (the sim harness) ignore it. */
   projectiles: Projectile[];
+  /** Hand-to-hand hits resolved this tick. Empty when no adjacent enemies fought. */
+  meleeEvents: MeleeEvent[];
 }
 
 // CHARGE + HOLD + UNLEASH tunables — values in src/data/combat.json. Re-exported
@@ -850,6 +868,7 @@ export const simulateTick = (
   // same defensive levers, no height bonus (throwing parabolic javelins).
   const damage = new Map<string, number>();
   const projectiles: Projectile[] = [];
+  const meleeEvents: MeleeEvent[] = [];
   for (const u of working) {
     const adjacentEnemies = HexUtils.getNeighbors(u.tacticalHex)
       .map(h => occupiedByHex.get(HexUtils.key(h)))
@@ -864,8 +883,22 @@ export const simulateTick = (
       const hDef = config.mapApi.getTerrainHeight(target.tacticalHex);
       const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
       const holdRed = holdReductionByUnit.get(target.id) ?? 0;
-      const dmg = ((config.damagePerTick * (1 + heightDamageBonus(hAtt, hDef))) / defenseMult) * (1 - holdRed);
+      const heightBonus = heightDamageBonus(hAtt, hDef);
+      const dmg = ((config.damagePerTick * (1 + heightBonus)) / defenseMult) * (1 - holdRed);
       damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
+      meleeEvents.push({
+        attackerId: u.id,
+        targetId: target.id,
+        attackerTeam: u.team,
+        targetTeam: target.team,
+        attackerType: u.unitType ?? 'infantry',
+        targetType: target.unitType ?? 'infantry',
+        fromHex: u.tacticalHex,
+        toHex: target.tacticalHex,
+        damage: dmg,
+        heightBonus,
+        killed: false,
+      });
       u.state = 'fighting';
     } else if ((u.unitType ?? 'infantry') === 'skirmisher') {
       // RANGED: find closest enemy within SKIRMISHER_MISSILE_RANGE. Distance>=2 because
@@ -900,6 +933,26 @@ export const simulateTick = (
   damage.forEach((dmg, id) => {
     const t = byId.get(id);
     if (t) t.hp -= dmg;
+  });
+  const killedIds = new Set<string>();
+  damage.forEach((_dmg, id) => {
+    const t = byId.get(id);
+    if (t && t.hp <= 0) killedIds.add(id);
+  });
+  killedIds.forEach(id => {
+    let chosenIdx = -1;
+    for (let i = 0; i < meleeEvents.length; i++) {
+      const evt = meleeEvents[i];
+      if (evt.targetId !== id) continue;
+      if (
+        chosenIdx === -1
+        || evt.damage > meleeEvents[chosenIdx].damage
+        || (evt.damage === meleeEvents[chosenIdx].damage && evt.attackerId < meleeEvents[chosenIdx].attackerId)
+      ) {
+        chosenIdx = i;
+      }
+    }
+    if (chosenIdx >= 0) meleeEvents[chosenIdx].killed = true;
   });
 
   // Build occupancy of living units (dying ones drop out of collision checks immediately).
@@ -1045,12 +1098,18 @@ export const simulateTick = (
       // capture hex). Smaller HexUtils.distance wins; ties → enemy.
       const enemies = working.filter(u => u.hp > 0 && u.team !== groupUnits[0].team);
       const captureHexes = config.captureZone ?? [];
-      if (enemies.length === 0 && captureHexes.length === 0) continue;
 
       // Engagement-cap accounting (enemy targets only): allies of this group already
       // adjacent to each enemy at the start of the tick. New attackers spread across
       // less-crowded enemies instead of piling on the nearest.
       const groupTeam = groupUnits[0].team;
+      // Forward beacon: a far hex in the team-forward straight direction (red→N, blue→S).
+      // Unleash marches toward it whenever it has no enemy to chase and can't make forward
+      // progress to a capture hex — i.e. the centre is occupied or now sits BEHIND the
+      // unit because it already trespassed it, and unleash never reverses. Keeps the block
+      // pushing into enemy territory instead of freezing.
+      const fwdDir = HexUtils.directions[groupTeam === 'red' ? 2 : 5];
+      const forwardBeacon = (h: Hex): Hex => ({ q: h.q + fwdDir.q * 64, r: h.r + fwdDir.r * 64 });
       const baseEngagement = new Map<string, number>();
       for (const e of enemies) {
         let count = 0;
@@ -1124,17 +1183,21 @@ export const simulateTick = (
               if (step === 0) claimsThisTick.set(bestEnemy.id, (claimsThisTick.get(bestEnemy.id) ?? 0) + 1);
             } else if (bestHex) {
               u.unleashTarget = { kind: 'hex', q: bestHex.q, r: bestHex.r };
-            } else {
-              break; // nothing to do this tick.
             }
+            // else: no enemy and no free capture hex — leave unleashTarget unset; the
+            // movement step pushes toward the forward beacon instead of freezing.
           }
 
-          // 3. Build a concrete target hex from the lock, used by the movement step.
-          const lock = u.unleashTarget!;
-          const targetHex: Hex = lock.kind === 'enemy'
-            ? byId.get(lock.id)!.tacticalHex
-            : { q: lock.q, r: lock.r };
-          const bestD = HexUtils.distance(u.tacticalHex, targetHex);
+          // 3. Concrete target hex. Enemy/capture come from the lock; with NO lock the
+          //    unit has no enemy and no free capture hex — push toward the forward beacon
+          //    so unleash never freezes.
+          const lock = u.unleashTarget;
+          const chasingEnemy = lock?.kind === 'enemy';
+          let targetHex: Hex;
+          if (lock?.kind === 'enemy') targetHex = byId.get(lock.id)!.tacticalHex;
+          else if (lock?.kind === 'hex') targetHex = { q: lock.q, r: lock.r };
+          else targetHex = forwardBeacon(u.tacticalHex);
+          let bestD = HexUtils.distance(u.tacticalHex, targetHex);
 
           // 4. Movement. Skirmisher hit-and-run only against an enemy lock (no kite vs
           //    a capture hex — there's no projectile thrower-and-runner target).
@@ -1143,10 +1206,10 @@ export const simulateTick = (
           let bestNextD = bestD;
 
           const isSkirm = (u.unitType ?? 'infantry') === 'skirmisher';
-          if (lock.kind === 'enemy' && isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
+          if (chasingEnemy && isSkirm && bestD > SKIRMISHER_KITE_THRESHOLD && bestD <= SKIRMISHER_MISSILE_RANGE) {
             break; // stand still — combat phase throws the javelin.
           }
-          if (lock.kind === 'enemy' && isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
+          if (chasingEnemy && isSkirm && bestD <= SKIRMISHER_KITE_THRESHOLD) {
             const prev = u.prevTacticalHex;
             let bestRunD = bestD;
             for (const dir of HexUtils.directions) {
@@ -1200,6 +1263,47 @@ export const simulateTick = (
               }
             }
             bestNext = bestLat;
+          }
+          // Stuck and not chasing an enemy → the only capture target is behind us (centre
+          // trespassed) or occupied. Unleash never reverses; redirect to the forward
+          // beacon and retry so the block keeps pushing in. (Skipped when targetHex is
+          // already the beacon — the approach above tried it.)
+          if (!bestNext && !chasingEnemy) {
+            const beacon = forwardBeacon(u.tacticalHex);
+            if (beacon.q !== targetHex.q || beacon.r !== targetHex.r) {
+              targetHex = beacon;
+              bestD = HexUtils.distance(u.tacticalHex, targetHex);
+              bestNextD = bestD;
+              for (const idx of cone) {
+                const dir = HexUtils.directions[idx];
+                const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+                const d = HexUtils.distance(next, targetHex);
+                if (d >= bestNextD) continue;
+                if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+                if (occupancy.get(HexUtils.key(next))) continue;
+                bestNext = next;
+                bestNextD = d;
+              }
+              if (!bestNext) {
+                const prev = u.prevTacticalHex;
+                let bestLat: Hex | null = null;
+                let bestLatKey: string | null = null;
+                for (const idx of cone) {
+                  const dir = HexUtils.directions[idx];
+                  const next: Hex = { q: u.tacticalHex.q + dir.q, r: u.tacticalHex.r + dir.r };
+                  if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) continue;
+                  if (occupancy.get(HexUtils.key(next))) continue;
+                  if (prev && next.q === prev.q && next.r === prev.r) continue;
+                  if (HexUtils.distance(next, targetHex) !== bestD) continue;
+                  const nk = HexUtils.key(next);
+                  if (bestLatKey === null || nk < bestLatKey) {
+                    bestLat = next;
+                    bestLatKey = nk;
+                  }
+                }
+                bestNext = bestLat;
+              }
+            }
           }
           if (!bestNext) break;
           occupancy.delete(HexUtils.key(u.tacticalHex));
@@ -1317,5 +1421,5 @@ export const simulateTick = (
     if (t) t.hp -= dmg;
   });
 
-  return { units: working.filter(u => u.hp > 0), orders: ordersOut, projectiles };
+  return { units: working.filter(u => u.hp > 0), orders: ordersOut, projectiles, meleeEvents };
 };

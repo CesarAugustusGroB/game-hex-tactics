@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "sim": "tsx scripts/sim-formations.ts",
+    "sim:loop": "tsx scripts/sim-battle-loop.ts",
     "test:cp": "tsx scripts/test-command-points.ts",
+    "test:scoring": "tsx scripts/sim-scoring.ts",
     "units:normalize": "python scripts/normalize-units.py"
   },
   "dependencies": {

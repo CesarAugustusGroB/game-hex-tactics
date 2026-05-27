@@ -230,15 +230,15 @@ export function renderOrderPreview(ctx: OrderDragCtx): void {
 
     const isLieutenant = i === 0;
     const hex = new PIXI.Graphics();
-    hex.lineStyle(isLieutenant ? 3 : 2, isLieutenant ? 0xfacc15 : teamColor, isLieutenant ? 0.95 : 0.75);
-    hex.beginFill(isLieutenant ? 0xfacc15 : teamColor, 0.18);
     const s = HexUtils.size;
+    const pts: number[] = [];
     for (let k = 0; k < 6; k++) {
       const r = Math.PI / 180 * (60 * k);
-      if (k === 0) hex.moveTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
-      else hex.lineTo(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
+      pts.push(pos.x + s * Math.cos(r), topY + s * Math.sin(r));
     }
-    hex.closePath().endFill();
+    hex.poly(pts)
+      .fill({ color: isLieutenant ? 0xfacc15 : teamColor, alpha: 0.18 })
+      .stroke({ width: isLieutenant ? 3 : 2, color: isLieutenant ? 0xfacc15 : teamColor, alpha: isLieutenant ? 0.95 : 0.75 });
     gfx.addChild(hex);
 
     if (isLieutenant) {

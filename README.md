@@ -1,73 +1,108 @@
-# React + TypeScript + Vite
+# hex-tactics
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based hex tactics game. Generate a procedural island on a strategic
+overview, **dive** into any patch of it to a zoomed-in tactical battlefield, deploy
+Roman-style cohorts, and fight a rigid-block formation battle for the central flag.
 
-Currently, two official plugins are available:
+Single-canvas [PIXI.js](https://pixijs.com/) v8 renderer with a thin React 19 HUD.
+The battle simulator is a pure, deterministic function — no React, no PIXI — so it can
+be driven headless by the scenario harness.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Tech stack
 
-## React Compiler
+- **React 19** + **Vite 8** (TypeScript, strict mode)
+- **PIXI.js 8** — all world rendering on one canvas
+- **simplex-noise** — procedural terrain
+- **gsap** — inter-tick unit movement tweening
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Getting started
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev        # Vite dev server at http://localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server (HMR). Pass `-- --port 5174` if 5173 is taken. |
+| `npm run build` | `tsc -b` (project references) then `vite build`. Type errors fail the build. |
+| `npm run preview` | Serve the production build. |
+| `npm run lint` | ESLint over the repo (flat config in `eslint.config.js`). |
+| `npm run sim` | Headless battle harness — runs ~21 formation scenarios against the pure sim and prints results. Run after any change to `src/battle/*`. |
+| `npm run test:cp` | Assertion-based test for the Command Points module. |
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+> On Windows, `npm run sim` may fail to resolve `tsx` from PATH — run `npx tsx scripts/sim-formations.ts` directly.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## How to play
+
+**Strategic view.** You start looking at a procedural island. Toggle **SCAN**, then click
+a hex to *dive* — the renderer re-samples that exact patch of the noise field at higher
+resolution and drops you into the tactical battlefield. **REGENERATE** rolls a new island.
+
+**Tactical view.** Deploy units into your team's deployment strip (red = bottom, blue =
+top), give your groups orders, then press **SPACE** to run the battle. Win by holding the
+central 7-hex flag flower uncontested for 20 ticks, or by annihilating the enemy.
+
+Each team starts with a roster of 50 infantry / 50 cavalry / 50 skirmishers and deploys
+them as cohorts of 4. Orders cost **Command Points** (regenerating pool, cap 20); the HUD
+shows each action's cost and disables it when you can't afford it.
+
+### Units
+
+| Type | HP | Speed | Notes |
+| --- | --- | --- | --- |
+| Infantry | 100 | slow | Line-holding backbone. |
+| Cavalry | 60 | fast | High charge impact, fragile. |
+| Skirmisher | 40 | medium | Ranged missiles (range 3), kites when threatened. |
+
+### Controls (tactical view)
+
+| Key | Action |
+| --- | --- |
+| `SPACE` | Start / pause the battle |
+| `<` or `,` | Swap the team you control (red ↔ blue) |
+| `1` `2` `3` | Select group |
+| `Z` `X` `C` | Place infantry / cavalry / skirmisher (toggles place mode) |
+| `T` | Assign mode (reassign units to the selected group) |
+| `Q` | Order mode — drag to set a group's destination & facing |
+| `A` | March forward / cycle heading within the forward cone |
+| `W` | Hold (defensive stance, builds damage reduction) |
+| `E` | Charge |
+| `R` | Unleash (commit — one-way, only retreat escapes it) |
+| `F` | Retreat (disengaged groups only; refunds 80% to roster) |
+| `S` | Stop / idle |
+| `D` | Cycle formation (line → wedge → column → hex) |
+| `Backspace` | Remove the selected group from the field |
+
+Pan with click-drag, zoom with the mouse wheel (anchored to the cursor).
+
+## Project layout
+
 ```
+src/
+  main.tsx, App.tsx          React bootstrap
+  components/GameCanvas.tsx   composition root — owns state, wires hooks + HUD
+  canvas/                     PIXI layer, decomposed by responsibility
+    PixiApp.ts                Application lifecycle, textures, pointer/wheel/ticker
+    useBattleTick.ts          tick driver (simulateTick + projectiles + win check)
+    HUD.tsx                   React HUD panel
+    world-gen.ts              pure generateWorldData()
+    render/                   pure draw fns (drawTerrain, drawDetails, drawUnits)
+    input/                    input handlers (keyboard, order-drag, paint)
+  battle/                     pure sim — no React/PIXI
+    simulate.ts               simulateTick + unit/order types + tunables
+    terrain.ts                terrain modifier table
+    ai.ts                     per-team AI controller registry
+    command-points.ts         pure CP cost/debit/regen helpers
+  hex-engine/HexUtils.ts      pure flat-top axial hex math (size = 40)
+  data/                       *.json values + *.ts typed wrappers (single source of truth)
+scripts/                      headless harnesses (sim-formations, snapshot-worldgen, test-command-points)
+public/                       sprite + texture assets
+```
+
+## Documentation
+
+- **`CLAUDE.md`** / **`AGENTS.md`** — architecture guide for AI coding agents (deep + concise).
+- **`LEARNINGS.md`** — accumulated gotchas and design decisions worth remembering.
+- **`ARCHITECTURAL_REVIEW.md`** — periodic architecture health check.
+- **`docs/superpowers/`** — design specs and implementation plans per feature.
