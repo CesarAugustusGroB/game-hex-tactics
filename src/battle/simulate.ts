@@ -18,7 +18,7 @@ import {
 } from '../data/units';
 
 export type Team = 'red' | 'blue';
-export type GroupId = 1 | 2 | 3;
+export type GroupId = 1 | 2 | 3 | 4;
 export type UnitState = 'idle' | 'moving' | 'fighting';
 export type FormationType = 'hex' | 'line' | 'wedge' | 'column';
 /** Distinguishes the unit roles. Per-type tunables (speed, max HP, charge damage, missile

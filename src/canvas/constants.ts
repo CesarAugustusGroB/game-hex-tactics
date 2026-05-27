@@ -50,7 +50,9 @@ export {
 
 export { STRATEGIC_RESOLUTION, DIVE_ZOOM } from '../data/world-gen';
 
-export type InputMode = 'place' | 'assign' | 'order';
+export type InputMode = 'place' | 'order';
+
+export const GROUP_IDS: readonly GroupId[] = [1, 2, 3, 4];
 
 export type Armies = Map<string, Unit[]>;
 export type GroupOrders = Map<string, GroupOrder>;
@@ -99,4 +101,30 @@ export const deployZoneFor = (team: Team, gridData: { hex: Hex; type: string }[]
     if (team === 'red' ? py >= threshold : py <= threshold) zone.add(HexUtils.key(d.hex));
   }
   return zone;
+};
+
+/** A group is "sealed" (locked from receiving new units) while it's committed on the
+ *  field: it has living units AND either an active advance order (attackTarget set, not
+ *  idle/hold) or at least one unit standing outside its deploy zone. Empty groups, and
+ *  groups fully back inside their deploy zone (the sim blanks the order on redeploy), are
+ *  unsealed — free to fill again. `aliveTeamUnits` must already be filtered to one team's
+ *  living units. */
+export const isGroupSealed = (
+  aliveTeamUnits: Unit[], orders: GroupOrders, deployZone: Set<string>, team: Team, gid: GroupId,
+): boolean => {
+  const gu = aliveTeamUnits.filter(u => u.groupId === gid);
+  if (gu.length === 0) return false;
+  const o = orders.get(groupOrderKey(team, gid));
+  if (o && o.attackTarget != null && o.mode !== 'idle' && o.mode !== 'hold') return true;
+  return gu.some(u => !deployZone.has(HexUtils.key(u.tacticalHex)));
+};
+
+/** The group that newly-placed cohorts fill: the unsealed group that already holds units
+ *  (the one being filled), else the lowest-numbered unsealed group. Null when all four are
+ *  sealed — deployment is maxed out until a group empties or redeploys. */
+export const activeFillGroup = (
+  aliveTeamUnits: Unit[], orders: GroupOrders, deployZone: Set<string>, team: Team,
+): GroupId | null => {
+  const unsealed = GROUP_IDS.filter(g => !isGroupSealed(aliveTeamUnits, orders, deployZone, team, g));
+  return unsealed.find(g => aliveTeamUnits.some(u => u.groupId === g)) ?? unsealed[0] ?? null;
 };

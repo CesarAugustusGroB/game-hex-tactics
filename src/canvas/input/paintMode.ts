@@ -3,8 +3,8 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { getTerrainMods } from '../../battle/terrain';
 import { MAX_HP_BY_TYPE, type Team, type GroupId, type UnitType, type Unit } from '../../battle/simulate';
 import {
-  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor,
-  type Armies, type Rosters, type InputMode,
+  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, activeFillGroup,
+  type Armies, type Rosters, type InputMode, type GroupOrders,
 } from '../constants';
 import type { CpIntent } from '../../battle/command-points';
 
@@ -15,11 +15,13 @@ export interface PaintModeCtx {
   selectedGroupRef: MutableRefObject<GroupId>;
   selectedUnitTypeRef: MutableRefObject<UnitType>;
   armiesRef: MutableRefObject<Armies>;
+  groupOrdersRef: MutableRefObject<GroupOrders>;
   rostersRef: MutableRefObject<Rosters>;
   gridDataRef: MutableRefObject<{ hex: Hex; type: string }[]>;
   inputModeRef: MutableRefObject<InputMode | null>;
   setArmies: Dispatch<SetStateAction<Armies>>;
   setRosters: Dispatch<SetStateAction<Rosters>>;
+  setSelectedGroup: Dispatch<SetStateAction<GroupId>>;
   chargeCP: (team: Team, intent: CpIntent) => boolean;
   triggerBrokeFlash: (team: Team) => void;
 }
@@ -38,6 +40,12 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
   if (remaining <= 0) return;
   const strategicKey = HexUtils.key(strategicHex);
   const existing = ctx.armiesRef.current.get(strategicKey) ?? [];
+  // New cohorts always fill the active group (the one being filled, or the next free
+  // slot). A group that has marched stays sealed until it empties or redeploys home; once
+  // all four are sealed there's nowhere to deploy.
+  const aliveTeam = existing.filter(u => u.team === team && u.hp > 0);
+  const groupId = activeFillGroup(aliveTeam, ctx.groupOrdersRef.current, zone, team);
+  if (groupId === null) { ctx.triggerBrokeFlash(team); return; }
   const occupied = new Set(existing.map(u => HexUtils.key(u.tacticalHex)));
   const target: Hex[] = [];
   const candidates: Hex[] = [hex, ...HexUtils.getNeighbors(hex)];
@@ -54,7 +62,6 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
     ctx.triggerBrokeFlash(team);
     return;
   }
-  const groupId = ctx.selectedGroupRef.current;
   const newUnits: Unit[] = target.map(h => {
     const placementType = ctx.gridDataRef.current.find(d => d.hex.q === h.q && d.hex.r === h.r)?.type;
     return {
@@ -82,35 +89,10 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
     next.set(team, { ...r, [unitType]: r[unitType] - newUnits.length });
     return next;
   });
-}
-
-export function paintAssign(hex: Hex, ctx: PaintModeCtx): void {
-  const strategicHex = ctx.currentStrategicHexRef.current;
-  if (!strategicHex) return;
-  const hexKey = HexUtils.key(hex);
-  if (ctx.lastPaintedKeyRef.current === hexKey) return;
-  ctx.lastPaintedKeyRef.current = hexKey;
-  const strategicKey = HexUtils.key(strategicHex);
-  const team = ctx.selectedTeamRef.current;
-  const groupId = ctx.selectedGroupRef.current;
-  ctx.setArmies(prev => {
-    const existing = prev.get(strategicKey) ?? [];
-    let mutated = false;
-    const updated = existing.map(u => {
-      if (u.team === team && u.tacticalHex.q === hex.q && u.tacticalHex.r === hex.r && u.groupId !== groupId) {
-        mutated = true;
-        return { ...u, groupId };
-      }
-      return u;
-    });
-    if (!mutated) return prev;
-    const next = new Map(prev);
-    next.set(strategicKey, updated);
-    return next;
-  });
+  // Keep the HUD selection on the group being filled, so order buttons target it.
+  if (ctx.selectedGroupRef.current !== groupId) ctx.setSelectedGroup(groupId);
 }
 
 export function paintAt(hex: Hex, ctx: PaintModeCtx): void {
   if (ctx.inputModeRef.current === 'place') paintPlace(hex, ctx);
-  else if (ctx.inputModeRef.current === 'assign') paintAssign(hex, ctx);
 }

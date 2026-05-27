@@ -13,6 +13,7 @@ import {
   makeInitialRosters,
   FORMATION_CYCLE,
   groupOrderKey,
+  GROUP_IDS, deployZoneFor, isGroupSealed, activeFillGroup,
 } from '../canvas/constants';
 import {
   type CommandPoints, type CpIntent,
@@ -131,6 +132,9 @@ export const GameCanvas: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<GroupId>(1);
   const [selectedUnitType, setSelectedUnitType] = useState<UnitType>('infantry');
   const [groupOrders, setGroupOrders] = useState<GroupOrders>(new Map());
+  // Group-order keys whose first march of this battle has been paid (at double cost).
+  // Battle-scoped; survives order clears (Backspace, redeploy) so re-marching stays cheap.
+  const [marchedGroups, setMarchedGroups] = useState<Set<string>>(new Set());
   const [groupFormations, setGroupFormations] = useState<GroupFormations>(new Map());
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
   const [rosters, setRosters] = useState<Rosters>(makeInitialRosters);
@@ -256,6 +260,7 @@ export const GameCanvas: React.FC = () => {
   // identifiers in source order without lint complaints. `groupOrdersRef` is hoisted here for
   // the same reason; its mirror useEffect stays with the other ref mirrors below.
   const groupOrdersRef = useRef<GroupOrders>(new Map());
+  const marchedGroupsRef = useRef<Set<string>>(new Set());
 
   // Single-entry order mutation. Both the UI handlers and the AI controllers go through
   // here. Mutates `groupOrdersRef.current` synchronously AND calls `setGroupOrders`, so
@@ -327,6 +332,7 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { selectedGroupRef.current = selectedGroup; }, [selectedGroup]);
   useEffect(() => { selectedUnitTypeRef.current = selectedUnitType; }, [selectedUnitType]);
   useEffect(() => { groupOrdersRef.current = groupOrders; }, [groupOrders]);
+  useEffect(() => { marchedGroupsRef.current = marchedGroups; }, [marchedGroups]);
   useEffect(() => { groupFormationsRef.current = groupFormations; }, [groupFormations]);
   useEffect(() => { groupDepthsRef.current = groupDepths; }, [groupDepths]);
   useEffect(() => { rostersRef.current = rosters; }, [rosters]);
@@ -476,6 +482,7 @@ export const GameCanvas: React.FC = () => {
     setIsScanning,
     setCurrentStrategicHex,
     setInputMode,
+    setSelectedGroup,
     setArmies,
     setRosters,
     issueOrder,
@@ -484,6 +491,20 @@ export const GameCanvas: React.FC = () => {
     generateWorldData,
   };
   usePixiApp(pixiCtx);
+
+  // Per-group seal/fill state for the selected team's army on the current tactical hex.
+  // Drives the HUD (🔒 on sealed groups, "filling" highlight on the active one). The
+  // placement path computes the same thing independently via the shared helpers.
+  const selectedDeployZone = useMemo(() => deployZoneFor(selectedTeam, gridData), [selectedTeam, gridData]);
+  const { sealedGroups, activeGroup } = useMemo(() => {
+    const sealed = new Set<GroupId>();
+    const alive = (currentStrategicHex ? armies.get(HexUtils.key(currentStrategicHex)) ?? [] : [])
+      .filter(u => u.team === selectedTeam && u.hp > 0);
+    for (const g of GROUP_IDS) {
+      if (isGroupSealed(alive, groupOrders, selectedDeployZone, selectedTeam, g)) sealed.add(g);
+    }
+    return { sealedGroups: sealed, activeGroup: activeFillGroup(alive, groupOrders, selectedDeployZone, selectedTeam) };
+  }, [armies, groupOrders, currentStrategicHex, selectedTeam, selectedDeployZone]);
 
   const battleCtx: BattleTickCtx = {
     currentStrategicHexRef,
@@ -626,7 +647,14 @@ export const GameCanvas: React.FC = () => {
         r: avgR + dir.r * 15,
       });
     }
-    if (!chargeCP(team, 'march')) { triggerBrokeFlash(team); return; }
+    const key = groupOrderKey(team, gid);
+    const intent: CpIntent = marchedGroupsRef.current.has(key) ? 'march' : 'firstMarch';
+    if (!chargeCP(team, intent)) { triggerBrokeFlash(team); return; }
+    if (intent === 'firstMarch') {
+      const next = new Set(marchedGroupsRef.current).add(key);
+      marchedGroupsRef.current = next;
+      setMarchedGroups(next);
+    }
     issueOrder(team, gid, {
       mode: 'march',
       attackTarget,
@@ -663,6 +691,7 @@ export const GameCanvas: React.FC = () => {
     setInputMode(null);
     setIsBattleRunning(false);
     setGroupOrders(new Map());
+    setMarchedGroups(new Set());
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
@@ -681,6 +710,7 @@ export const GameCanvas: React.FC = () => {
     setInputMode(null);
     setIsBattleRunning(false);
     setGroupOrders(new Map());
+    setMarchedGroups(new Set());
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
@@ -703,6 +733,7 @@ export const GameCanvas: React.FC = () => {
     setInputMode(null);
     setIsBattleRunning(false);
     setGroupOrders(new Map());
+    setMarchedGroups(new Set());
     setGroupFormations(new Map());
     setGroupDepths(new Map());
     setRosters(makeInitialRosters());
@@ -780,6 +811,9 @@ export const GameCanvas: React.FC = () => {
       currentStrategicHex={currentStrategicHex}
       armies={armies}
       groupOrders={groupOrders}
+      marchedGroups={marchedGroups}
+      sealedGroups={sealedGroups}
+      activeGroup={activeGroup}
       groupFormations={groupFormations}
       rosters={rosters}
       selectedTeam={selectedTeam}

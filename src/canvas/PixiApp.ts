@@ -120,6 +120,7 @@ export interface PixiAppCtx {
   setIsScanning: Dispatch<SetStateAction<boolean>>;
   setCurrentStrategicHex: Dispatch<SetStateAction<Hex | null>>;
   setInputMode: Dispatch<SetStateAction<InputMode | null>>;
+  setSelectedGroup: Dispatch<SetStateAction<GroupId>>;
   setArmies: Dispatch<SetStateAction<Armies>>;
   setRosters: Dispatch<SetStateAction<Rosters>>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
@@ -365,11 +366,13 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         selectedGroupRef: ctx.selectedGroupRef,
         selectedUnitTypeRef: ctx.selectedUnitTypeRef,
         armiesRef: ctx.armiesRef,
+        groupOrdersRef: ctx.groupOrdersRef,
         rostersRef: ctx.rostersRef,
         gridDataRef: ctx.gridDataRef,
         inputModeRef: ctx.inputModeRef,
         setArmies: ctx.setArmies,
         setRosters: ctx.setRosters,
+        setSelectedGroup: ctx.setSelectedGroup,
         chargeCP: ctx.chargeCP,
         triggerBrokeFlash: ctx.triggerBrokeFlash,
       };
@@ -395,7 +398,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
 
       app.stage.on('pointerdown', (e) => {
         const mode = ctx.inputModeRef.current;
-        if ((mode === 'place' || mode === 'assign') && ctx.currentStrategicHexRef.current) {
+        if (mode === 'place' && ctx.currentStrategicHexRef.current) {
           ctx.isPaintingRef.current = true;
           ctx.lastPaintedKeyRef.current = null;
           const local = world.toLocal(e.global);
