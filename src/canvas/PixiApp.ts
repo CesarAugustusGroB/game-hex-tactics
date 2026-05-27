@@ -14,6 +14,7 @@ import {
   beginOrderDrag, updateOrderDrag, commitOrderDrag, cancelOrderDrag,
 } from './input/orderDrag';
 import { type PaintModeCtx, paintAt } from './input/paintMode';
+import { advanceUnitFollowers } from './render/drawUnits';
 import type { OrderDrag } from './input/orderDrag';
 import type { Hex } from '../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../battle/simulate';
@@ -499,6 +500,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         // Call via ref so the ticker always invokes the latest closure (which has current
         // hoveredHex / gridData / isScanning from the most recent render).
         ctx.updateHighlightsRef.current();
+        advanceUnitFollowers(ctx.unitContainersRef.current, ticker.deltaMS);
         waterFilterTime += ticker.deltaMS / 1000;
         for (const handle of ctx.waterFilterHandlesRef.current) {
           handle.uniforms.uTime = waterFilterTime;
