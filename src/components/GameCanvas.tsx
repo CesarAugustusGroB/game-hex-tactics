@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as PIXI from 'pixi.js';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import { createNoise2D } from 'simplex-noise';
@@ -724,11 +724,18 @@ export const GameCanvas: React.FC = () => {
   useEffect(() => { drawUnits(); }, [drawUnits]);
   useEffect(() => { generateWorldData(); }, [generateWorldData]);
 
+  // key → terrain type, rebuilt only when the world changes. updateHighlights runs every
+  // frame via the ticker, so a per-frame gridData.find over ~3.8k hexes is a real hotspot.
+  const tileTypeByKey = useMemo(
+    () => new Map(gridData.map(d => [HexUtils.key(d.hex), d.type])),
+    [gridData],
+  );
+
   const updateHighlights = () => {
     const h = highlightGfx.current; h.clear(); if (!hoveredHex) return;
-    const hexData = gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r);
+    const hexType = tileTypeByKey.get(HexUtils.key(hoveredHex));
     const pos = HexUtils.hexToPixel(hoveredHex);
-    const topY = pos.y - (hexData ? TERRAINS[hexData.type].height : 0);
+    const topY = pos.y - (hexType ? TERRAINS[hexType].height : 0);
     if (isScanning) {
       h.circle(pos.x, topY, HexUtils.size * 6.5)
         .fill({ color: 0x00e6ff, alpha: 0.1 })
@@ -748,7 +755,7 @@ export const GameCanvas: React.FC = () => {
   // gridData / isScanning instead of the mount-time stale values. See LEARNINGS.md.
   useEffect(() => { updateHighlightsRef.current = updateHighlights; });
 
-  const curT = hoveredHex ? TERRAINS[gridData.find(d => d.hex.q === hoveredHex.q && d.hex.r === hoveredHex.r)?.type || 'SEA'] : null;
+  const curT = hoveredHex ? TERRAINS[tileTypeByKey.get(HexUtils.key(hoveredHex)) || 'SEA'] : null;
 
   return (
     <HUD
