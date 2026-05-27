@@ -24,10 +24,10 @@ import { GRID_RADIUS, STRATEGIC_RESOLUTION } from '../src/data/world-gen';
 // map-types registry
 {
   const SHAPES = new Set(['radial', 'linear', 'flat', 'invertedRadial']);
-  assert.equal(MAP_TYPE_IDS.length, 5, '5 archetypes');
+  assert.equal(MAP_TYPE_IDS.length, 8, '8 archetypes');
   assert.deepEqual(
     [...MAP_TYPE_IDS].sort(),
-    ['archipelago', 'coastline', 'inlandSea', 'island', 'plains'],
+    ['archipelago', 'coastline', 'forest', 'highlands', 'hills', 'inlandSea', 'island', 'plains'],
     'expected archetype ids',
   );
   for (const id of MAP_TYPE_IDS) {
@@ -80,6 +80,42 @@ import { GRID_RADIUS, STRATEGIC_RESOLUTION } from '../src/data/world-gen';
   // resolveMapType: explicit passthrough, random is deterministic per seed
   assert.equal(resolveMapType('coastline', 1), 'coastline');
   assert.equal(resolveMapType('random', 555), resolveMapType('random', 555), 'random stable per seed');
+}
+
+// forest archetype: FOREST is the plurality land type (bucket override widens the band)
+{
+  const grid = generateWorldData({
+    settings: { mapType: 'forest', seed: 12345, noiseOffset: { q: 0, r: 0 }, resolution: STRATEGIC_RESOLUTION },
+    gridRadius: GRID_RADIUS,
+    viewMode: 'STRATEGIC',
+  }).gridData;
+
+  const water = new Set(['SEA', 'DEEP_SEA', 'SAND', 'RIVER']);
+  const counts = grid.reduce<Record<string, number>>((acc, d) => {
+    if (!water.has(d.type)) acc[d.type] = (acc[d.type] || 0) + 1;
+    return acc;
+  }, {});
+  const plurality = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  assert.equal(plurality[0], 'FOREST', 'forest archetype is forest-dominated');
+}
+
+// hills archetype: HILL is the plurality land type, with plains + forest present
+{
+  const grid = generateWorldData({
+    settings: { mapType: 'hills', seed: 12345, noiseOffset: { q: 0, r: 0 }, resolution: STRATEGIC_RESOLUTION },
+    gridRadius: GRID_RADIUS,
+    viewMode: 'STRATEGIC',
+  }).gridData;
+
+  const water = new Set(['SEA', 'DEEP_SEA', 'SAND', 'RIVER']);
+  const counts = grid.reduce<Record<string, number>>((acc, d) => {
+    if (!water.has(d.type)) acc[d.type] = (acc[d.type] || 0) + 1;
+    return acc;
+  }, {});
+  const plurality = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  assert.equal(plurality[0], 'HILL', 'hills archetype is hill-dominated');
+  assert.ok(counts['GRASSLAND'] > 0, 'hills has plains');
+  assert.ok(counts['FOREST'] > 0, 'hills has some forest');
 }
 
 console.log('all worldgen tests passed');

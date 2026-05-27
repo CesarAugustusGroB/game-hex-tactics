@@ -2,22 +2,27 @@ import raw from './world-gen.json';
 
 export type ShapePrimitive = 'radial' | 'linear' | 'flat' | 'invertedRadial';
 
-export type MapTypeId = 'island' | 'coastline' | 'archipelago' | 'plains' | 'inlandSea';
+export type MapTypeId =
+  | 'island' | 'coastline' | 'archipelago' | 'plains' | 'inlandSea'
+  | 'highlands' | 'forest' | 'hills';
+
+export interface BucketConfig {
+  deepSeaMult: number;
+  sandOffset: number;
+  forestMult: number;
+  hillMult: number;
+  mountainOffset: number;
+}
 
 export interface MapTypeConfig {
   shape: ShapePrimitive;
   waterLevel: number;
   mountainLevel: number;
+  bucket?: Partial<BucketConfig>; // per-archetype overrides of the global thresholds
 }
 
 export interface WorldGenConfig {
-  bucket: {
-    deepSeaMult: number;
-    sandOffset: number;
-    forestMult: number;
-    hillMult: number;
-    mountainOffset: number;
-  };
+  bucket: BucketConfig;
   falloff: { intercept: number; exponent: number };
   strategicResolution: number;
   diveZoom: number;

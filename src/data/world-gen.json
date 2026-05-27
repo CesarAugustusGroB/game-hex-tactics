@@ -18,7 +18,12 @@
     "coastline":   { "shape": "linear",         "waterLevel": 0.42, "mountainLevel": 0.85 },
     "archipelago": { "shape": "flat",           "waterLevel": 0.55, "mountainLevel": 0.88 },
     "plains":      { "shape": "flat",           "waterLevel": 0.25, "mountainLevel": 0.90 },
-    "inlandSea":   { "shape": "invertedRadial", "waterLevel": 0.45, "mountainLevel": 0.88 }
+    "inlandSea":   { "shape": "invertedRadial", "waterLevel": 0.45, "mountainLevel": 0.88 },
+    "highlands":   { "shape": "flat",           "waterLevel": 0.10, "mountainLevel": 0.48 },
+    "forest":      { "shape": "flat",           "waterLevel": 0.18, "mountainLevel": 0.92,
+                     "bucket": { "forestMult": 0.28, "hillMult": 0.85 } },
+    "hills":       { "shape": "flat",           "waterLevel": 0.12, "mountainLevel": 0.65,
+                     "bucket": { "forestMult": 0.50, "hillMult": 0.66 } }
   },
   "defaultMapType": "island"
 }

@@ -79,7 +79,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
   const cfg = MAP_TYPES[settings.mapType];
   const w = cfg.waterLevel;
   const m = cfg.mountainLevel;
-  const b = WORLD_GEN.bucket;
+  const b = { ...WORLD_GEN.bucket, ...cfg.bucket };
   const ctx: ShapeCtx = {
     gridRadius,
     intercept: WORLD_GEN.falloff.intercept,

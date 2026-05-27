@@ -72,6 +72,9 @@ const MAP_TYPE_LABELS: Record<string, string> = {
   archipelago: 'ISLES',
   plains: 'PLAINS',
   inlandSea: 'INLAND SEA',
+  highlands: 'HIGHLANDS',
+  forest: 'FOREST',
+  hills: 'HILLS',
   random: 'RANDOM',
 };
 
