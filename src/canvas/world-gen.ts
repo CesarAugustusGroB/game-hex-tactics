@@ -93,6 +93,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     coastAngle: shapeRng() * Math.PI * 2,
   };
 
+  // Note: bucketing never emits ROCKY — it exists only as a paint-mode terrain.
   const bucket = (e: number): string => {
     if (e < w * b.deepSeaMult)    return 'DEEP_SEA';
     if (e < w)                    return 'SEA';
@@ -147,7 +148,8 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     }
   }
 
-  // 2. Cohesion Pass: Remove single-hex noise
+  // 2. Cohesion Pass: snap a hex to its neighbours' majority type when >3 of 6 agree.
+  //    Smooths isolated specks and ragged biome edges (not only single-hex islands).
   const smoothedMap = new Map<string, string>();
   newMap.forEach((type, key) => {
     const hex = HexUtils.fromKey(key);
