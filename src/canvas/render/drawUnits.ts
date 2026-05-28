@@ -1,7 +1,8 @@
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
-import { MAX_HP_BY_TYPE, MARCH_HEXES_PER_TICK, CHARGE_HEXES_PER_TICK } from '../../battle/simulate';
+import { MAX_HP_BY_TYPE } from '../../battle/simulate';
+import { planFollowerLegs, PX_PER_HEX } from './followerPath';
 import type { Unit, Team } from '../../battle/simulate';
 import { getTerrainMods } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
@@ -37,16 +38,9 @@ interface UnitVisual {
 // drains it at constant speed so fractional sim speeds (1.5 hex/tick → 1,2,1,2 hexes per
 // tick) glide smoothly instead of pulsing fast/slow each tick.
 type UnitContainer = PIXI.Container & {
-  _targetKey?: string; _hexKey?: string; _visual?: UnitVisual;
+  _targetKey?: string; _hexKey?: string; _hex?: Hex; _visual?: UnitVisual;
   _path?: { x: number; y: number; speed: number }[];
 };
-
-// Center-to-center pixel spacing of adjacent hexes — converts hex/tick speeds to px/sec.
-const PX_PER_HEX = (() => {
-  const o = HexUtils.hexToPixel({ q: 0, r: 0 });
-  const n = HexUtils.hexToPixel(HexUtils.directions[0]);
-  return Math.hypot(n.x - o.x, n.y - o.y);
-})();
 
 /** Advance every unit container one frame along its queued move path at constant speed.
  *  Called from the PIXI ticker (per frame). The buffered path gives a small lag that keeps
@@ -334,6 +328,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       container.zIndex = topY;
       container._targetKey = targetKey;
       container._hexKey = hexKey;
+      container._hex = u.tacticalHex;
       container._path = [];
       const tex = u.team === 'red'
         ? (unitType === 'skirmisher' ? ctx.unitTextureRedSkirmisher : unitType === 'cavalry' ? ctx.unitTextureRedCavalry : ctx.unitTextureRed)
@@ -348,22 +343,27 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       container._hexKey = hexKey;
       container.zIndex = topY;
       const path = container._path ?? (container._path = []);
-      // Constant glide speed (px/sec) for this leg: the unit's configured hexes/tick for
-      // its current mode, slowed by destination terrain's moveCost to match the sim's
-      // longer entry cooldown on rough ground (nextMoveTick = tick + 1 + moveCost).
       const moveCost = getTerrainMods(tileType).moveCost;
-      const order = ctx.groupOrders.get(`${u.team}:${u.groupId}`);
-      const hexPerTick = order?.mode === 'charge' ? CHARGE_HEXES_PER_TICK[unitType] : MARCH_HEXES_PER_TICK[unitType];
-      const speed = (hexPerTick * PX_PER_HEX * 1000) / (TICK_MS * (1 + moveCost));
-      // Teleports (redeploy, order-drag reposition, world regen) jump farther than any
-      // single tick's march/charge could — snap instead of gliding across the map.
+      const oldHex = container._hex ?? u.tacticalHex;
+      container._hex = u.tacticalHex;
+      // Teleports (redeploy, order-drag reposition, world regen) jump farther than any single
+      // tick's march/charge could — snap instead of gliding across the map.
       const tail = path.length > 0 ? path[path.length - 1] : from;
       const jump = Math.hypot(pos.x - tail.x, topY - tail.y);
       if (jump > PX_PER_HEX * 7) {
         path.length = 0;
         container.position.set(pos.x, topY);
       } else {
-        path.push({ x: pos.x, y: topY, speed });
+        // Trace the actual per-tick hex path (no corner-cutting) at the delivered speed (no
+        // fast/slow pulsing on fractional speeds). Elevation per intermediate hex via tileType.
+        const topPixel = (h: Hex) => {
+          const t = tileTypeByKey.get(HexUtils.key(h));
+          const p = HexUtils.hexToPixel(h);
+          return { x: p.x, y: t != null ? p.y - TERRAINS[t].height : p.y };
+        };
+        const legs = planFollowerLegs(oldHex, u.tacticalHex, topPixel, moveCost);
+        if (legs.length === 0) container.position.set(pos.x, topY); // same hex, new elevation
+        else for (const leg of legs) path.push(leg);
       }
       const isHiddenMove = ctx.fogOfWar && u.team !== ctx.selectedTeam && !visibleHexes.has(hexKey);
       if (movedHex && !isFar && !isHiddenMove) {
