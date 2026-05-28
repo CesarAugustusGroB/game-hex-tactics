@@ -100,12 +100,18 @@ export class HexUtils {
   static hexLine(a: Hex, b: Hex): Hex[] {
     const n = this.distance(a, b);
     if (n === 0) return [a];
+    // Red Blob "epsilon" nudge: shift both endpoints off exact hex boundaries (in cube
+    // space q+e, r+e, s-2e) so a sample landing on an edge rounds consistently instead
+    // of direction-dependently. eps is tiny — integer endpoints still round to a and b.
+    const eps = 1e-6;
+    const aq = a.q + eps, ar = a.r + eps;
+    const bq = b.q + eps, br = b.r + eps;
     const result: Hex[] = [];
     for (let i = 0; i <= n; i++) {
       const t = i / n;
       result.push(this.hexRound({
-        q: a.q * (1 - t) + b.q * t,
-        r: a.r * (1 - t) + b.r * t,
+        q: aq * (1 - t) + bq * t,
+        r: ar * (1 - t) + br * t,
       }));
     }
     return result;
