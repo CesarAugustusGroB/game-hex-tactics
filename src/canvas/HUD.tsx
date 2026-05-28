@@ -707,15 +707,16 @@ export const HUD: React.FC<HUDProps> = ({
                       const engaged = groupUnitsHere.some(u =>
                         HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
                       );
-                      const retreatDisabled = count === 0 || engaged || !canAfford(selectedTeam, 'retreat');
+                      const retreatIntent = engaged ? 'banish' : 'retreat';
+                      const retreatDisabled = count === 0 || !canAfford(selectedTeam, retreatIntent);
                       const refundPct = Math.round(RETREAT_REFUND_FRAC * 100);
                       return (
                         <button
                           disabled={retreatDisabled}
                           title={
                             count === 0 ? 'No units in this group'
-                            : engaged ? '⚔ In melee — break contact first'
-                            : `Retreat: vanish from field + ${refundPct}% refund (shortcut: F)`
+                            : engaged ? `Banish: vanish from field + ${refundPct}% refund (shortcut: F)`
+                            : 'Retreat: pull back to the deploy zone (shortcut: F)'
                           }
                           onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
                           style={{
@@ -728,8 +729,8 @@ export const HUD: React.FC<HUDProps> = ({
                             opacity: retreatDisabled ? 0.5 : 1,
                           }}
                         >
-                          {engaged ? '⚔ RETREAT' : 'RETREAT (F)'}
-                          <CostChip cost={CP_COSTS.retreat} affordable={canAfford(selectedTeam, 'retreat')} />
+                          {engaged ? '⚔ BANISH' : 'RETREAT (F)'}
+                          <CostChip cost={CP_COSTS[retreatIntent]} affordable={canAfford(selectedTeam, retreatIntent)} />
                         </button>
                       );
                     })()}
