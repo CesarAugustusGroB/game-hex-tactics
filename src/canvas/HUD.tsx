@@ -695,9 +695,9 @@ export const HUD: React.FC<HUDProps> = ({
                       {FORMATION_LABELS[formation]} (D)
                       <CostChip cost={CP_COSTS.cycleFormation} affordable={canAfford(selectedTeam, 'cycleFormation')} />
                     </button>
-                    {/* F — RETREAT: vanish from field + refund 80% of each unit type
-                        to roster. Blocked if any unit in the group has an enemy hex
-                        adjacent (must fight out of melee). */}
+                    {/* F — RETREAT: disengaged groups pull back to the deploy zone (cheap);
+                        engaged groups BANISH — vanish from field + refund a fraction of each
+                        unit type to roster (costlier, the only escape from melee). */}
                     {(() => {
                       const allUnitsHere = currentStrategicHex ? armies.get(HexUtils.key(currentStrategicHex)) ?? [] : [];
                       const groupUnitsHere = allUnitsHere.filter(u => u.team === selectedTeam && u.groupId === gid && u.hp > 0);
