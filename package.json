@@ -14,6 +14,7 @@
     "test:scoring": "tsx scripts/sim-scoring.ts",
     "test:hold": "tsx scripts/test-hold.ts",
     "test:follower": "tsx scripts/test-follower-path.ts",
+    "test:worldgen": "tsx scripts/test-worldgen.ts",
     "units:normalize": "python scripts/normalize-units.py"
   },
   "dependencies": {

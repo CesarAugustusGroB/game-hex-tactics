@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mulberry32 } from '../src/utils/rng';
 import { MAP_TYPES, MAP_TYPE_IDS, DEFAULT_MAP_TYPE } from '../src/data/world-gen';
 import { shapeMult, type ShapeCtx } from '../src/canvas/world-gen';
-import { generateWorldData, resolveMapType } from '../src/canvas/world-gen';
+import { generateWorldData, resolveMapType, canThickenToRiver } from '../src/canvas/world-gen';
 import { GRID_RADIUS, STRATEGIC_RESOLUTION } from '../src/data/world-gen';
 
 // mulberry32: deterministic per seed, divergent across seeds
@@ -116,6 +116,38 @@ import { GRID_RADIUS, STRATEGIC_RESOLUTION } from '../src/data/world-gen';
   assert.equal(plurality[0], 'HILL', 'hills archetype is hill-dominated');
   assert.ok(counts['GRASSLAND'] > 0, 'hills has plains');
   assert.ok(counts['FOREST'] > 0, 'hills has some forest');
+}
+
+// river thickening predicate: never flood water or beach into walkable river
+{
+  assert.equal(canThickenToRiver('SEA'), false, 'SEA stays sea');
+  assert.equal(canThickenToRiver('DEEP_SEA'), false, 'DEEP_SEA stays deep sea');
+  assert.equal(canThickenToRiver('SAND'), false, 'SAND beach not flooded');
+  assert.equal(canThickenToRiver('GRASSLAND'), true, 'land can thicken');
+  assert.equal(canThickenToRiver('FOREST'), true, 'land can thicken');
+  assert.equal(canThickenToRiver('MOUNTAIN'), true, 'land can thicken');
+  assert.equal(canThickenToRiver('RIVER'), true, 'river stays river');
+}
+
+// integration: no RIVER hex is fully enclosed by open water (would imply a flooded sea tile)
+{
+  const water = new Set(['SEA', 'DEEP_SEA']);
+  for (let seed = 1; seed <= 12; seed++) {
+    const grid = generateWorldData({
+      settings: { mapType: 'island', seed, noiseOffset: { q: 7 * 4.5, r: -3 * 4.5 }, resolution: STRATEGIC_RESOLUTION / 4.5 },
+      gridRadius: GRID_RADIUS,
+      viewMode: 'TACTICAL',
+    }).gridData;
+    const typeAt = new Map(grid.map(d => [`${d.hex.q},${d.hex.r}`, d.type]));
+    for (const d of grid) {
+      if (d.type !== 'RIVER') continue;
+      const nbrs = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]]
+        .map(([dq,dr]) => typeAt.get(`${d.hex.q+dq},${d.hex.r+dr}`))
+        .filter((t): t is string => t !== undefined);
+      const allWater = nbrs.length > 0 && nbrs.every(t => water.has(t));
+      assert.ok(!allWater, `RIVER hex ${d.hex.q},${d.hex.r} (seed ${seed}) is surrounded by open water`);
+    }
+  }
 }
 
 console.log('all worldgen tests passed');

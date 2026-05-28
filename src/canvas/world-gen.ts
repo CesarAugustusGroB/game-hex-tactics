@@ -47,6 +47,12 @@ const SHAPE_SALT = 0x9e3779b9;
 const RIVER_SALT = 0x85ebca6b;
 const TYPE_SALT  = 0xc2b2ae35;
 
+// Tactical river thickening must never convert water or beach into RIVER. Flooding
+// SEA/DEEP_SEA creates walkable "bridges" across open water (the sim consults
+// isWalkable per hex); flooding SAND eats the coastline. RIVER only spreads onto land.
+export const canThickenToRiver = (type: string): boolean =>
+  type !== 'SEA' && type !== 'DEEP_SEA' && type !== 'SAND';
+
 export function resolveMapType(choice: MapTypeChoice, seed: number): MapTypeId {
   if (choice !== 'random') return choice;
   const idx = Math.floor(mulberry32((seed ^ TYPE_SALT) >>> 0)() * MAP_TYPE_IDS.length);
@@ -179,7 +185,10 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
       // Rivers thicken in TACTICAL view so they're walkable but visually substantial.
       if (viewMode === 'TACTICAL') {
         HexUtils.getNeighbors(curr).forEach(n => {
-          if (smoothedMap.has(HexUtils.key(n)) && riverRng() > 0.3) smoothedMap.set(HexUtils.key(n), 'RIVER');
+          const nk = HexUtils.key(n);
+          if (!smoothedMap.has(nk)) return;
+          const roll = riverRng() > 0.3; // drawn unconditionally to preserve RNG order
+          if (roll && canThickenToRiver(smoothedMap.get(nk)!)) smoothedMap.set(nk, 'RIVER');
         });
       }
 
