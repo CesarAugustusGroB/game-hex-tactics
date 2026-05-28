@@ -362,7 +362,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
           return { x: p.x, y: t != null ? p.y - TERRAINS[t].height : p.y };
         };
         const legs = planFollowerLegs(oldHex, u.tacticalHex, topPixel, moveCost);
-        if (legs.length === 0) container.position.set(pos.x, topY); // same hex, new elevation
+        if (legs.length === 0) { path.length = 0; container.position.set(pos.x, topY); } // same hex, new elevation — drop stale legs
         else for (const leg of legs) path.push(leg);
       }
       const isHiddenMove = ctx.fogOfWar && u.team !== ctx.selectedTeam && !visibleHexes.has(hexKey);
