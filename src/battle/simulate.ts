@@ -1264,11 +1264,15 @@ export const simulateTick = (
             }
             bestNext = bestLat;
           }
-          // Stuck and not chasing an enemy → the only capture target is behind us (centre
-          // trespassed) or occupied. Unleash never reverses; redirect to the forward
-          // beacon and retry so the block keeps pushing in. (Skipped when targetHex is
-          // already the beacon — the approach above tried it.)
-          if (!bestNext && !chasingEnemy) {
+          // Stuck → redirect to the forward beacon so unleash never freezes and keeps
+          // pushing into enemy territory (where it scores). Covers two cases: (a) the
+          // capture target is behind us (centre trespassed) or occupied; (b) the unit is
+          // locked onto an enemy it can't reach within the forward cone — e.g. it already
+          // advanced PAST the enemy line and the nearest enemy is now BEHIND it. Without
+          // this, such a unit froze instead of continuing in to score. Exception: a
+          // locked enemy that's adjacent (bestD <= 1) means we're in melee — stay and
+          // fight rather than abandoning the fight to wander forward.
+          if (!bestNext && (!chasingEnemy || bestD > 1)) {
             const beacon = forwardBeacon(u.tacticalHex);
             if (beacon.q !== targetHex.q || beacon.r !== targetHex.r) {
               targetHex = beacon;
