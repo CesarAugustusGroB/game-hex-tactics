@@ -196,6 +196,10 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
       const neighbors = HexUtils.getNeighbors(curr).filter(n => smoothedMap.has(HexUtils.key(n)));
       if (neighbors.length === 0) break;
       const next = neighbors.sort((a, b) => (elevationCache.get(HexUtils.key(a))||0) - (elevationCache.get(HexUtils.key(b))||0))[0];
+      // Rivers flow downhill: stop pooling in a basin rather than climbing the lowest ridge.
+      const currElev = elevationCache.get(k) ?? Infinity;
+      const nextElev = elevationCache.get(HexUtils.key(next)) ?? Infinity;
+      if (nextElev >= currElev) break;
       curr = next;
     }
   }
