@@ -79,7 +79,8 @@ export interface Unit {
  *               ticks; stragglers get left behind; deals impact damage in a 3-hex lance.
  * - 'retreat' : rigid-block advance in team-absolute backward direction (red→S, blue→N),
  *               ignores 'fighting' state so the block can disengage. Auto-clears the order
- *               when the group lands fully back in its deploy zone. One-way commit.
+ *               when the group lands fully back in its deploy zone. Issued by the UI only for
+ *               a DISENGAGED group (an engaged one is banished instead); interruptible.
  * - 'unleash' : break formation; each unit greedily steps toward its nearest enemy. Sets
  *               `committed=true` — group is locked out of further orders until retreat
  *               returns it home.
