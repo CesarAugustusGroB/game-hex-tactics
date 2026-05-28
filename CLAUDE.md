@@ -97,7 +97,7 @@ The same procedural function produces both views. Clicking a hex while `isScanni
 
 Three unit types (`infantry` / `cavalry` / `skirmisher`) with per-type records for HP, march/charge speed, charge impact, and (skirmisher) missile range. Fractional speed (1.5/tick) is resolved per tick via `stepsForTick(speed, tick)` so the rigid block stays integer-axial.
 
-Five order modes (`march` / `charge` / `retreat` / `unleash` / `defendHeight`). March, charge, retreat are rigid-block — every unit waits on the slowest cooldown. Unleash is per-unit greedy. DefendHeight spreads to the perimeter of a sticky home-terrain blob. Multi-step modes snapshot `startBlocked` at tick start so step N doesn't re-block step N+1 via `applyEntryCooldown` writes from step N.
+Order modes (`march` / `charge` / `retreat` / `unleash` / `hold` / `idle`). March, charge, retreat are rigid-block — every unit waits on the slowest cooldown. Unleash is per-unit greedy. Hold stands still and accrues a defensive damage reduction. Retreat (UI): a disengaged group pulls back via sim `retreat` mode; an engaged group is banished off-field for a partial refund. Multi-step modes snapshot `startBlocked` at tick start so step N doesn't re-block step N+1 via `applyEntryCooldown` writes from step N.
 
 **Critical invariant:** `tickCounterRef.current` (owned by `GameCanvas.tsx`, passed into `useBattleTick`) is monotonic. Reset it ONLY on regenerate-world and return-to-strategic. **Never** reset it when a battle starts — every unit's `nextMoveTick` is an absolute tick number, so a reset puts the whole army on a multi-hundred-tick cooldown.
 
