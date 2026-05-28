@@ -850,8 +850,10 @@ export const simulateTick = (
   const holdReductionByUnit = new Map<string, number>();
   for (const u of working) {
     const order = orders.get(groupOrderKey(u.team, u.groupId));
-    if (order?.mode === 'hold' && (order.holdTicks ?? 0) > 0) {
-      holdReductionByUnit.set(u.id, holdReduction(order.holdTicks ?? 0));
+    // Reduction applies from the tick hold is engaged: holdTicks is 0 on that tick (the
+    // motion phase increments it afterward), so count it as the 1st held tick here.
+    if (order?.mode === 'hold') {
+      holdReductionByUnit.set(u.id, holdReduction((order.holdTicks ?? 0) + 1));
     }
   }
 
