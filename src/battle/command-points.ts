@@ -18,12 +18,13 @@ export const CP_COSTS = {
   placeCohort: 2,
   orderDrag: 3,
   hold: 4,
-  // Orderly pull-back of a disengaged group (sim 'retreat' mode walks it home). Cheap so
-  // disengaging is preferable to feeding units into the line.
+  // RETREAT walks a group back to its deploy zone; BANISH vanishes it off-field for a partial
+  // roster refund. Both cost 2× while the group is in melee (the *Engaged variants) — breaking
+  // contact under fire is expensive.
   retreat: 2,
-  // Abandon a melee-locked group off the field for a partial roster refund — the only exit
-  // for an engaged (incl. unleashed/committed) group. Costs more than an orderly retreat.
   banish: 4,
+  retreatEngaged: 4,
+  banishEngaged: 8,
   charge: 6,
   unleash: 6,
 } as const;

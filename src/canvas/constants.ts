@@ -119,6 +119,16 @@ export const isGroupSealed = (
   return gu.some(u => !deployZone.has(HexUtils.key(u.tacticalHex)));
 };
 
+/** A group is "engaged" when any of its living units has an enemy in an adjacent hex. Drives
+ *  the in-combat 2× cost for RETREAT / BANISH. `units` is the full unit list for the hex. */
+export const isGroupEngaged = (units: Unit[], team: Team, gid: GroupId): boolean => {
+  const enemyHexes = new Set(
+    units.filter(u => u.team !== team && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
+  );
+  return units.some(u => u.team === team && u.groupId === gid && u.hp > 0
+    && HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))));
+};
+
 /** The group that newly-placed cohorts fill: the unsealed group that already holds units
  *  (the one being filled), else the lowest-numbered unsealed group. Null when all four are
  *  sealed — deployment is maxed out until a group empties or redeploys. */

@@ -1,12 +1,12 @@
 import React from 'react';
 import { HexUtils } from '../hex-engine/HexUtils';
 import type { Hex } from '../hex-engine/HexUtils';
-import type { OrderMode, FormationType, Team, GroupId, UnitType } from '../battle/simulate';
+import type { OrderMode, Team, GroupId, UnitType } from '../battle/simulate';
 import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '../battle/simulate';
-import type { InputMode, Armies, GroupOrders, GroupFormations, Rosters } from './constants';
+import type { InputMode, Armies, GroupOrders, Rosters } from './constants';
 import {
   POINTS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
-  FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS,
+  TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS, isGroupEngaged,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
 import { CP_COSTS, type CpIntent } from '../battle/command-points';
@@ -35,7 +35,6 @@ export interface HUDProps {
   sealedGroups: Set<GroupId>;
   /** Group that newly-placed cohorts fill; null when all four are sealed. */
   activeGroup: GroupId | null;
-  groupFormations: GroupFormations;
   rosters: Rosters;
   // selection
   selectedTeam: Team;
@@ -63,7 +62,7 @@ export interface HUDProps {
   toggleScan: () => void;
   toggleMode: (mode: Exclude<OrderMode, 'march'>) => void;
   marchForward: () => void;
-  cycleFormation: (gid: GroupId) => void;
+  banishGroup: () => void;
   resetBattle: () => void;
   returnToStrategic: () => void;
   regenerateWorld: () => void;
@@ -126,7 +125,6 @@ export const HUD: React.FC<HUDProps> = ({
   currentStrategicHex,
   armies,
   groupOrders,
-  groupFormations,
   rosters,
   selectedTeam,
   selectedGroup,
@@ -153,7 +151,7 @@ export const HUD: React.FC<HUDProps> = ({
   toggleScan,
   toggleMode,
   marchForward,
-  cycleFormation,
+  banishGroup,
   resetBattle,
   returnToStrategic,
   regenerateWorld,
@@ -466,6 +464,8 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
             {GROUP_IDS.map(gid => {
               const count = groupCounts[gid];
+              const unitsHere = currentStrategicHex ? armies.get(HexUtils.key(currentStrategicHex)) ?? [] : [];
+              const engaged = isGroupEngaged(unitsHere, selectedTeam, gid);
               const isSelectedRow = selectedGroup === gid;
               const isSealed = sealedGroups.has(gid);
               const isActiveFill = activeGroup === gid;
@@ -473,8 +473,6 @@ export const HUD: React.FC<HUDProps> = ({
               const teamColor = TEAM_TINTS[selectedTeam];
               const teamColorHex = `#${teamColor.toString(16).padStart(6, '0')}`;
               const formationKey = groupOrderKey(selectedTeam, gid);
-              const formation: FormationType = groupFormations.get(formationKey) ?? 'line';
-              const formationIsDefault = formation === 'line';
               const order = groupOrders.get(formationKey);
               const canHold = !!order?.attackTarget;
               const committed = !!order?.committed;
@@ -529,7 +527,7 @@ export const HUD: React.FC<HUDProps> = ({
                     {/* Q — DEPLOY (enter order mode for drag-deploy / direction set) */}
                     <button
                       disabled={count === 0 || (!orderActive && !canAfford(selectedTeam, 'orderDrag'))}
-                      title="Deploy: drag from a deploy-zone hex to set heading + formation (shortcut: Q)"
+                      title="Deploy: drag from a deploy-zone hex to set heading (shortcut: Q)"
                       onClick={() => {
                         setSelectedGroup(gid);
                         setInputMode(prev => (prev === 'order' && selectedGroup === gid) ? null : 'order');
@@ -677,47 +675,40 @@ export const HUD: React.FC<HUDProps> = ({
                       IDLE (S)
                       <CostChip cost={CP_COSTS.idle} affordable={canAfford(selectedTeam, 'idle')} />
                     </button>
-                    {/* D — Cycle formation */}
-                    <button
-                      disabled={isBattleRunning || !canAfford(selectedTeam, 'cycleFormation')}
-                      title={isBattleRunning ? 'Formation locked during battle' : `Formation: ${formation} (click to cycle, shortcut: D)`}
-                      onClick={() => cycleFormation(gid)}
-                      style={{
-                        ...btnBase,
-                        position: 'relative',
-                        background: isBattleRunning ? 'rgba(255,255,255,0.02)' : formationIsDefault ? 'rgba(255,255,255,0.04)' : 'rgba(148,163,184,0.18)',
-                        color: isBattleRunning ? '#475569' : formationIsDefault ? '#94a3b8' : '#e2e8f0',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        cursor: isBattleRunning ? 'not-allowed' : 'pointer',
-                        opacity: isBattleRunning ? 0.5 : 1,
-                      }}
-                    >
-                      {FORMATION_LABELS[formation]} (D)
-                      <CostChip cost={CP_COSTS.cycleFormation} affordable={canAfford(selectedTeam, 'cycleFormation')} />
-                    </button>
-                    {/* F — RETREAT: disengaged groups pull back to the deploy zone (cheap);
-                        engaged groups BANISH — vanish from field + refund a fraction of each
-                        unit type to roster (costlier, the only escape from melee). */}
+                    {/* D — BANISH: vanish the group off the field + refund a fraction of each
+                        unit type to roster (costlier). Separate from RETREAT. */}
                     {(() => {
-                      const allUnitsHere = currentStrategicHex ? armies.get(HexUtils.key(currentStrategicHex)) ?? [] : [];
-                      const groupUnitsHere = allUnitsHere.filter(u => u.team === selectedTeam && u.groupId === gid && u.hp > 0);
-                      const enemyHexes = new Set(
-                        allUnitsHere.filter(u => u.team !== selectedTeam && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
-                      );
-                      const engaged = groupUnitsHere.some(u =>
-                        HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
-                      );
-                      const retreatIntent = engaged ? 'banish' : 'retreat';
-                      const retreatDisabled = count === 0 || !canAfford(selectedTeam, retreatIntent);
+                      const banishIntent = engaged ? 'banishEngaged' : 'banish';
+                      const banishDisabled = count === 0 || !canAfford(selectedTeam, banishIntent);
                       const refundPct = Math.round(RETREAT_REFUND_FRAC * 100);
                       return (
                         <button
+                          disabled={banishDisabled}
+                          title={count === 0 ? 'No units in this group' : `Banish: vanish from field + ${refundPct}% refund${engaged ? ' (2× — in combat)' : ''} (shortcut: D)`}
+                          onClick={() => { if (!banishDisabled) banishGroup(); }}
+                          style={{
+                            ...btnBase,
+                            position: 'relative',
+                            background: banishDisabled ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.12)',
+                            color: banishDisabled ? '#475569' : '#ef4444',
+                            border: banishDisabled ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(239,68,68,0.55)',
+                            cursor: banishDisabled ? 'not-allowed' : 'pointer',
+                            opacity: banishDisabled ? 0.5 : 1,
+                          }}
+                        >
+                          ⚔ BANISH (D)
+                          <CostChip cost={CP_COSTS[banishIntent]} affordable={canAfford(selectedTeam, banishIntent)} />
+                        </button>
+                      );
+                    })()}
+                    {/* F — RETREAT: orderly pull-back to the deploy zone (cheaper). */}
+                    {(() => {
+                      const retreatIntent = engaged ? 'retreatEngaged' : 'retreat';
+                      const retreatDisabled = count === 0 || !canAfford(selectedTeam, retreatIntent);
+                      return (
+                        <button
                           disabled={retreatDisabled}
-                          title={
-                            count === 0 ? 'No units in this group'
-                            : engaged ? `Banish: vanish from field + ${refundPct}% refund (shortcut: F)`
-                            : 'Retreat: pull back to the deploy zone (shortcut: F)'
-                          }
+                          title={count === 0 ? 'No units in this group' : `Retreat: pull back to the deploy zone${engaged ? ' (2× — in combat)' : ''} (shortcut: F)`}
                           onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
                           style={{
                             ...btnBase,
@@ -729,7 +720,7 @@ export const HUD: React.FC<HUDProps> = ({
                             opacity: retreatDisabled ? 0.5 : 1,
                           }}
                         >
-                          {engaged ? '⚔ BANISH' : 'RETREAT (F)'}
+                          RETREAT (F)
                           <CostChip cost={CP_COSTS[retreatIntent]} affordable={canAfford(selectedTeam, retreatIntent)} />
                         </button>
                       );
