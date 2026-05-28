@@ -119,7 +119,6 @@ export const GameCanvas: React.FC = () => {
   const isPaintingRef = useRef(false);
   const lastPaintedKeyRef = useRef<string | null>(null);
 
-  const [gridData, setGridData] = useState<{ hex: Hex; type: string }[]>([]);
   const [hoveredHex, setHoveredHex] = useState<Hex | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -151,16 +150,12 @@ export const GameCanvas: React.FC = () => {
 
   const gridRadius = GRID_RADIUS;
 
-  // --- Smooth Tactical Generator ---
-  const generateWorldData = useCallback(() => {
-    if (!detailDensityNoiseRef.current) detailDensityNoiseRef.current = createNoise2D();
-    const { gridData } = generateWorldDataPure({
-      settings: genSettings,
-      gridRadius,
-      viewMode,
-    });
-    setGridData(gridData);
-  }, [genSettings, gridRadius, viewMode]);
+  // Pure derivation: the world is a function of (settings, radius, view). Computing it in
+  // render (not setState-in-effect) avoids an extra render cycle and the cascading-render lint.
+  const gridData = useMemo(
+    () => generateWorldDataPure({ settings: genSettings, gridRadius, viewMode }).gridData,
+    [genSettings, gridRadius, viewMode],
+  );
 
   const drawMap = useCallback(() => {
     if (!terrainTexturesLoaded) return;
@@ -481,7 +476,6 @@ export const GameCanvas: React.FC = () => {
     issueOrder,
     chargeCP,
     triggerBrokeFlash,
-    generateWorldData,
   };
   usePixiApp(pixiCtx);
 
@@ -731,7 +725,6 @@ export const GameCanvas: React.FC = () => {
 
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
-  useEffect(() => { generateWorldData(); }, [generateWorldData]);
 
   // key → terrain type, rebuilt only when the world changes. updateHighlights runs every
   // frame via the ticker, so a per-frame gridData.find over ~3.8k hexes is a real hotspot.
