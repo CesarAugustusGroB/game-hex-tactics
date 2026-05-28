@@ -279,7 +279,7 @@ export const GameCanvas: React.FC = () => {
       if (touchesIntent && !isRetreatRequest) return;
     }
     next.set(key, {
-      team, groupId, attackTarget: null, heading: 0,
+      team, groupId, attackTarget: null, heading: team === 'red' ? 2 : 5,
       ...existing,
       ...change,
     });
