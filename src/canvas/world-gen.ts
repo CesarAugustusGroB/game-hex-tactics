@@ -169,7 +169,8 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
 
   for (let i = 0; i < riverCount; i++) {
     if (starts.length === 0) break;
-    let curr = starts[Math.floor(riverRng() * starts.length)];
+    const startIdx = Math.floor(riverRng() * starts.length);
+    let curr = starts.splice(startIdx, 1)[0]; // without replacement: distinct sources
     const visited = new Set<string>();
 
     for (let s = 0; s < 300; s++) {
