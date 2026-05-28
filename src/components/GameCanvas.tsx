@@ -525,6 +525,8 @@ export const GameCanvas: React.FC = () => {
     setCommandPoints,
     cpRegenRef,
     cpMaxRef,
+    marchedGroupsRef,
+    setMarchedGroups,
   };
   useBattleTick(battleCtx, isBattleRunning);
 
