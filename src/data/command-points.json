@@ -1,5 +1,5 @@
 {
-  "cap": 20,
-  "initial": 20,
-  "regenN": 2
+  "cap": 200,
+  "initial": 200,
+  "regenN": 10
 }

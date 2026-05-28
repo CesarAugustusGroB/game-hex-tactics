@@ -4,7 +4,7 @@
   "dragThresholdPx":   24,
   "deployZoneFrac":    0.28,
   "retreatRefundFrac": 0.80,
-  "initialRoster":     { "infantry": 50, "cavalry": 50, "skirmisher": 50 },
+  "initialRoster":     { "infantry": 200, "cavalry": 200, "skirmisher": 200 },
   "cohortSize":        4,
   "capture": {
     "center": { "q": 0, "r": 0 }
