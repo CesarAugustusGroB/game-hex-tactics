@@ -263,6 +263,10 @@ export const snapHeading = (px: number, py: number): number => {
 const FORWARD_CONE_RED  = new Set<number>([1, 2, 3]);
 const FORWARD_CONE_BLUE = new Set<number>([0, 4, 5]);
 
+// Unleash projects a "beacon" this many hexes forward as a direction, not a destination.
+// Must exceed the grid diameter (gridRadius=35 → diameter 70) so it never lands on-grid.
+const UNLEASH_BEACON_DIST = 64;
+
 /** The 3 hex directions a team is allowed to advance / charge / unleash into. */
 export const forwardCone = (team: Team): Set<number> =>
   team === 'red' ? FORWARD_CONE_RED : FORWARD_CONE_BLUE;
@@ -1111,7 +1115,7 @@ export const simulateTick = (
       // unit because it already trespassed it, and unleash never reverses. Keeps the block
       // pushing into enemy territory instead of freezing.
       const fwdDir = HexUtils.directions[groupTeam === 'red' ? 2 : 5];
-      const forwardBeacon = (h: Hex): Hex => ({ q: h.q + fwdDir.q * 64, r: h.r + fwdDir.r * 64 });
+      const forwardBeacon = (h: Hex): Hex => ({ q: h.q + fwdDir.q * UNLEASH_BEACON_DIST, r: h.r + fwdDir.r * UNLEASH_BEACON_DIST });
       const baseEngagement = new Map<string, number>();
       for (const e of enemies) {
         let count = 0;
