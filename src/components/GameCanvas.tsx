@@ -528,12 +528,11 @@ export const GameCanvas: React.FC = () => {
   };
   useBattleTick(battleCtx, isBattleRunning);
 
-  // Shared toggle for CHARGE / RETREAT / UNLEASH shortcuts and HUD buttons. Toggling the
-  // active mode reverts the group to 'idle' (the rest default); CHARGE additionally arms
-  // / clears the duration counter so re-entering charge starts a fresh window.
-  // RETREAT is a special case: it vanishes a disengaged group from the field and
-  // refunds RETREAT_REFUND_FRAC of each unit type to the team's roster. If any unit in
-  // the group has an enemy adjacent, the press is a no-op.
+  // RETREAT is a special case, branching on melee engagement:
+  //   - disengaged → orderly pull-back: issue sim 'retreat' mode (walks the block home and
+  //     auto-clears the order in the deploy zone). Cheap.
+  //   - engaged    → banish: vanish the group off the field and refund RETREAT_REFUND_FRAC
+  //     of each unit type to the roster. The only escape for a melee-locked group. Costlier.
   const toggleMode = useCallback((mode: Exclude<OrderMode, 'march'>) => {
     const gid = selectedGroupRef.current;
     const team = selectedTeamRef.current;
@@ -551,32 +550,41 @@ export const GameCanvas: React.FC = () => {
       const engaged = groupUnits.some(u =>
         HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
       );
-      if (engaged) return; // melee locks the retreat — no-op
-      const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
-      for (const u of groupUnits) {
-        refund[u.unitType ?? 'infantry']++;
+      if (engaged) {
+        if (!chargeCP(team, 'banish')) {
+          triggerBrokeFlash(team);
+          return;
+        }
+        const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
+        for (const u of groupUnits) {
+          refund[u.unitType ?? 'infantry']++;
+        }
+        setArmies(prev => {
+          const next = new Map(prev);
+          const arr = next.get(sKey) ?? [];
+          next.set(sKey, arr.filter(u => !(u.team === team && u.groupId === gid)));
+          return next;
+        });
+        setRosters(prev => {
+          const next = new Map(prev);
+          const r = next.get(team) ?? { ...INITIAL_ROSTER };
+          next.set(team, {
+            infantry: r.infantry + Math.floor(refund.infantry * RETREAT_REFUND_FRAC),
+            cavalry: r.cavalry + Math.floor(refund.cavalry * RETREAT_REFUND_FRAC),
+            skirmisher: r.skirmisher + Math.floor(refund.skirmisher * RETREAT_REFUND_FRAC),
+          });
+          return next;
+        });
+        clearOrder(team, gid);
+        return;
       }
       if (!chargeCP(team, 'retreat')) {
         triggerBrokeFlash(team);
         return;
       }
-      setArmies(prev => {
-        const next = new Map(prev);
-        const arr = next.get(sKey) ?? [];
-        next.set(sKey, arr.filter(u => !(u.team === team && u.groupId === gid)));
-        return next;
+      issueOrder(team, gid, {
+        mode: 'retreat', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined,
       });
-      setRosters(prev => {
-        const next = new Map(prev);
-        const r = next.get(team) ?? { ...INITIAL_ROSTER };
-        next.set(team, {
-          infantry: r.infantry + Math.floor(refund.infantry * RETREAT_REFUND_FRAC),
-          cavalry: r.cavalry + Math.floor(refund.cavalry * RETREAT_REFUND_FRAC),
-          skirmisher: r.skirmisher + Math.floor(refund.skirmisher * RETREAT_REFUND_FRAC),
-        });
-        return next;
-      });
-      clearOrder(team, gid);
       return;
     }
     if (!cur?.attackTarget) return;
