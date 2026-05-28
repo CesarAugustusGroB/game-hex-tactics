@@ -228,7 +228,20 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
         updated.set(strategicKey, survivors);
         return updated;
       });
-      if (result.orders !== ctx.groupOrdersRef.current) ctx.setGroupOrders(result.orders);
+      // A group that just emptied (all units died, or raided the line & returned to roster)
+      // keeps its stale march/charge/committed order. Reset it to idle so when the freed
+      // slot is recycled, the freshly-placed units start idle instead of inheriting the old
+      // advance and immediately running off the deploy zone.
+      const liveGroups = new Set(survivors.map(u => `${u.team}:${u.groupId}`));
+      let orders = result.orders;
+      for (const [key, o] of orders) {
+        if (liveGroups.has(key)) continue;
+        const stale = o.attackTarget != null || (o.mode != null && o.mode !== 'idle') || o.committed;
+        if (!stale) continue;
+        if (orders === result.orders) orders = new Map(orders);
+        orders.set(key, { team: o.team, groupId: o.groupId, heading: o.heading, attackTarget: null, mode: 'idle' });
+      }
+      if (orders !== ctx.groupOrdersRef.current) ctx.setGroupOrders(orders);
     }, TICK_MS);
     return () => window.clearInterval(id);
   }, [enabled, ctx.issueOrder, ctx.clearOrder]); // eslint-disable-line react-hooks/exhaustive-deps

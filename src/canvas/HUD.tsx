@@ -6,7 +6,7 @@ import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '.
 import type { InputMode, Armies, GroupOrders, GroupFormations, Rosters } from './constants';
 import {
   POINTS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
-  FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey,
+  FORMATION_LABELS, TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
 import { CP_COSTS, type CpIntent } from '../battle/command-points';
@@ -29,6 +29,12 @@ export interface HUDProps {
   currentStrategicHex: Hex | null;
   armies: Armies;
   groupOrders: GroupOrders;
+  /** Group-order keys whose first march this battle is already paid — drives the MARCH cost chip (firstMarch vs march). */
+  marchedGroups: Set<string>;
+  /** Groups locked from receiving new units (marched + still committed on the field). */
+  sealedGroups: Set<GroupId>;
+  /** Group that newly-placed cohorts fill; null when all four are sealed. */
+  activeGroup: GroupId | null;
   groupFormations: GroupFormations;
   rosters: Rosters;
   // selection
@@ -127,6 +133,9 @@ export const HUD: React.FC<HUDProps> = ({
   selectedUnitType,
   commandPoints,
   brokeFlash,
+  marchedGroups,
+  sealedGroups,
+  activeGroup,
   canAfford,
   cpMax,
   cpRegenN,
@@ -157,7 +166,7 @@ export const HUD: React.FC<HUDProps> = ({
 }) => {
   const isPlacing = inputMode === 'place';
 
-  const groupCounts: Record<GroupId, number> = { 1: 0, 2: 0, 3: 0 };
+  const groupCounts: Record<GroupId, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
   if (currentStrategicHex) {
     const units = armies.get(HexUtils.key(currentStrategicHex)) ?? [];
     for (const u of units) {
@@ -356,7 +365,8 @@ export const HUD: React.FC<HUDProps> = ({
             const samePlacing = isPlacing && selectedUnitType === type;
             const remaining = rosters.get(selectedTeam)?.[type] ?? 0;
             const outOfStock = remaining <= 0;
-            const disabled = viewMode !== 'TACTICAL' || outOfStock || (!samePlacing && !canAfford(selectedTeam, 'placeCohort'));
+            const noActiveGroup = activeGroup === null;
+            const disabled = viewMode !== 'TACTICAL' || outOfStock || (!samePlacing && (noActiveGroup || !canAfford(selectedTeam, 'placeCohort')));
             const keyHint = type === 'infantry' ? '(Z)' : type === 'cavalry' ? '(X)' : '(C)';
             const label = type === 'infantry' ? 'INFANTRY' : type === 'cavalry' ? 'CAVALRY' : 'SKIRMISH';
             return (
@@ -372,7 +382,8 @@ export const HUD: React.FC<HUDProps> = ({
                 title={
                   viewMode !== 'TACTICAL' ? 'Dive into a tactical view first'
                   : outOfStock ? `No ${type} left in roster`
-                  : `Deploy a cohort of up to ${COHORT_SIZE} ${type} — ${remaining} remaining`
+                  : noActiveGroup ? 'All 4 groups are sealed — none can take new units until one empties or redeploys'
+                  : `Deploy a cohort of up to ${COHORT_SIZE} ${type} into G${activeGroup} — ${remaining} remaining`
                 }
                 style={{
                   flex: 1,
@@ -453,10 +464,11 @@ export const HUD: React.FC<HUDProps> = ({
             <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
               GROUPS
             </div>
-            {([1, 2, 3] as const).map(gid => {
+            {GROUP_IDS.map(gid => {
               const count = groupCounts[gid];
               const isSelectedRow = selectedGroup === gid;
-              const assignActive = inputMode === 'assign' && selectedGroup === gid;
+              const isSealed = sealedGroups.has(gid);
+              const isActiveFill = activeGroup === gid;
               const orderActive = inputMode === 'order' && selectedGroup === gid;
               const teamColor = TEAM_TINTS[selectedTeam];
               const teamColorHex = `#${teamColor.toString(16).padStart(6, '0')}`;
@@ -489,16 +501,21 @@ export const HUD: React.FC<HUDProps> = ({
                 <div key={gid} style={{
                   marginBottom: '6px',
                   padding: '4px 6px',
-                  borderLeft: isSelectedRow ? `3px solid ${teamColorHex}` : '3px solid transparent',
-                  background: isSelectedRow ? `${teamColorHex}14` : 'transparent',
+                  borderLeft: isSelectedRow ? `3px solid ${teamColorHex}` : isActiveFill ? '3px solid #10b981' : '3px solid transparent',
+                  background: isSelectedRow ? `${teamColorHex}14` : isActiveFill ? '#10b98114' : 'transparent',
                   borderRadius: '6px',
+                  opacity: isSealed ? 0.82 : 1,
                   transition: 'background 120ms, border-color 120ms',
                 }}>
-                  {/* Row 1 ──────── G  T  Q  W  E  R ──────── */}
+                  {/* Row 1 ──────── G  Q  W  E  R ──────── */}
                   <div style={{ ...rowStyle, marginBottom: '4px' }}>
                     <button
                       onClick={() => setSelectedGroup(gid)}
-                      title={`Select G${gid} (shortcut: ${gid})`}
+                      title={
+                        isSealed ? `G${gid} sealed — marched, can't add units until it empties or redeploys (shortcut: ${gid})`
+                        : isActiveFill ? `G${gid} — filling: new units deploy here (shortcut: ${gid})`
+                        : `Select G${gid} (shortcut: ${gid})`
+                      }
                       style={{
                         flex: '0 0 48px', padding: 0, background: 'transparent', border: 'none',
                         textAlign: 'left', fontSize: '11px', fontWeight: 800,
@@ -507,6 +524,7 @@ export const HUD: React.FC<HUDProps> = ({
                       }}
                     >
                       G{gid} <span style={{ color: '#64748b', fontWeight: 600 }}>×{count}</span>
+                      {isSealed ? <span title="Sealed"> 🔒</span> : isActiveFill ? <span style={{ color: '#10b981' }} title="Filling"> ▶</span> : null}
                     </button>
                     {/* Q — DEPLOY (enter order mode for drag-deploy / direction set) */}
                     <button
@@ -597,27 +615,6 @@ export const HUD: React.FC<HUDProps> = ({
                       {committed ? '🔒 UNLEASH' : 'UNLEASH (R)'}
                       {!unleashActive && !committed && <CostChip cost={CP_COSTS.unleash} affordable={canAfford(selectedTeam, 'unleash')} />}
                     </button>
-                    {/* T — ASSIGN. Sits right of UNLEASH so the row reads Q W E R T,
-                        matching the keyboard. Available regardless of order state. */}
-                    <button
-                      title="Assign units to this group (shortcut: T)"
-                      onClick={() => {
-                        setSelectedGroup(gid);
-                        setInputMode(prev => (prev === 'assign' && selectedGroup === gid) ? null : 'assign');
-                        setIsScanning(false);
-                      }}
-                      style={{
-                        ...btnBase,
-                        position: 'relative',
-                        background: assignActive ? teamColorHex : 'rgba(255,255,255,0.04)',
-                        color: assignActive ? 'white' : '#94a3b8',
-                        border: assignActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ASSIGN (T)
-                      <CostChip cost={CP_COSTS.assign} affordable={canAfford(selectedTeam, 'assign')} />
-                    </button>
                   </div>
                   {/* Row 2 ──────── A  S  D  F ──────── */}
                   <div style={{ ...rowStyle, paddingLeft: '54px' /* aligns under the QWER cluster, past the G label */ }}>
@@ -627,7 +624,9 @@ export const HUD: React.FC<HUDProps> = ({
                     {(() => {
                       const isMarching = orderMode === 'march' && !!order?.attackTarget;
                       const nextHeading = cycleConeHeading(selectedTeam, order?.heading ?? (selectedTeam === 'red' ? 2 : 5));
-                      const marchIntent: CpIntent = isMarching ? 'cycleHeading' : 'march';
+                      const marchIntent: CpIntent = isMarching
+                        ? 'cycleHeading'
+                        : marchedGroups.has(formationKey) ? 'march' : 'firstMarch';
                       const marchDisabled = count === 0 || committed || !canAfford(selectedTeam, marchIntent);
                       return (
                         <button

@@ -43,7 +43,7 @@ export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
         setSelectedTeam(prev => (prev === 'red' ? 'blue' : 'red'));
         return;
       }
-      if (e.key === '1' || e.key === '2' || e.key === '3') {
+      if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
         setSelectedGroup(Number(e.key) as GroupId);
         return;
       }

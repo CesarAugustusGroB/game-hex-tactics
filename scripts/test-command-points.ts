@@ -95,9 +95,9 @@ function check(name: string, cond: boolean, detail?: string) {
 
 // CP_COSTS table consistency
 {
-  const expected = { assign: 0, idle: 0, meta: 0, debug: 0,
+  const expected = { idle: 0, meta: 0, debug: 0,
     cycleHeading: 1, cycleFormation: 1, march: 2, placeCohort: 2, orderDrag: 3,
-    hold: 4, retreat: 4, charge: 6, unleash: 6 } as const;
+    firstMarch: 4, hold: 4, retreat: 4, charge: 6, unleash: 6 } as const;
   const expectedKeys = Object.keys(expected);
   const actualKeys = Object.keys(CP_COSTS);
   const sameSize = expectedKeys.length === actualKeys.length;
