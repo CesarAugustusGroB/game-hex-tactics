@@ -14,6 +14,7 @@ import {
   beginOrderDrag, updateOrderDrag, commitOrderDrag, cancelOrderDrag,
 } from './input/orderDrag';
 import { type PaintModeCtx, paintAt } from './input/paintMode';
+import { advanceUnitFollowers } from './render/drawUnits';
 import type { OrderDrag } from './input/orderDrag';
 import type { Hex } from '../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../battle/simulate';
@@ -120,12 +121,12 @@ export interface PixiAppCtx {
   setIsScanning: Dispatch<SetStateAction<boolean>>;
   setCurrentStrategicHex: Dispatch<SetStateAction<Hex | null>>;
   setInputMode: Dispatch<SetStateAction<InputMode | null>>;
+  setSelectedGroup: Dispatch<SetStateAction<GroupId>>;
   setArmies: Dispatch<SetStateAction<Armies>>;
   setRosters: Dispatch<SetStateAction<Rosters>>;
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
   chargeCP: (team: Team, intent: CpIntent) => boolean;
   triggerBrokeFlash: (team: Team) => void;
-  generateWorldData: () => void;
 }
 
 export function usePixiApp(ctx: PixiAppCtx): void {
@@ -365,11 +366,13 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         selectedGroupRef: ctx.selectedGroupRef,
         selectedUnitTypeRef: ctx.selectedUnitTypeRef,
         armiesRef: ctx.armiesRef,
+        groupOrdersRef: ctx.groupOrdersRef,
         rostersRef: ctx.rostersRef,
         gridDataRef: ctx.gridDataRef,
         inputModeRef: ctx.inputModeRef,
         setArmies: ctx.setArmies,
         setRosters: ctx.setRosters,
+        setSelectedGroup: ctx.setSelectedGroup,
         chargeCP: ctx.chargeCP,
         triggerBrokeFlash: ctx.triggerBrokeFlash,
       };
@@ -395,7 +398,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
 
       app.stage.on('pointerdown', (e) => {
         const mode = ctx.inputModeRef.current;
-        if ((mode === 'place' || mode === 'assign') && ctx.currentStrategicHexRef.current) {
+        if (mode === 'place' && ctx.currentStrategicHexRef.current) {
           ctx.isPaintingRef.current = true;
           ctx.lastPaintedKeyRef.current = null;
           const local = world.toLocal(e.global);
@@ -496,6 +499,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         // Call via ref so the ticker always invokes the latest closure (which has current
         // hoveredHex / gridData / isScanning from the most recent render).
         ctx.updateHighlightsRef.current();
+        advanceUnitFollowers(ctx.unitContainersRef.current, ticker.deltaMS);
         waterFilterTime += ticker.deltaMS / 1000;
         for (const handle of ctx.waterFilterHandlesRef.current) {
           handle.uniforms.uTime = waterFilterTime;
@@ -518,8 +522,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
           }
         }
       });
-
-      ctx.generateWorldData();
     };
 
     // Capture the unit-containers map for the unmount cleanup. The ref's `.current`

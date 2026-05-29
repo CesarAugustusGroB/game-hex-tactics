@@ -39,7 +39,7 @@ by responsibility — no longer a single god-file.
   - `render/` — pure draw functions: `drawTerrain.ts`, `drawDetails.ts`, `drawUnits.ts`.
   - `input/` — `useTacticalKeyboard.ts`, `useGlobalShortcuts.ts`, `orderDrag.ts`, `paintMode.ts`.
 - `src/battle/` — pure, no React/PIXI:
-  - `simulate.ts` — `simulateTick(units, orders, config) → { units, orders }`. Five order modes (`march`/`charge`/`retreat`/`unleash`/`defendHeight`), three unit types, per-type tunables.
+  - `simulate.ts` — `simulateTick(units, orders, config) → { units, orders }`. Order modes (`march`/`charge`/`retreat`/`unleash`/`hold`/`idle`), three unit types, per-type tunables.
   - `terrain.ts` — terrain modifier table (defense/moveCost/attrition/vision + downhill bonus).
   - `ai.ts` — per-team AI controller registry (`registerAiController`); the tick loop polls it before each sim step.
   - `command-points.ts` — pure CP cost/`debit`/`applyRegen` helpers (cap 20, regen +1 every 4 ticks).

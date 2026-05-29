@@ -6,17 +6,25 @@ import { CP_CAP, CP_INITIAL, CP_REGEN_N, CP_REGEN_PER_TICK_STEP } from '../data/
 export { CP_CAP, CP_INITIAL, CP_REGEN_N, CP_REGEN_PER_TICK_STEP };
 
 export const CP_COSTS = {
-  assign: 0,
   idle: 0,
   meta: 0,
   debug: 0,
   cycleHeading: 1,
   cycleFormation: 1,
   march: 2,
+  // First march of a group this battle costs double — discourages splitting the army
+  // into many small groups to drip-feed units to the enemy line for points.
+  firstMarch: 4,
   placeCohort: 2,
   orderDrag: 3,
   hold: 4,
-  retreat: 4,
+  // RETREAT walks a group back to its deploy zone; BANISH vanishes it off-field for a partial
+  // roster refund. Both cost 2× while the group is in melee (the *Engaged variants) — breaking
+  // contact under fire is expensive.
+  retreat: 2,
+  banish: 4,
+  retreatEngaged: 4,
+  banishEngaged: 8,
   charge: 6,
   unleash: 6,
 } as const;

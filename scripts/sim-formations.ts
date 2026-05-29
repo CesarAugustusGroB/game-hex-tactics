@@ -19,81 +19,6 @@ import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
 const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
 const id = (n: number): string => `u${String(n).padStart(2, '0')}`;
 
-/** 7-hex HILL blob: center (0,0) plus its 6 axial neighbors. Everything else = GRASSLAND. */
-const HILL_BLOB: Hex[] = [{ q: 0, r: 0 }, ...HexUtils.getNeighbors({ q: 0, r: 0 })];
-const HILL_TERRAIN = new Map(HILL_BLOB.map(h => [HexUtils.key(h), 'HILL']));
-
-/**
- * Same 7-hex HILL blob, with RIVERs on the E and W flanks at (2,0) and (-2,0). The
- * river-flanked HILL borders are (1,0) (touches (2,0) RIVER) and (-1,0) (touches
- * (-2,0) RIVER). These segment the perimeter:
- *   - SOUTH arc: (-1,1) SW, (0,1) SE, plus terminators (1,0) and (-1,0)
- *   - NORTH arc: (0,-1) NW, (1,-1) NE, plus the same terminators
- * Anchor on the south side should yield the SOUTH arc; anchor on the north side, the
- * NORTH arc. Used to verify river-segment defense.
- */
-const HILL_BLOB_WITH_RIVERS = new Map<string, string>(HILL_TERRAIN);
-HILL_BLOB_WITH_RIVERS.set(HexUtils.key({ q: 2, r: 0 }), 'RIVER');
-HILL_BLOB_WITH_RIVERS.set(HexUtils.key({ q: -2, r: 0 }), 'RIVER');
-
-/**
- * Radius-2 RIDGELINE blob — 19 hexes total: center + ring-1 (6 hexes) + ring-2 (12).
- * This is the realistic test size for multi-rank defense: ring-2 is the 12-hex front
- * (rank 0), ring-1 is rank 1 (6 hexes), center is rank 2 (1 hex). Surrounding hexes
- * are tagged THICKET — the player's "thicket" terminology for the lowland attackers
- * approach through. Both terrains are walkable.
- */
-const RIDGELINE_BLOB: Hex[] = (() => {
-  const out: Hex[] = [{ q: 0, r: 0 }];
-  for (let q = -2; q <= 2; q++) {
-    for (let r = -2; r <= 2; r++) {
-      const s = -q - r;
-      if (Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= 2 && (q !== 0 || r !== 0)) {
-        out.push({ q, r });
-      }
-    }
-  }
-  return out;
-})();
-const RIDGELINE_TERRAIN = new Map<string, string>(
-  RIDGELINE_BLOB.map(h => [HexUtils.key(h), 'RIDGELINE'] as [string, string]),
-);
-// Tag a band of THICKET hexes south of the ridgeline. Range r=[2,6] so the SE/SW
-// ring-2 borders (whose southern neighbors are at r=2) also count as "south-facing"
-// when defendFrom='THICKET' narrows the segment.
-for (let q = -6; q <= 6; q++) {
-  for (let r = 2; r <= 6; r++) {
-    const key = HexUtils.key({ q, r });
-    if (RIDGELINE_TERRAIN.has(key)) continue; // skip blob hexes
-    RIDGELINE_TERRAIN.set(key, 'THICKET');
-  }
-}
-
-/**
- * Same RIDGELINE blob, but with a RIVER finger entering from the south-east at
- * (3,-1), (3,0), and from the south-west at (-3,1), (-3,2). These river-flanked
- * borders cut the perimeter — defending from the south arc should ignore the
- * north arc.
- */
-const RIDGELINE_WITH_RIVERS = new Map<string, string>(RIDGELINE_TERRAIN);
-RIDGELINE_WITH_RIVERS.set(HexUtils.key({ q: 3, r: 0 }), 'RIVER');
-RIDGELINE_WITH_RIVERS.set(HexUtils.key({ q: -3, r: 2 }), 'RIVER');
-
-/**
- * Same HILL blob, but with FOREST on the east side and SAND on the west side. Used to
- * verify the directional `defendFrom` filter — defendFrom='FOREST' should pull units to
- * the east-facing borders only.
- *
- * East FOREST hexes (neighbors of E/NE/SE HILL borders):  (2,0), (2,-1), (1,1)
- * West SAND hexes (neighbors of W/SW/NW HILL borders):  (-2,0), (-2,1), (-1,-1)
- */
-const HILL_DIRECTIONAL_TERRAIN = new Map<string, string>(HILL_TERRAIN);
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 2, r: 0 }), 'FOREST');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 2, r: -1 }), 'FOREST');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: 1, r: 1 }), 'FOREST');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: -2, r: 0 }), 'SAND');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: -2, r: 1 }), 'SAND');
-HILL_DIRECTIONAL_TERRAIN.set(HexUtils.key({ q: -1, r: -1 }), 'SAND');
 
 interface ScenarioUnit {
   id: string;
@@ -143,9 +68,7 @@ const seedUnit = (s: ScenarioUnit, terrainAt?: Map<string, string>): Unit => ({
 });
 
 // Heights for terrains the harness uses. Mirrors `TERRAINS[type].height` in
-// GameCanvas.tsx for shared keys; THICKET and RIDGELINE are harness-only fictions
-// (used only by the defendHeight scenarios) and need plausible elevations so the
-// damage step's `getTerrainHeight` returns something sane on those hexes.
+// GameCanvas.tsx for shared keys; THICKET and RIDGELINE are kept for renderGrid display.
 const HARNESS_HEIGHTS: Record<string, number> = {
   SAND: 8,
   GRASSLAND: 12,
@@ -226,9 +149,8 @@ const scenarios: Scenario[] = [
     team: 'red', groupId: 1, formation: 'line', depth: 1, maxTicks: 20,
   },
   {
-    // CHARGE across open ground: 3 reds in a column charge east. Should advance
-    // CHARGE_SPEED_HEXES (2) hexes per tick for CHARGE_DURATION_TICKS (3) ticks = 6 hexes,
-    // then auto-revert to march for the remaining 7 ticks (7 more hexes) = 13 total.
+    // CHARGE across open ground: 3 reds in a column charge east. Advances
+    // CHARGE_HEXES_PER_TICK per tick for CHARGE_DURATION_TICKS ticks, then reverts to march.
     name: 'charge-clear',
     units: rowAt(1, 0, -1, 'red', 1).concat(
       rowAt(1, 0, 0, 'red', 1).map(u => ({ ...u, id: id(2) })),

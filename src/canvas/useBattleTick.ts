@@ -48,6 +48,10 @@ export interface BattleTickCtx {
   setCommandPoints: Dispatch<SetStateAction<CommandPoints>>;
   cpRegenRef: MutableRefObject<number>;
   cpMaxRef: MutableRefObject<number>;
+  // Group-order keys whose firstMarch surcharge is already paid this battle. Pruned here
+  // when a group empties so a recycled slot re-pays firstMarch.
+  marchedGroupsRef: MutableRefObject<Set<string>>;
+  setMarchedGroups: Dispatch<SetStateAction<Set<string>>>;
 }
 
 export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
@@ -228,7 +232,33 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
         updated.set(strategicKey, survivors);
         return updated;
       });
-      if (result.orders !== ctx.groupOrdersRef.current) ctx.setGroupOrders(result.orders);
+      // A group that just emptied (all units died, or raided the line & returned to roster)
+      // keeps its stale march/charge/committed order. Reset it to idle so when the freed
+      // slot is recycled, the freshly-placed units start idle instead of inheriting the old
+      // advance and immediately running off the deploy zone.
+      const liveGroups = new Set(survivors.map(u => `${u.team}:${u.groupId}`));
+      let orders = result.orders;
+      for (const [key, o] of orders) {
+        if (liveGroups.has(key)) continue;
+        const stale = o.attackTarget != null || (o.mode != null && o.mode !== 'idle') || o.committed;
+        if (!stale) continue;
+        if (orders === result.orders) orders = new Map(orders);
+        orders.set(key, { team: o.team, groupId: o.groupId, heading: o.heading, attackTarget: null, mode: 'idle' });
+      }
+      // Drop dead groups' keys from marchedGroups so a recycled slot re-pays firstMarch
+      // (keeps the anti-drip-feed surcharge from leaking on recycle).
+      const marched = ctx.marchedGroupsRef.current;
+      let prunedMarched: Set<string> | null = null;
+      for (const key of marched) {
+        if (liveGroups.has(key)) continue;
+        if (!prunedMarched) prunedMarched = new Set(marched);
+        prunedMarched.delete(key);
+      }
+      if (prunedMarched) {
+        ctx.marchedGroupsRef.current = prunedMarched;
+        ctx.setMarchedGroups(prunedMarched);
+      }
+      if (orders !== ctx.groupOrdersRef.current) ctx.setGroupOrders(orders);
     }, TICK_MS);
     return () => window.clearInterval(id);
   }, [enabled, ctx.issueOrder, ctx.clearOrder]); // eslint-disable-line react-hooks/exhaustive-deps

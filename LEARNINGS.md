@@ -467,3 +467,18 @@ Driving the app with the Playwright MCP, a battle looked frozen at ~1 FPS — `r
 - `src/hex-engine/HexUtils.ts`: axial hex math. Pointy-top, size=40, 111 lines, stable.
 - `scripts/sim-formations.ts`: manual test harness. Prints scenario results for visual inspection.
 - `PLAN.md`: prior architectural review with prioritized recommendations.
+
+## Group seal/fill: derive the state, don't store it (`feature/systems`)
+
+The "groups seal when they march, free up when empty or back home" rule (4-group cap, single auto-fill pointer) is tempting to implement as a `sealedGroups` set you mutate on march and clear in the tick loop. Don't. That path has two traps: (1) a **march-moment race** — the instant you issue the march order, units are still standing in the deploy zone, so a position-based "all units home → unseal" check in the tick loop immediately un-seals the group you just sent; (2) ongoing bookkeeping that has to be reset, kept in sync with React, and reconciled with order-clears (Backspace, redeploy).
+
+Instead derive it from state you already have:
+
+```ts
+sealed(g) = liveCount(g) > 0 && (hasActiveAdvanceOrder(g) || someUnitOutsideDeployZone(g))
+active    = unsealedGroupWithUnits ?? lowestUnsealedGroup ?? null
+```
+
+`hasActiveAdvanceOrder` (attackTarget set, mode ≠ idle/hold) seals **immediately** on march with no race — units haven't moved yet but the order is already advance-mode. The position term keeps a committed group sealed while it's out on the field even under hold/idle. The empty case (`liveCount === 0`) and the redeploy case fall out for free: the sim already **blanks the order** (`attackTarget: null`) when every living unit lands back in its deploy zone (`simulate.ts` retreat branch), so a redeployed group has no active advance order and no unit outside the zone → unsealed. One pure predicate, computed both in `GameCanvas` (for the HUD's 🔒/▶ markers, via `useMemo`) and in `paintMode.paintPlace` (to pick the fill group) — no stored state, nothing to reset.
+
+Keep this **separate** from the per-battle `marchedGroups` cost flag. Sealing is about *placement* (toggles as the group leaves/returns/empties); `marchedGroups` is about *CP cost* (first march costs double, never un-set until battle reset). A recycled slot re-marches at normal cost precisely because the two concepts don't share storage.

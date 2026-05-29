@@ -14,17 +14,17 @@ export interface TacticalKeyboardCtx {
   setIsScanning: Dispatch<SetStateAction<boolean>>;
   toggleMode: (mode: Exclude<OrderMode, 'march'>) => void;
   marchForward: () => void;
-  cycleFormation: (gid: GroupId) => void;
+  banishGroup: () => void;
 }
 
 export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
   const { viewMode, selectedGroupRef, selectedTeamRef, currentStrategicHexRef, armiesRef,
-    setInputMode, setIsScanning, toggleMode, marchForward, cycleFormation } = ctx;
+    setInputMode, setIsScanning, toggleMode, marchForward, banishGroup } = ctx;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (!'tqwerasdf'.includes(k)) return;
+      if (!'qwerasdf'.includes(k)) return;
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -32,10 +32,7 @@ export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
       const gid = selectedGroupRef.current;
       const team = selectedTeamRef.current;
 
-      if (k === 't') {
-        setInputMode(prev => (prev === 'assign' ? null : 'assign'));
-        setIsScanning(false);
-      } else if (k === 'q') {
+      if (k === 'q') {
         const hex = currentStrategicHexRef.current;
         const units = hex ? armiesRef.current.get(HexUtils.key(hex)) ?? [] : [];
         const count = units.filter(u => u.team === team && u.groupId === gid).length;
@@ -53,13 +50,13 @@ export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
       } else if (k === 'a') {
         marchForward();
       } else if (k === 'd') {
-        cycleFormation(gid);
+        banishGroup();
       } else if (k === 'f') {
         toggleMode('retreat');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, marchForward, cycleFormation, selectedGroupRef, selectedTeamRef,
+  }, [viewMode, toggleMode, marchForward, banishGroup, selectedGroupRef, selectedTeamRef,
     currentStrategicHexRef, armiesRef, setInputMode, setIsScanning]);
 }

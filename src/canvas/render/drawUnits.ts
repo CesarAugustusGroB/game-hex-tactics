@@ -2,6 +2,7 @@ import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../../battle/simulate';
+import { planFollowerLegs, PX_PER_HEX } from './followerPath';
 import type { Unit, Team } from '../../battle/simulate';
 import { getTerrainMods } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
@@ -32,7 +33,44 @@ interface UnitVisual {
   arrow: PIXI.Text;
   arrowHeading: string;
 }
-type UnitContainer = PIXI.Container & { _targetKey?: string; _hexKey?: string; _visual?: UnitVisual };
+// `_path`: pending move waypoints (hex centers) the visual still has to walk through, each
+// tagged with the px/sec speed for that leg. A per-frame follower (advanceUnitFollowers)
+// drains it at constant speed so fractional sim speeds (1.5 hex/tick → 1,2,1,2 hexes per
+// tick) glide smoothly instead of pulsing fast/slow each tick.
+type UnitContainer = PIXI.Container & {
+  _targetKey?: string; _hexKey?: string; _hex?: Hex; _visual?: UnitVisual;
+  _path?: { x: number; y: number; speed: number }[];
+};
+
+/** Advance every unit container one frame along its queued move path at constant speed.
+ *  Called from the PIXI ticker (per frame). The buffered path gives a small lag that keeps
+ *  motion continuous across the sim's lumpy per-tick hex delivery — no fast/slow pulsing,
+ *  pauses only when a unit genuinely stops (combat, idle). */
+export function advanceUnitFollowers(containers: Map<string, PIXI.Container>, deltaMS: number): void {
+  const dt = deltaMS / 1000;
+  containers.forEach(cont => {
+    const c = cont as UnitContainer;
+    if (c.destroyed || !c._path || c._path.length === 0) return;
+    // Safety against runaway lag (e.g. speed/delivery drift): never trail more than a few
+    // hexes — jump to the penultimate waypoint and glide the last leg.
+    if (c._path.length > 6) c._path.splice(0, c._path.length - 2);
+    let budget = c._path[0].speed * dt;
+    while (budget > 0 && c._path.length > 0) {
+      const wp = c._path[0];
+      const dx = wp.x - c.position.x, dy = wp.y - c.position.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= budget) {
+        c.position.set(wp.x, wp.y);
+        c._path.shift();
+        budget -= dist;
+      } else {
+        c.position.x += (dx / dist) * budget;
+        c.position.y += (dy / dist) * budget;
+        budget = 0;
+      }
+    }
+  });
+}
 
 export interface UnitsRenderContext {
   unitsGfx: PIXI.Container;
@@ -290,6 +328,8 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       container.zIndex = topY;
       container._targetKey = targetKey;
       container._hexKey = hexKey;
+      container._hex = u.tacticalHex;
+      container._path = [];
       const tex = u.team === 'red'
         ? (unitType === 'skirmisher' ? ctx.unitTextureRedSkirmisher : unitType === 'cavalry' ? ctx.unitTextureRedCavalry : ctx.unitTextureRed)
         : (unitType === 'skirmisher' ? ctx.unitTextureBlueSkirmisher : unitType === 'cavalry' ? ctx.unitTextureBlueCavalry : ctx.unitTextureBlue);
@@ -302,10 +342,29 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       container._targetKey = targetKey;
       container._hexKey = hexKey;
       container.zIndex = topY;
-      // Stretch the tween over the destination terrain's cooldown so the unit GLIDES
-      // across rough hexes instead of teleporting in TICK_MS then sitting idle.
+      const path = container._path ?? (container._path = []);
       const moveCost = getTerrainMods(tileType).moveCost;
-      const duration = (TICK_MS * (1 + moveCost)) / 1000;
+      const oldHex = container._hex ?? u.tacticalHex;
+      container._hex = u.tacticalHex;
+      // Teleports (redeploy, order-drag reposition, world regen) jump farther than any single
+      // tick's march/charge could — snap instead of gliding across the map.
+      const tail = path.length > 0 ? path[path.length - 1] : from;
+      const jump = Math.hypot(pos.x - tail.x, topY - tail.y);
+      if (jump > PX_PER_HEX * 7) {
+        path.length = 0;
+        container.position.set(pos.x, topY);
+      } else {
+        // Trace the actual per-tick hex path (no corner-cutting) at the delivered speed (no
+        // fast/slow pulsing on fractional speeds). Elevation per intermediate hex via tileType.
+        const topPixel = (h: Hex) => {
+          const t = tileTypeByKey.get(HexUtils.key(h));
+          const p = HexUtils.hexToPixel(h);
+          return { x: p.x, y: t != null ? p.y - TERRAINS[t].height : p.y };
+        };
+        const legs = planFollowerLegs(oldHex, u.tacticalHex, topPixel, moveCost);
+        if (legs.length === 0) { path.length = 0; container.position.set(pos.x, topY); } // same hex, new elevation — drop stale legs
+        else for (const leg of legs) path.push(leg);
+      }
       const isHiddenMove = ctx.fogOfWar && u.team !== ctx.selectedTeam && !visibleHexes.has(hexKey);
       if (movedHex && !isFar && !isHiddenMove) {
         spawnMovementDust({
@@ -315,18 +374,11 @@ export function drawUnits(ctx: UnitsRenderContext): void {
           to: { x: pos.x, y: topY },
           unitType,
           worldScale: ctx.worldScale,
-          duration,
+          duration: (TICK_MS * (1 + moveCost)) / 1000,
           zIndex: topY,
           seed: `${u.id}:${hexKey}`,
         });
       }
-      gsap.to(container.position, {
-        x: pos.x,
-        y: topY,
-        duration,
-        ease: 'linear',
-        overwrite: true,
-      });
     }
 
     const v = container._visual!;
