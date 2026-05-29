@@ -700,7 +700,16 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     const gridEdges: [number, number, number][] = [
       [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
     ];
+    // The two neighbour dirs whose hexes also share each vertex (flat-top, vertex i at
+    // 60·i). A vertex is lifted to the tallest of the (up to 3) hexes touching it, so a
+    // shorter hex's grid edge climbs to meet a taller neighbour's raised corner instead
+    // of being drawn at its own height and poking a stub across the taller hex's top.
+    const vertexDirs: [number, number][] = [[0, 1], [0, 5], [5, 4], [4, 3], [3, 2], [2, 1]];
     const sz = HexUtils.size;
+    const heightAt = (q: number, r: number): number => {
+      const t = terrainAt.get(HexUtils.key({ q, r }));
+      return t ? (TERRAINS[t]?.height ?? 0) : 0;
+    };
     for (const item of gridData) {
       const tDef = TERRAINS[item.type] || TERRAINS.SEA;
       const hh = tDef.height;
@@ -709,7 +718,13 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       const topV: { x: number; y: number }[] = [];
       for (let i = 0; i < 6; i++) {
         const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - hh });
+        let vh = hh;
+        for (const d of vertexDirs[i]) {
+          const nb = HexUtils.directions[d];
+          const nbh = heightAt(item.hex.q + nb.q, item.hex.r + nb.r);
+          if (nbh > vh) vh = nbh;
+        }
+        topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - vh });
       }
       for (const [v1, v2, dirIdx] of gridEdges) {
         const dir = HexUtils.directions[dirIdx];
