@@ -28,9 +28,9 @@ export {
   HEADING_ARROWS,
   INITIAL_ROSTER,
   COHORT_SIZE,
-  // RETREAT: pressing retreat on a disengaged group vanishes them from the field and
-  // refunds this fraction of each unit type back to the team's roster. Engaged groups
-  // (any unit with an enemy in an adjacent hex) get a no-op — they have to fight.
+  // RETREAT refund fraction: the banish path (engaged retreat) vanishes the group from the
+  // field and refunds this fraction of each unit type to the team's roster. A disengaged
+  // retreat instead pulls the group back to the deploy zone via the sim (no refund).
   RETREAT_REFUND_FRAC,
   CAPTURE_CENTER,
   FORMATION_CYCLE,
@@ -117,6 +117,16 @@ export const isGroupSealed = (
   const o = orders.get(groupOrderKey(team, gid));
   if (o && o.attackTarget != null && o.mode !== 'idle' && o.mode !== 'hold') return true;
   return gu.some(u => !deployZone.has(HexUtils.key(u.tacticalHex)));
+};
+
+/** A group is "engaged" when any of its living units has an enemy in an adjacent hex. Drives
+ *  the in-combat 2× cost for RETREAT / BANISH. `units` is the full unit list for the hex. */
+export const isGroupEngaged = (units: Unit[], team: Team, gid: GroupId): boolean => {
+  const enemyHexes = new Set(
+    units.filter(u => u.team !== team && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
+  );
+  return units.some(u => u.team === team && u.groupId === gid && u.hp > 0
+    && HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))));
 };
 
 /** The group that newly-placed cohorts fill: the unsealed group that already holds units

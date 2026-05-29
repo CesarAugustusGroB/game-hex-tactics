@@ -127,7 +127,6 @@ export interface PixiAppCtx {
   issueOrder: (team: Team, groupId: GroupId, change: OrderChange) => void;
   chargeCP: (team: Team, intent: CpIntent) => boolean;
   triggerBrokeFlash: (team: Team) => void;
-  generateWorldData: () => void;
 }
 
 export function usePixiApp(ctx: PixiAppCtx): void {
@@ -523,8 +522,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
           }
         }
       });
-
-      ctx.generateWorldData();
     };
 
     // Capture the unit-containers map for the unmount cleanup. The ref's `.current`

@@ -8,7 +8,7 @@ import { groupOrderKey } from '../src/canvas/constants';
 let pass = 0, fail = 0;
 const check = (name: string, cond: boolean, extra = '') => {
   console.log(`${cond ? '✓' : '✗'} ${name}${extra ? ` — ${extra}` : ''}`);
-  cond ? pass++ : fail++;
+  if (cond) pass++; else fail++;
 };
 
 const team: Team = 'red';

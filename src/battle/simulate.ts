@@ -23,9 +23,9 @@ export type UnitState = 'idle' | 'moving' | 'fighting';
 export type FormationType = 'hex' | 'line' | 'wedge' | 'column';
 /** Distinguishes the unit roles. Per-type tunables (speed, max HP, charge damage, missile
  *  range) live in `src/data/units.json` and are re-exported below as *_BY_TYPE records.
- *  - infantry:    baseline foot. 2 hexes/tick march, 4 charge. 100 HP.
- *  - cavalry:     4 hexes/tick march, 6 charge. 60 HP. 2× lance impact.
- *  - skirmisher:  3 hexes/tick march, 4 charge. 40 HP. Throws a javelin at the
+ *  - infantry:    baseline foot. March/charge speeds per `src/data/units.json`. 100 HP.
+ *  - cavalry:     March/charge speeds per `src/data/units.json`. 60 HP. 2× lance impact.
+ *  - skirmisher:  March/charge speeds per `src/data/units.json`. 40 HP. Throws a javelin at the
  *                 closest enemy within 3 hexes if NOT in melee — see ranged phase. Weak
  *                 in melee and on charge.
  *  Mixed groups take the slowest unit's speed for free (the rigid-block step waits on
@@ -79,7 +79,8 @@ export interface Unit {
  *               ticks; stragglers get left behind; deals impact damage in a 3-hex lance.
  * - 'retreat' : rigid-block advance in team-absolute backward direction (red→S, blue→N),
  *               ignores 'fighting' state so the block can disengage. Auto-clears the order
- *               when the group lands fully back in its deploy zone. One-way commit.
+ *               when the group lands fully back in its deploy zone. Issued by the UI only for
+ *               a DISENGAGED group (an engaged one is banished instead); interruptible.
  * - 'unleash' : break formation; each unit greedily steps toward its nearest enemy. Sets
  *               `committed=true` — group is locked out of further orders until retreat
  *               returns it home.
@@ -262,6 +263,10 @@ export const snapHeading = (px: number, py: number): number => {
 // Blue deploys north, attacks south → forward cone = {SE, S, SW}.
 const FORWARD_CONE_RED  = new Set<number>([1, 2, 3]);
 const FORWARD_CONE_BLUE = new Set<number>([0, 4, 5]);
+
+// Unleash projects a "beacon" this many hexes forward as a direction, not a destination.
+// Must exceed the grid diameter (gridRadius=35 → diameter 70) so it never lands on-grid.
+const UNLEASH_BEACON_DIST = 64;
 
 /** The 3 hex directions a team is allowed to advance / charge / unleash into. */
 export const forwardCone = (team: Team): Set<number> =>
@@ -850,8 +855,10 @@ export const simulateTick = (
   const holdReductionByUnit = new Map<string, number>();
   for (const u of working) {
     const order = orders.get(groupOrderKey(u.team, u.groupId));
-    if (order?.mode === 'hold' && (order.holdTicks ?? 0) > 0) {
-      holdReductionByUnit.set(u.id, holdReduction(order.holdTicks ?? 0));
+    // Reduction applies from the tick hold is engaged: holdTicks is 0 on that tick (the
+    // motion phase increments it afterward), so count it as the 1st held tick here.
+    if (order?.mode === 'hold') {
+      holdReductionByUnit.set(u.id, holdReduction((order.holdTicks ?? 0) + 1));
     }
   }
 
@@ -1109,7 +1116,7 @@ export const simulateTick = (
       // unit because it already trespassed it, and unleash never reverses. Keeps the block
       // pushing into enemy territory instead of freezing.
       const fwdDir = HexUtils.directions[groupTeam === 'red' ? 2 : 5];
-      const forwardBeacon = (h: Hex): Hex => ({ q: h.q + fwdDir.q * 64, r: h.r + fwdDir.r * 64 });
+      const forwardBeacon = (h: Hex): Hex => ({ q: h.q + fwdDir.q * UNLEASH_BEACON_DIST, r: h.r + fwdDir.r * UNLEASH_BEACON_DIST });
       const baseEngagement = new Map<string, number>();
       for (const e of enemies) {
         let count = 0;

@@ -18,7 +18,13 @@ export const CP_COSTS = {
   placeCohort: 2,
   orderDrag: 3,
   hold: 4,
-  retreat: 4,
+  // RETREAT walks a group back to its deploy zone; BANISH vanishes it off-field for a partial
+  // roster refund. Both cost 2× while the group is in melee (the *Engaged variants) — breaking
+  // contact under fire is expensive.
+  retreat: 2,
+  banish: 4,
+  retreatEngaged: 4,
+  banishEngaged: 8,
   charge: 6,
   unleash: 6,
 } as const;

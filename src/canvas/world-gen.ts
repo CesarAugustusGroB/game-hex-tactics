@@ -47,6 +47,12 @@ const SHAPE_SALT = 0x9e3779b9;
 const RIVER_SALT = 0x85ebca6b;
 const TYPE_SALT  = 0xc2b2ae35;
 
+// Tactical river thickening must never convert water or beach into RIVER. Flooding
+// SEA/DEEP_SEA creates walkable "bridges" across open water (the sim consults
+// isWalkable per hex); flooding SAND eats the coastline. RIVER only spreads onto land.
+export const canThickenToRiver = (type: string): boolean =>
+  type !== 'SEA' && type !== 'DEEP_SEA' && type !== 'SAND';
+
 export function resolveMapType(choice: MapTypeChoice, seed: number): MapTypeId {
   if (choice !== 'random') return choice;
   const idx = Math.floor(mulberry32((seed ^ TYPE_SALT) >>> 0)() * MAP_TYPE_IDS.length);
@@ -87,6 +93,7 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     coastAngle: shapeRng() * Math.PI * 2,
   };
 
+  // Note: bucketing never emits ROCKY — it exists only as a paint-mode terrain.
   const bucket = (e: number): string => {
     if (e < w * b.deepSeaMult)    return 'DEEP_SEA';
     if (e < w)                    return 'SEA';
@@ -141,7 +148,8 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
     }
   }
 
-  // 2. Cohesion Pass: Remove single-hex noise
+  // 2. Cohesion Pass: snap a hex to its neighbours' majority type when >3 of 6 agree.
+  //    Smooths isolated specks and ragged biome edges (not only single-hex islands).
   const smoothedMap = new Map<string, string>();
   newMap.forEach((type, key) => {
     const hex = HexUtils.fromKey(key);
@@ -163,7 +171,8 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
 
   for (let i = 0; i < riverCount; i++) {
     if (starts.length === 0) break;
-    let curr = starts[Math.floor(riverRng() * starts.length)];
+    const startIdx = Math.floor(riverRng() * starts.length);
+    let curr = starts.splice(startIdx, 1)[0]; // without replacement: distinct sources
     const visited = new Set<string>();
 
     for (let s = 0; s < 300; s++) {
@@ -179,13 +188,20 @@ export function generateWorldData(input: WorldGenInput): WorldGenOutput {
       // Rivers thicken in TACTICAL view so they're walkable but visually substantial.
       if (viewMode === 'TACTICAL') {
         HexUtils.getNeighbors(curr).forEach(n => {
-          if (smoothedMap.has(HexUtils.key(n)) && riverRng() > 0.3) smoothedMap.set(HexUtils.key(n), 'RIVER');
+          const nk = HexUtils.key(n);
+          if (!smoothedMap.has(nk)) return;
+          const roll = riverRng() > 0.3; // drawn unconditionally to preserve RNG order
+          if (roll && canThickenToRiver(smoothedMap.get(nk)!)) smoothedMap.set(nk, 'RIVER');
         });
       }
 
       const neighbors = HexUtils.getNeighbors(curr).filter(n => smoothedMap.has(HexUtils.key(n)));
       if (neighbors.length === 0) break;
       const next = neighbors.sort((a, b) => (elevationCache.get(HexUtils.key(a))||0) - (elevationCache.get(HexUtils.key(b))||0))[0];
+      // Rivers flow downhill: stop pooling in a basin rather than climbing the lowest ridge.
+      const currElev = elevationCache.get(k) ?? Infinity;
+      const nextElev = elevationCache.get(HexUtils.key(next)) ?? Infinity;
+      if (nextElev >= currElev) break;
       curr = next;
     }
   }

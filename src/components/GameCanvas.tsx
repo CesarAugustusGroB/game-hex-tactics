@@ -11,9 +11,8 @@ import {
   type Rosters,
   INITIAL_ROSTER, RETREAT_REFUND_FRAC,
   makeInitialRosters,
-  FORMATION_CYCLE,
   groupOrderKey,
-  GROUP_IDS, deployZoneFor, isGroupSealed, activeFillGroup,
+  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged, activeFillGroup,
 } from '../canvas/constants';
 import {
   type CommandPoints, type CpIntent,
@@ -120,7 +119,6 @@ export const GameCanvas: React.FC = () => {
   const isPaintingRef = useRef(false);
   const lastPaintedKeyRef = useRef<string | null>(null);
 
-  const [gridData, setGridData] = useState<{ hex: Hex; type: string }[]>([]);
   const [hoveredHex, setHoveredHex] = useState<Hex | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -155,16 +153,12 @@ export const GameCanvas: React.FC = () => {
 
   const gridRadius = GRID_RADIUS;
 
-  // --- Smooth Tactical Generator ---
-  const generateWorldData = useCallback(() => {
-    if (!detailDensityNoiseRef.current) detailDensityNoiseRef.current = createNoise2D();
-    const { gridData } = generateWorldDataPure({
-      settings: genSettings,
-      gridRadius,
-      viewMode,
-    });
-    setGridData(gridData);
-  }, [genSettings, gridRadius, viewMode]);
+  // Pure derivation: the world is a function of (settings, radius, view). Computing it in
+  // render (not setState-in-effect) avoids an extra render cycle and the cascading-render lint.
+  const gridData = useMemo(
+    () => generateWorldDataPure({ settings: genSettings, gridRadius, viewMode }).gridData,
+    [genSettings, gridRadius, viewMode],
+  );
 
   const drawMap = useCallback(() => {
     if (!terrainTexturesLoaded) return;
@@ -284,7 +278,7 @@ export const GameCanvas: React.FC = () => {
       if (touchesIntent && !isRetreatRequest) return;
     }
     next.set(key, {
-      team, groupId, attackTarget: null, heading: 0,
+      team, groupId, attackTarget: null, heading: team === 'red' ? 2 : 5,
       ...existing,
       ...change,
     });
@@ -488,7 +482,6 @@ export const GameCanvas: React.FC = () => {
     issueOrder,
     chargeCP,
     triggerBrokeFlash,
-    generateWorldData,
   };
   usePixiApp(pixiCtx);
 
@@ -531,15 +524,14 @@ export const GameCanvas: React.FC = () => {
     setCommandPoints,
     cpRegenRef,
     cpMaxRef,
+    marchedGroupsRef,
+    setMarchedGroups,
   };
   useBattleTick(battleCtx, isBattleRunning);
 
-  // Shared toggle for CHARGE / RETREAT / UNLEASH shortcuts and HUD buttons. Toggling the
-  // active mode reverts the group to 'idle' (the rest default); CHARGE additionally arms
-  // / clears the duration counter so re-entering charge starts a fresh window.
-  // RETREAT is a special case: it vanishes a disengaged group from the field and
-  // refunds RETREAT_REFUND_FRAC of each unit type to the team's roster. If any unit in
-  // the group has an enemy adjacent, the press is a no-op.
+  // RETREAT: orderly pull-back — issue sim 'retreat' mode (walks the block backward and
+  // auto-clears the order when it lands in the deploy zone). Works mid-melee (the sim ignores
+  // 'fighting' to disengage). BANISH (vanish + refund) is a separate action — see banishGroup.
   const toggleMode = useCallback((mode: Exclude<OrderMode, 'march'>) => {
     const gid = selectedGroupRef.current;
     const team = selectedTeamRef.current;
@@ -547,48 +539,23 @@ export const GameCanvas: React.FC = () => {
     if (mode === 'retreat') {
       const strategic = currentStrategicHexRef.current;
       if (!strategic) return;
-      const sKey = HexUtils.key(strategic);
-      const all = armiesRef.current.get(sKey) ?? [];
+      const all = armiesRef.current.get(HexUtils.key(strategic)) ?? [];
       const groupUnits = all.filter(u => u.team === team && u.groupId === gid && u.hp > 0);
       if (groupUnits.length === 0) return;
-      const enemyHexes = new Set(
-        all.filter(u => u.team !== team && u.hp > 0).map(u => HexUtils.key(u.tacticalHex)),
-      );
-      const engaged = groupUnits.some(u =>
-        HexUtils.getNeighbors(u.tacticalHex).some(n => enemyHexes.has(HexUtils.key(n))),
-      );
-      if (engaged) return; // melee locks the retreat — no-op
-      const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
-      for (const u of groupUnits) {
-        refund[u.unitType ?? 'infantry']++;
-      }
-      if (!chargeCP(team, 'retreat')) {
+      const intent: CpIntent = isGroupEngaged(all, team, gid) ? 'retreatEngaged' : 'retreat';
+      if (!chargeCP(team, intent)) {
         triggerBrokeFlash(team);
         return;
       }
-      setArmies(prev => {
-        const next = new Map(prev);
-        const arr = next.get(sKey) ?? [];
-        next.set(sKey, arr.filter(u => !(u.team === team && u.groupId === gid)));
-        return next;
+      issueOrder(team, gid, {
+        mode: 'retreat', chargeTicksRemaining: undefined, chargeDamagedIds: undefined, holdTicks: undefined,
       });
-      setRosters(prev => {
-        const next = new Map(prev);
-        const r = next.get(team) ?? { ...INITIAL_ROSTER };
-        next.set(team, {
-          infantry: r.infantry + Math.floor(refund.infantry * RETREAT_REFUND_FRAC),
-          cavalry: r.cavalry + Math.floor(refund.cavalry * RETREAT_REFUND_FRAC),
-          skirmisher: r.skirmisher + Math.floor(refund.skirmisher * RETREAT_REFUND_FRAC),
-        });
-        return next;
-      });
-      clearOrder(team, gid);
       return;
     }
     if (!cur?.attackTarget) return;
-    // Once committed (post-unleash), no further mode changes — RETREAT was handled
-    // above and is the only escape. The HUD button is also disabled but the keyboard
-    // could still fire — short-circuit here for symmetry.
+    // Once committed (post-unleash), no further mode changes — RETREAT (above) and BANISH (a
+    // separate action) are the escapes. The HUD buttons for other modes are disabled but the
+    // keyboard could still fire — short-circuit here for symmetry.
     if (cur.committed) return;
     const isActive = (cur.mode ?? 'idle') === mode;
     if (isActive) {
@@ -612,7 +579,45 @@ export const GameCanvas: React.FC = () => {
       // Unleash is the only remaining one-way commit (retreat is handled separately above).
       committed: mode === 'unleash' ? true : undefined,
     });
-  }, [issueOrder, clearOrder, chargeCP, triggerBrokeFlash]);
+  }, [issueOrder, chargeCP, triggerBrokeFlash]);
+
+  // BANISH: remove the group from the field entirely and refund RETREAT_REFUND_FRAC of each
+  // unit type to the roster. Available regardless of engagement — the costlier "pull them out
+  // now for a partial refund" option (vs RETREAT, which walks them back to redeploy).
+  const banishGroup = useCallback(() => {
+    const gid = selectedGroupRef.current;
+    const team = selectedTeamRef.current;
+    const strategic = currentStrategicHexRef.current;
+    if (!strategic) return;
+    const sKey = HexUtils.key(strategic);
+    const all = armiesRef.current.get(sKey) ?? [];
+    const groupUnits = all.filter(u => u.team === team && u.groupId === gid && u.hp > 0);
+    if (groupUnits.length === 0) return;
+    const intent: CpIntent = isGroupEngaged(all, team, gid) ? 'banishEngaged' : 'banish';
+    if (!chargeCP(team, intent)) {
+      triggerBrokeFlash(team);
+      return;
+    }
+    const refund: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
+    for (const u of groupUnits) refund[u.unitType ?? 'infantry']++;
+    setArmies(prev => {
+      const next = new Map(prev);
+      const arr = next.get(sKey) ?? [];
+      next.set(sKey, arr.filter(u => !(u.team === team && u.groupId === gid)));
+      return next;
+    });
+    setRosters(prev => {
+      const next = new Map(prev);
+      const r = next.get(team) ?? { ...INITIAL_ROSTER };
+      next.set(team, {
+        infantry: r.infantry + Math.floor(refund.infantry * RETREAT_REFUND_FRAC),
+        cavalry: r.cavalry + Math.floor(refund.cavalry * RETREAT_REFUND_FRAC),
+        skirmisher: r.skirmisher + Math.floor(refund.skirmisher * RETREAT_REFUND_FRAC),
+      });
+      return next;
+    });
+    clearOrder(team, gid);
+  }, [chargeCP, triggerBrokeFlash, clearOrder]);
 
   // A / MARCH: dual-purpose action on the selected group.
   //   - If currently marching: cycle heading within the team's forward cone.
@@ -672,19 +677,6 @@ export const GameCanvas: React.FC = () => {
       return next;
     });
   }, []);
-
-  const cycleFormation = useCallback((gid: GroupId) => {
-    const team = selectedTeamRef.current;
-    if (!chargeCP(team, 'cycleFormation')) { triggerBrokeFlash(team); return; }
-    const key = groupOrderKey(team, gid);
-    setGroupFormations(prev => {
-      const next = new Map(prev);
-      const cur = next.get(key) ?? 'line';
-      const idx = FORMATION_CYCLE.indexOf(cur);
-      next.set(key, FORMATION_CYCLE[(idx + 1) % FORMATION_CYCLE.length]);
-      return next;
-    });
-  }, [chargeCP, triggerBrokeFlash]);
 
   const resetBattle = useCallback(() => {
     setArmies(new Map());
@@ -750,7 +742,7 @@ export const GameCanvas: React.FC = () => {
 
   useTacticalKeyboard({
     viewMode, selectedGroupRef, selectedTeamRef, currentStrategicHexRef, armiesRef,
-    setInputMode, setIsScanning, toggleMode, marchForward, cycleFormation,
+    setInputMode, setIsScanning, toggleMode, marchForward, banishGroup,
   });
 
   useGlobalShortcuts({
@@ -762,7 +754,6 @@ export const GameCanvas: React.FC = () => {
 
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
   useEffect(() => { drawUnits(); }, [drawUnits]);
-  useEffect(() => { generateWorldData(); }, [generateWorldData]);
 
   // key → terrain type, rebuilt only when the world changes. updateHighlights runs every
   // frame via the ticker, so a per-frame gridData.find over ~3.8k hexes is a real hotspot.
@@ -814,7 +805,6 @@ export const GameCanvas: React.FC = () => {
       marchedGroups={marchedGroups}
       sealedGroups={sealedGroups}
       activeGroup={activeGroup}
-      groupFormations={groupFormations}
       rosters={rosters}
       selectedTeam={selectedTeam}
       selectedGroup={selectedGroup}
@@ -831,7 +821,7 @@ export const GameCanvas: React.FC = () => {
       toggleScan={toggleScan}
       toggleMode={toggleMode}
       marchForward={marchForward}
-      cycleFormation={cycleFormation}
+      banishGroup={banishGroup}
       resetBattle={resetBattle}
       returnToStrategic={returnToStrategic}
       regenerateWorld={regenerateWorld}

@@ -55,6 +55,9 @@ export function beginOrderDrag(e: PIXI.FederatedPointerEvent, world: PIXI.Contai
     u => u.team === team && u.groupId === groupId,
   );
   if (groupUnits.length === 0) return;
+  // Committed (unleashed) groups are locked — don't begin a redeploy drag (it would charge
+  // CP and teleport units before issueOrder rejects the change).
+  if (ctx.groupOrdersRef.current.get(groupOrderKey(team, groupId))?.committed) return;
   const local = world.toLocal(e.global);
   const targetHex = HexUtils.pixelToHex({ x: local.x, y: local.y });
   const formation = ctx.groupFormationsRef.current.get(groupOrderKey(team, groupId)) ?? 'line';
