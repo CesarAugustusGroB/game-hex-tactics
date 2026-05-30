@@ -3,7 +3,7 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { getTerrainMods } from '../../battle/terrain';
 import { MAX_HP_BY_TYPE, type Team, type GroupId, type UnitType, type Unit } from '../../battle/simulate';
 import {
-  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, activeFillGroup,
+  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, terrainMapFor, activeFillGroup,
   type Armies, type Rosters, type InputMode, type GroupOrders,
 } from '../constants';
 import type { CpIntent } from '../../battle/command-points';
@@ -62,8 +62,9 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
     ctx.triggerBrokeFlash(team);
     return;
   }
+  const terrainAt = terrainMapFor(ctx.gridDataRef.current);
   const newUnits: Unit[] = target.map(h => {
-    const placementType = ctx.gridDataRef.current.find(d => d.hex.q === h.q && d.hex.r === h.r)?.type;
+    const placementType = terrainAt.get(HexUtils.key(h));
     return {
       id: crypto.randomUUID(),
       team,

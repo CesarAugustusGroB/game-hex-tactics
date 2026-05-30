@@ -10,6 +10,8 @@ export interface WaterFilterConfig {
 export interface WaterFilterHandle {
   filter: PIXI.Filter;
   uniforms: { uTime: number };
+  /** Set once when cached so `drawTerrain` can reuse the handle across redraws. */
+  kind?: 'deepSea' | 'coastal';
 }
 
 export const WATER_FILTER_CONFIGS: Record<'deepSea' | 'coastal', WaterFilterConfig> = {

@@ -6,7 +6,7 @@ import { planFollowerLegs, PX_PER_HEX } from './followerPath';
 import type { Unit, Team } from '../../battle/simulate';
 import { getTerrainMods } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
-import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, type Armies, type GroupOrders } from '../constants';
+import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, terrainMapFor, type Armies, type GroupOrders } from '../constants';
 import { spawnMovementDust } from './movementFx';
 
 const UNIT_SPRITE_SIZE = 112;
@@ -18,7 +18,23 @@ const HP_BAR_W = 26;
 const HP_BAR_H = 4;
 const HP_BAR_Y = -40;
 const BADGE_Y = -44;
-const STAR_STYLE = { fontSize: 14, fontWeight: '900' as const, fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } };
+// Gold ★ / → style for lieutenant markers — shared with the order-drag preview.
+export const STAR_STYLE = { fontSize: 14, fontWeight: '900' as const, fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } };
+
+// Kill EVERY GSAP tween bound to a unit container before destroy. Killing only the
+// container + its position MISSES the children — the unit-sprite carries the melee lunge
+// tween, and a surviving tween keeps setting .x/.y on a freed (null) object every frame,
+// throwing inside GSAP's rAF. One such throw aborts that frame's whole tween pass → ALL
+// units freeze for a frame and then jump = the "teleport". Children must be killed too.
+export const killUnitTweens = (cont: PIXI.Container): void => {
+  gsap.killTweensOf(cont);
+  gsap.killTweensOf(cont.position);
+  for (const child of cont.children) {
+    gsap.killTweensOf(child);
+    gsap.killTweensOf((child as PIXI.Container).position);
+    gsap.killTweensOf((child as PIXI.Container).scale);
+  }
+};
 
 // Persistent per-unit children, created once and mutated each tick. Stored on the unit
 // container as `_visual` (same casting convention the codebase uses for `_targetKey`).
@@ -192,20 +208,6 @@ export function drawUnits(ctx: UnitsRenderContext): void {
   const c = ctx.unitsGfx;
   const armyTex = ctx.armyTexture;
 
-  // Kill EVERY GSAP tween bound to a unit before destroy. Killing only the container +
-  // its position MISSED the children — the unit-sprite carries the melee lunge tween, and
-  // a surviving tween keeps setting .x/.y on a freed (null) object every frame, throwing
-  // inside GSAP's rAF. One such throw aborts that frame's whole tween pass → ALL units
-  // freeze for a frame and then jump = the "teleport". Children must be killed too.
-  const killUnitTweens = (cont: PIXI.Container) => {
-    gsap.killTweensOf(cont);
-    gsap.killTweensOf(cont.position);
-    for (const child of cont.children) {
-      gsap.killTweensOf(child);
-      gsap.killTweensOf((child as PIXI.Container).position);
-      gsap.killTweensOf((child as PIXI.Container).scale);
-    }
-  };
   const destroyAllUnitContainers = () => {
     ctx.unitContainers.forEach(cont => {
       killUnitTweens(cont);
@@ -214,8 +216,9 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     ctx.unitContainers.clear();
   };
 
-  // Single O(hexes) build, then O(1) lookups — replaces per-unit / per-ring gridData.find.
-  const tileTypeByKey = new Map<string, string>(ctx.gridData.map(d => [HexUtils.key(d.hex), d.type]));
+  // O(1) lookups, shared across consumers via the gridData-identity cache (drawUnits runs
+  // every tick — rebuilding this map per call was pure waste).
+  const tileTypeByKey = terrainMapFor(ctx.gridData);
 
   if (ctx.viewMode === 'STRATEGIC') {
     destroyAllUnitContainers();

@@ -23,7 +23,7 @@ import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
 import { HUD } from '../canvas/HUD';
 import { generateWorldData as generateWorldDataPure, resolveMapType, type GenSettings, type MapTypeChoice } from '../canvas/world-gen';
-import { drawTerrain } from '../canvas/render/drawTerrain';
+import { drawTerrain, drawGrid } from '../canvas/render/drawTerrain';
 import { drawDetails as drawDetailsRender } from '../canvas/render/drawDetails';
 import { drawUnits as drawUnitsRender } from '../canvas/render/drawUnits';
 import { useTacticalKeyboard } from '../canvas/input/useTacticalKeyboard';
@@ -78,7 +78,6 @@ export const GameCanvas: React.FC = () => {
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
   const dustTextureRef = useRef<PIXI.Texture | null>(null);
   const grassTextureRef = useRef<PIXI.Texture | null>(null);
-  const grassNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const grassMacroNoiseTextureRef = useRef<PIXI.Texture | null>(null);
   const grassPatchDryTextureRef = useRef<PIXI.Texture | null>(null);
   const grassPatchDenseTextureRef = useRef<PIXI.Texture | null>(null);
@@ -171,7 +170,6 @@ export const GameCanvas: React.FC = () => {
     drawTerrain({
       terrainGfx: terrainGfx.current,
       terrainOverlay: terrainOverlayRef.current,
-      gridGfx: gridGfx.current,
       deployZoneGfx: deployZoneGfx.current,
       captureZoneGfx: captureZoneGfx.current,
       captureFlagSprite: captureFlagSpriteRef.current,
@@ -204,10 +202,18 @@ export const GameCanvas: React.FC = () => {
       deepSeaTex: deepSeaTextureRef.current,
       waterFilters: waterFilterHandlesRef.current,
       gridData,
-      showGrid,
       viewMode,
     });
-  }, [gridData, showGrid, terrainTexturesLoaded, viewMode]);
+  }, [gridData, terrainTexturesLoaded, viewMode]);
+
+  // Grid lives in its own gridGfx and effect so toggling it never re-runs the terrain
+  // pipeline (which would recompile water shaders and rebuild every overlay). Gated on
+  // texture load like drawMap so it never strokes into a gridGfx the PIXI app hasn't
+  // attached yet.
+  useEffect(() => {
+    if (!terrainTexturesLoaded) return;
+    drawGrid({ gridGfx: gridGfx.current, gridData, showGrid });
+  }, [gridData, showGrid, terrainTexturesLoaded]);
 
   const drawDetails = useCallback(() => {
     if (!detailDensityNoiseRef.current) detailDensityNoiseRef.current = createNoise2D();
@@ -426,7 +432,6 @@ export const GameCanvas: React.FC = () => {
     javelinTextureRef,
     dustTextureRef,
     grassTextureRef,
-    grassNoiseTextureRef,
     grassMacroNoiseTextureRef,
     grassPatchDryTextureRef,
     grassPatchDenseTextureRef,

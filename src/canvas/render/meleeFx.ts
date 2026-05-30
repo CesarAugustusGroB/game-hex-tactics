@@ -2,6 +2,9 @@ import gsap from 'gsap';
 import * as PIXI from 'pixi.js';
 import type { MeleeEvent } from '../../battle/simulate';
 import { TEAM_TINTS, LOD_THRESHOLD } from '../constants';
+import { makeStableNoise, makeDustParticle } from './fx-utils';
+
+const stableNoise = makeStableNoise(9973);
 
 const MAX_FULL_EVENTS_PER_TICK = 24;
 const BASE_DURATION = 0.34;
@@ -21,13 +24,6 @@ const eventRank = (a: MeleeEvent, b: MeleeEvent): number => {
   if (a.killed !== b.killed) return a.killed ? -1 : 1;
   if (a.damage !== b.damage) return b.damage - a.damage;
   return `${a.attackerId}:${a.targetId}`.localeCompare(`${b.attackerId}:${b.targetId}`);
-};
-
-const stableNoise = (seed: string, n: number): number => {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
-  const v = Math.sin((hash + n * 9973) * 12.9898) * 43758.5453;
-  return v - Math.floor(v);
 };
 
 // A small, smooth lean-in of the attacker's sprite toward its target on impact. Deliberately
@@ -61,15 +57,14 @@ const addDust = (
     const side = stableNoise(seed, i) - 0.5;
     const along = stableNoise(seed, i + 21);
     const size = 15 + stableNoise(seed, i + 42) * 14;
-    const dust = dustTexture ? new PIXI.Sprite(dustTexture) : new PIXI.Graphics();
-    if (dust instanceof PIXI.Sprite) {
-      dust.anchor.set(0.5);
-      dust.width = size * 1.35;
-      dust.height = size * 0.92;
-      dust.tint = stableNoise(seed, i + 84) > 0.5 ? 0xd7b46f : 0xbda36f;
-    } else {
-      dust.ellipse(0, 0, size * 0.5, size * 0.32).fill({ color: 0xb9a06b, alpha: 0.42 });
-    }
+    const dust = makeDustParticle(dustTexture, {
+      width: size * 1.35,
+      height: size * 0.92,
+      tint: stableNoise(seed, i + 84) > 0.5 ? 0xd7b46f : 0xbda36f,
+      ellipseRx: size * 0.5,
+      ellipseRy: size * 0.32,
+      ellipseAlpha: 0.42,
+    });
     const x = backX * (8 + along * 10) + -backY * side * 16;
     const y = backY * (8 + along * 10) + backX * side * 10 + 4;
     dust.x = x;

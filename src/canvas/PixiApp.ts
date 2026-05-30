@@ -14,7 +14,7 @@ import {
   beginOrderDrag, updateOrderDrag, commitOrderDrag, cancelOrderDrag,
 } from './input/orderDrag';
 import { type PaintModeCtx, paintAt } from './input/paintMode';
-import { advanceUnitFollowers } from './render/drawUnits';
+import { advanceUnitFollowers, killUnitTweens } from './render/drawUnits';
 import type { OrderDrag } from './input/orderDrag';
 import type { Hex } from '../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../battle/simulate';
@@ -61,7 +61,6 @@ export interface PixiAppCtx {
   javelinTextureRef: MutableRefObject<PIXI.Texture | null>;
   dustTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassTextureRef: MutableRefObject<PIXI.Texture | null>;
-  grassNoiseTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassMacroNoiseTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassPatchDryTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassPatchDenseTextureRef: MutableRefObject<PIXI.Texture | null>;
@@ -158,84 +157,74 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         return PIXI.Texture.from(canvas);
       };
 
-      const [armyTex, redInfantryTex, hopliteTex, redCavalryTex, blueCavalryTex, romanSkirmisherTex, blueSkirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, riverShimmerHighlightTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex] = await Promise.all([
-        loadHighResSvgTexture('/units/army.svg', 160),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-infantry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/hoplite.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/red-cavalry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/blue-cavalry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/roman_skirmisher.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/normalized/blue-skirmisher.png'),
-        PIXI.Assets.load<PIXI.Texture>('/units/javelin.png'),
-        PIXI.Assets.load<PIXI.Texture>('/fx/dust-puff.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/grass.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-noise.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-macro-noise.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-patch-dry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-patch-dense.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/grass-flower-speck.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/forest.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/forest-macro-variation.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/forest-dense-patch.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/forest-moss-patch.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/river.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/river-flow-variation.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/river-depth-patch.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/river-edge-softness.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/river-shimmer-highlight.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/hill.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/hill-macro-noise.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/hill-patch-dry.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/hill-patch-dense.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/mountain.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/snow.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/sand.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/sea.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-macro-noise.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-shallow-patch.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-depth-patch.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/sea-micro-noise.png'),
-        PIXI.Assets.load<PIXI.Texture>('/terrain/deep-sea.png'),
-      ]);
+      // Texture manifest: path, target ref, and per-texture flags in ONE place, so adding a
+      // texture is a single row — no positional Promise.all / mipmap-loop / addressMode /
+      // assignment lists to keep in sync. `repeat` wraps the source so TilingSprite overlays
+      // tile continuously across each biome; everything but the army SVG gets LINEAR +
+      // auto-mipmaps so heavy minification at strategic zoom doesn't alias.
+      type TexSpec = {
+        path: string;
+        ref: MutableRefObject<PIXI.Texture | null>;
+        repeat?: boolean;
+        svgSize?: number;
+        noMipmap?: boolean;
+      };
+      /* eslint-disable react-hooks/immutability */
+      const manifest: TexSpec[] = [
+        { path: '/units/army.svg', ref: ctx.armyTextureRef, svgSize: 160, noMipmap: true },
+        { path: '/units/normalized/red-infantry.png', ref: ctx.unitTextureRef },
+        { path: '/units/normalized/hoplite.png', ref: ctx.unitTextureBlueRef },
+        { path: '/units/normalized/red-cavalry.png', ref: ctx.unitTextureRedCavalryRef },
+        { path: '/units/normalized/blue-cavalry.png', ref: ctx.unitTextureBlueCavalryRef },
+        { path: '/units/normalized/roman_skirmisher.png', ref: ctx.unitTextureRedSkirmisherRef },
+        { path: '/units/normalized/blue-skirmisher.png', ref: ctx.unitTextureBlueSkirmisherRef },
+        { path: '/units/javelin.png', ref: ctx.javelinTextureRef },
+        { path: '/fx/dust-puff.png', ref: ctx.dustTextureRef },
+        { path: '/terrain/grass.png', ref: ctx.grassTextureRef, repeat: true },
+        { path: '/terrain/grass-macro-noise.png', ref: ctx.grassMacroNoiseTextureRef, repeat: true },
+        { path: '/terrain/grass-patch-dry.png', ref: ctx.grassPatchDryTextureRef, repeat: true },
+        { path: '/terrain/grass-patch-dense.png', ref: ctx.grassPatchDenseTextureRef, repeat: true },
+        { path: '/terrain/grass-flower-speck.png', ref: ctx.grassFlowerSpeckTextureRef, repeat: true },
+        { path: '/terrain/forest.png', ref: ctx.forestTextureRef, repeat: true },
+        { path: '/terrain/forest-macro-variation.png', ref: ctx.forestMacroVariationTextureRef, repeat: true },
+        { path: '/terrain/forest-dense-patch.png', ref: ctx.forestDensePatchTextureRef, repeat: true },
+        { path: '/terrain/forest-moss-patch.png', ref: ctx.forestMossPatchTextureRef, repeat: true },
+        { path: '/terrain/river.png', ref: ctx.riverTextureRef, repeat: true },
+        { path: '/terrain/river-flow-variation.png', ref: ctx.riverFlowVariationTextureRef, repeat: true },
+        { path: '/terrain/river-depth-patch.png', ref: ctx.riverDepthPatchTextureRef, repeat: true },
+        { path: '/terrain/river-edge-softness.png', ref: ctx.riverEdgeSoftnessTextureRef, repeat: true },
+        { path: '/terrain/river-shimmer-highlight.png', ref: ctx.riverShimmerHighlightTextureRef, repeat: true },
+        { path: '/terrain/hill.png', ref: ctx.hillTextureRef, repeat: true },
+        { path: '/terrain/hill-macro-noise.png', ref: ctx.hillMacroNoiseTextureRef, repeat: true },
+        { path: '/terrain/hill-patch-dry.png', ref: ctx.hillPatchDryTextureRef, repeat: true },
+        { path: '/terrain/hill-patch-dense.png', ref: ctx.hillPatchDenseTextureRef, repeat: true },
+        { path: '/terrain/mountain.png', ref: ctx.mountainTextureRef, repeat: true },
+        { path: '/terrain/snow.png', ref: ctx.snowTextureRef, repeat: true },
+        { path: '/terrain/sand.png', ref: ctx.sandTextureRef, repeat: true },
+        { path: '/terrain/sea.png', ref: ctx.seaTextureRef, repeat: true },
+        { path: '/terrain/sea-macro-noise.png', ref: ctx.seaMacroNoiseTextureRef, repeat: true },
+        { path: '/terrain/sea-shallow-patch.png', ref: ctx.seaShallowPatchTextureRef, repeat: true },
+        { path: '/terrain/sea-depth-patch.png', ref: ctx.seaDepthPatchTextureRef, repeat: true },
+        { path: '/terrain/sea-micro-noise.png', ref: ctx.seaMicroNoiseTextureRef, repeat: true },
+        { path: '/terrain/deep-sea.png', ref: ctx.deepSeaTextureRef, repeat: true },
+      ];
+      const loadedTex = await Promise.all(manifest.map(t =>
+        t.svgSize != null
+          ? loadHighResSvgTexture(t.path, t.svgSize)
+          : PIXI.Assets.load<PIXI.Texture>(t.path),
+      ));
       if (!isMounted) return;
 
-      // LINEAR + auto-mipmaps so heavy minification at strategic zoom doesn't alias.
-      for (const tex of [redInfantryTex, hopliteTex, redCavalryTex, blueCavalryTex, romanSkirmisherTex, blueSkirmisherTex, javelinTex, dustTex, grassTex, grassNoiseTex, grassMacroNoiseTex, grassPatchDryTex, grassPatchDenseTex, grassFlowerSpeckTex, forestTex, forestMacroVariationTex, forestDensePatchTex, forestMossPatchTex, riverTex, riverFlowVariationTex, riverDepthPatchTex, riverEdgeSoftnessTex, hillTex, hillMacroNoiseTex, hillPatchDryTex, hillPatchDenseTex, mountainTex, snowTex, sandTex, seaTex, seaMacroNoiseTex, seaShallowPatchTex, seaDepthPatchTex, seaMicroNoiseTex, deepSeaTex]) {
-        tex.source.scaleMode = 'linear';
-        tex.source.autoGenerateMipmaps = true;
-        tex.source.updateMipmaps();
-      }
-      // 'repeat' wrap so the TilingSprite overlays tile continuously across each biome.
-      grassTex.source.addressMode = 'repeat';
-      grassNoiseTex.source.addressMode = 'repeat';
-      grassMacroNoiseTex.source.addressMode = 'repeat';
-      grassPatchDryTex.source.addressMode = 'repeat';
-      grassPatchDenseTex.source.addressMode = 'repeat';
-      grassFlowerSpeckTex.source.addressMode = 'repeat';
-      forestTex.source.addressMode = 'repeat';
-      forestMacroVariationTex.source.addressMode = 'repeat';
-      forestDensePatchTex.source.addressMode = 'repeat';
-      forestMossPatchTex.source.addressMode = 'repeat';
-      riverTex.source.addressMode = 'repeat';
-      riverFlowVariationTex.source.addressMode = 'repeat';
-      riverDepthPatchTex.source.addressMode = 'repeat';
-      riverEdgeSoftnessTex.source.addressMode = 'repeat';
-      riverShimmerHighlightTex.source.addressMode = 'repeat';
-      hillTex.source.addressMode = 'repeat';
-      hillMacroNoiseTex.source.addressMode = 'repeat';
-      hillPatchDryTex.source.addressMode = 'repeat';
-      hillPatchDenseTex.source.addressMode = 'repeat';
-      mountainTex.source.addressMode = 'repeat';
-      snowTex.source.addressMode = 'repeat';
-      sandTex.source.addressMode = 'repeat';
-      seaTex.source.addressMode = 'repeat';
-      seaMacroNoiseTex.source.addressMode = 'repeat';
-      seaShallowPatchTex.source.addressMode = 'repeat';
-      seaDepthPatchTex.source.addressMode = 'repeat';
-      seaMicroNoiseTex.source.addressMode = 'repeat';
-      deepSeaTex.source.addressMode = 'repeat';
-
-      /* eslint-disable react-hooks/immutability */
+      manifest.forEach((t, i) => {
+        const tex = loadedTex[i];
+        if (!t.noMipmap) {
+          tex.source.scaleMode = 'linear';
+          tex.source.autoGenerateMipmaps = true;
+          tex.source.updateMipmaps();
+        }
+        if (t.repeat) tex.source.addressMode = 'repeat';
+        t.ref.current = tex;
+      });
       // Bake a soft elliptical shadow to a texture once — every unit reuses it as a plain
       // Sprite, so shadows cost zero per-frame filter passes. The 128² frame leaves room
       // for the blur to fall off inside the texture bounds.
@@ -247,15 +236,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         frame: new PIXI.Rectangle(0, 0, 128, 128),
       });
       shadowG.destroy(true);
-      ctx.armyTextureRef.current = armyTex;
-      ctx.unitTextureRef.current = redInfantryTex;
-      ctx.unitTextureBlueRef.current = hopliteTex;
-      ctx.unitTextureRedCavalryRef.current = redCavalryTex;
-      ctx.unitTextureBlueCavalryRef.current = blueCavalryTex;
-      ctx.unitTextureRedSkirmisherRef.current = romanSkirmisherTex;
-      ctx.unitTextureBlueSkirmisherRef.current = blueSkirmisherTex;
-      ctx.javelinTextureRef.current = javelinTex;
-      ctx.dustTextureRef.current = dustTex;
 
       // Capture-the-flag marker — loaded once at mount, positioned at hex (0,0).
       const winFlagTex = await PIXI.Assets.load<PIXI.Texture>('/assets/win-flag.png');
@@ -285,35 +265,6 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         tex.source.updateMipmaps();
         ctx.detailTexturesRef.current.set(ALL_DETAIL_KEYS[i], tex);
       }
-
-      ctx.grassTextureRef.current = grassTex;
-      ctx.grassNoiseTextureRef.current = grassNoiseTex;
-      ctx.grassMacroNoiseTextureRef.current = grassMacroNoiseTex;
-      ctx.grassPatchDryTextureRef.current = grassPatchDryTex;
-      ctx.grassPatchDenseTextureRef.current = grassPatchDenseTex;
-      ctx.grassFlowerSpeckTextureRef.current = grassFlowerSpeckTex;
-      ctx.forestTextureRef.current = forestTex;
-      ctx.forestMacroVariationTextureRef.current = forestMacroVariationTex;
-      ctx.forestDensePatchTextureRef.current = forestDensePatchTex;
-      ctx.forestMossPatchTextureRef.current = forestMossPatchTex;
-      ctx.riverTextureRef.current = riverTex;
-      ctx.riverFlowVariationTextureRef.current = riverFlowVariationTex;
-      ctx.riverDepthPatchTextureRef.current = riverDepthPatchTex;
-      ctx.riverEdgeSoftnessTextureRef.current = riverEdgeSoftnessTex;
-      ctx.riverShimmerHighlightTextureRef.current = riverShimmerHighlightTex;
-      ctx.hillTextureRef.current = hillTex;
-      ctx.hillMacroNoiseTextureRef.current = hillMacroNoiseTex;
-      ctx.hillPatchDryTextureRef.current = hillPatchDryTex;
-      ctx.hillPatchDenseTextureRef.current = hillPatchDenseTex;
-      ctx.mountainTextureRef.current = mountainTex;
-      ctx.snowTextureRef.current = snowTex;
-      ctx.sandTextureRef.current = sandTex;
-      ctx.seaTextureRef.current = seaTex;
-      ctx.seaMacroNoiseTextureRef.current = seaMacroNoiseTex;
-      ctx.seaShallowPatchTextureRef.current = seaShallowPatchTex;
-      ctx.seaDepthPatchTextureRef.current = seaDepthPatchTex;
-      ctx.seaMicroNoiseTextureRef.current = seaMicroNoiseTex;
-      ctx.deepSeaTextureRef.current = deepSeaTex;
 
       ctx.setTerrainTexturesLoaded(true);
 
@@ -534,17 +485,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       isMounted = false;
       // Kill GSAP tweens before PIXI destroys their targets — otherwise GSAP keeps
       // updating freed objects for up to TICK_MS after unmount.
-      containers.forEach(cont => {
-        gsap.killTweensOf(cont);
-        gsap.killTweensOf(cont.position);
-        // Children carry tweens too (the unit-sprite's melee lunge) — kill them or GSAP
-        // updates a freed object and throws after app.destroy.
-        for (const child of cont.children) {
-          gsap.killTweensOf(child);
-          gsap.killTweensOf((child as PIXI.Container).position);
-          gsap.killTweensOf((child as PIXI.Container).scale);
-        }
-      });
+      containers.forEach(killUnitTweens);
       containers.clear();
       for (const child of ctx.projectilesGfx.current.children) {
         gsap.killTweensOf(child);

@@ -2,6 +2,9 @@ import gsap from 'gsap';
 import * as PIXI from 'pixi.js';
 import type { UnitType } from '../../battle/simulate';
 import { LOD_THRESHOLD } from '../constants';
+import { makeStableNoise, makeDustParticle } from './fx-utils';
+
+const stableNoise = makeStableNoise(7919);
 
 const DUST_BY_TYPE: Record<UnitType, { count: number; size: number; alpha: number }> = {
   cavalry: { count: 7, size: 0.72, alpha: 0.2 },
@@ -20,13 +23,6 @@ export interface MovementDustContext {
   zIndex: number;
   seed: string;
 }
-
-const stableNoise = (seed: string, n: number): number => {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
-  const v = Math.sin((hash + n * 7919) * 12.9898) * 43758.5453;
-  return v - Math.floor(v);
-};
 
 export const spawnMovementDust = (ctx: MovementDustContext): void => {
   if (ctx.worldScale < LOD_THRESHOLD) return;
@@ -48,15 +44,14 @@ export const spawnMovementDust = (ctx: MovementDustContext): void => {
     const along = (i + 0.35 + stableNoise(ctx.seed, i) * 0.45) / spec.count;
     const side = stableNoise(ctx.seed, i + 31) - 0.5;
     const radius = (8 + stableNoise(ctx.seed, i + 62) * 7) * spec.size;
-    const dust = ctx.dustTexture ? new PIXI.Sprite(ctx.dustTexture) : new PIXI.Graphics();
-    if (dust instanceof PIXI.Sprite) {
-      dust.anchor.set(0.5);
-      dust.width = radius * 1.7;
-      dust.height = radius * 1.05;
-      dust.tint = stableNoise(ctx.seed, i + 93) > 0.5 ? 0xd6b16e : 0xb9a06b;
-    } else {
-      dust.ellipse(0, 0, radius * 0.55, radius * 0.34).fill({ color: 0xb9a06b, alpha: spec.alpha });
-    }
+    const dust = makeDustParticle(ctx.dustTexture, {
+      width: radius * 1.7,
+      height: radius * 1.05,
+      tint: stableNoise(ctx.seed, i + 93) > 0.5 ? 0xd6b16e : 0xb9a06b,
+      ellipseRx: radius * 0.55,
+      ellipseRy: radius * 0.34,
+      ellipseAlpha: spec.alpha,
+    });
     dust.x = ctx.from.x + dx * along + px * side * spread;
     dust.y = ctx.from.y + dy * along + py * side * spread + 16;
     dust.alpha = 0;

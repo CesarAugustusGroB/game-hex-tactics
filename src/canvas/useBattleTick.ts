@@ -14,7 +14,7 @@ import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
   POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
   COHORT_SIZE, INITIAL_ROSTER,
-  captureZoneKeys, deployZoneFor,
+  captureZoneKeys, deployZoneFor, terrainMapFor, gridKeySetFor,
   type Armies, type GroupOrders, type Rosters,
 } from './constants';
 import { scoreTick } from '../battle/scoring';
@@ -70,9 +70,10 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       const hasAi = !!(getAiController('red') || getAiController('blue'));
       if (units.length === 0 && !hasAi) return;
       const grid = ctx.gridDataRef.current;
-      const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
-      const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
-      // Precompute deploy zone hex sets — the retreat-clear logic queries this per tick.
+      // All three derive purely from `grid` (stable until world regen) and are cached by
+      // gridData identity — no O(n) rebuild per tick.
+      const gridSet = gridKeySetFor(grid);
+      const terrainAt = terrainMapFor(grid);
       const deployZones: Record<Team, Set<string>> = {
         red:  deployZoneFor('red',  grid),
         blue: deployZoneFor('blue', grid),

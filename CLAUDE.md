@@ -34,12 +34,12 @@ Single-canvas PIXI.js application with a thin React HUD. The canvas layer lives 
 - `src/canvas/PixiApp.ts` — `usePixiApp` hook: PIXI Application lifecycle, texture loading, container hierarchy, pointer/wheel/ticker wiring, cleanup.
 - `src/canvas/useBattleTick.ts` — `useBattleTick` hook: setInterval driving `simulateTick` + projectile animation + capture/win detection.
 - `src/canvas/world-gen.ts` — pure `generateWorldData()` (noise + cohesion + rivers).
-- `src/canvas/constants.ts` — module-level constants and type aliases (tick rate, deploy zone, formation cycle, capture config).
+- `src/canvas/constants.ts` — module-level constants and type aliases (tick rate, deploy zone, formation cycle, capture config), plus the `gridData`-identity cache (`terrainMapFor` / `gridKeySetFor` / `deployZoneFor`) that per-tick/per-frame consumers must reuse instead of rebuilding O(n) maps.
 - `src/canvas/terrain-defs.ts` — `TERRAINS` table (spreads `TERRAIN_MODS` from `src/battle/terrain.ts`).
 - `src/canvas/detail-rules.ts` — decoration sprite catalog and weighted spawn rules.
 - `src/canvas/water-filter.ts` — animated water filter (GLSL + factory).
 - `src/canvas/render/` — pure render functions:
-  - `drawTerrain.ts` — two-pass terrain pipeline (hex tops + cliff walls + textured overlays + grid + deploy/capture zones).
+  - `drawTerrain.ts` — two-pass terrain pipeline (hex tops + cliff walls + textured overlays + deploy/capture zones). Exports `drawGrid()` separately so toggling the grid never rebuilds terrain.
   - `drawDetails.ts` — three-layer decoration scatter.
   - `drawUnits.ts` — units, HP bars, badges, attack rings, strategic-view army icons.
 - `src/canvas/input/` — input handlers:
@@ -67,7 +67,9 @@ Single-canvas PIXI.js application with a thin React HUD. The canvas layer lives 
 
 Heights live in `TERRAINS[type].height`. `highlightGfx` and `previewGfx` are redrawn every tick from the ticker (not from React state) so hover/drag updates don't re-run `drawMap`.
 
-A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`) inside `usePixiApp`. World z-order (as attached in `PixiApp.ts`): `terrainGfx → terrainOverlayRef → detailsGfx → deployZoneGfx → captureZoneGfx → captureFlagSprite → gridGfx → unitsGfx → projectilesGfx → previewGfx → highlightGfx`. The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
+The grid is drawn by a separate exported `drawGrid()` into its own `gridGfx`, from a `useEffect([gridData, showGrid])` — so toggling GRID re-strokes only that layer instead of rebuilding the whole terrain pipeline (which recompiles water shaders). The two animated water `Filter`s are **cached for the app's lifetime** in `ctx.waterFilters` (keyed by kind) and reused across redraws; recreating one per `drawMap` recompiles a `GlProgram` and leaks the old one.
+
+A single `PIXI.Application` is created once in a mount-only `useEffect` (`[]`) inside `usePixiApp`. World z-order (as attached in `PixiApp.ts`): `terrainGfx → terrainOverlayRef → detailsGfx → deployZoneGfx → captureZoneGfx → captureFlagSprite → gridGfx → movementDustGfx → unitsGfx → combatFxGfx → projectilesGfx → previewGfx → highlightGfx`. The world container is panned via `pointerdown` + `globalpointermove` and zoomed by a wheel listener on the DOM container that anchors zoom to the cursor.
 
 **PIXI v8 gotcha:** `Color.multiply(number)` treats the number as a hex int via bit-shifts (`0.7 | 0 === 0` → black). Always pass an RGB-normalised array (`[s, s, s, 1]`) when shading. See `LEARNINGS.md` for the full story.
 
