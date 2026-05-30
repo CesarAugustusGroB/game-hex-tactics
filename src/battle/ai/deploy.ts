@@ -29,7 +29,7 @@ export interface DeployInput {
 
 /**
  * Expand the doctrine's role mix into an ordered group list (capped at 4 groups), then emit
- * one cohort placement per group, scaled by forceScale. Anchors are spaced COHORT_SIZE apart
+ * `waves` contiguous cohorts per group (waves scaled by forceScale). Anchors are spaced COHORT_SIZE apart
  * along the free deploy-zone hexes so cohorts don't overlap. Pure; the caller applies each
  * placement through state.placeCohort (which enforces CP and re-checks occupancy).
  */
@@ -48,11 +48,14 @@ export function planDeployment(input: DeployInput): Placement[] {
   const remaining: Record<UnitType, number> = { ...roster };
   let anchorIdx = 0;
 
-  for (let w = 0; w < waves; w++) {
-    for (let g = 0; g < groupRoles.length; g++) {
-      const role = groupRoles[g];
-      const unitType = ROLE_UNIT[role];
-      if (remaining[unitType] <= 0) continue;
+  // Place each group's cohorts contiguously (group loop outer, wave loop inner): a group must
+  // form one connected blob because the sim's rigid-block march steps a whole group together —
+  // a group split into separated clusters mutually interlocks and never advances.
+  for (let g = 0; g < groupRoles.length; g++) {
+    const role = groupRoles[g];
+    const unitType = ROLE_UNIT[role];
+    for (let w = 0; w < waves; w++) {
+      if (remaining[unitType] <= 0) break;
       if (anchorIdx >= freeHexes.length) return placements;
       const anchor = freeHexes[anchorIdx];
       anchorIdx += COHORT_SIZE;
