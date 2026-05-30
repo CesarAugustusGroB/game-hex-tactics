@@ -12,6 +12,8 @@ import type { TerrainDef } from './terrain-defs';
 import { CP_COSTS, type CpIntent } from '../battle/command-points';
 import { MAP_TYPE_IDS, type MapTypeId } from '../data/world-gen';
 import type { MapTypeChoice } from './world-gen';
+import type { Doctrine, Difficulty } from '../data/ai';
+import { DOCTRINES, DIFFICULTIES } from '../data/ai';
 
 export interface HUDProps {
   // ref
@@ -73,6 +75,13 @@ export interface HUDProps {
   setMapTypeChoice: (c: MapTypeChoice) => void;
   setSeed: (n: number) => void;
   rerollSeed: () => void;
+  // enemy AI
+  aiEnabled: boolean;
+  aiDoctrine: Doctrine;
+  aiDifficulty: Difficulty;
+  setAiEnabled: (b: boolean) => void;
+  setAiDoctrine: (d: Doctrine) => void;
+  setAiDifficulty: (d: Difficulty) => void;
 }
 
 const MAP_TYPE_LABELS: Record<string, string> = {
@@ -161,6 +170,12 @@ export const HUD: React.FC<HUDProps> = ({
   setMapTypeChoice,
   setSeed,
   rerollSeed,
+  aiEnabled,
+  aiDoctrine,
+  aiDifficulty,
+  setAiEnabled,
+  setAiDoctrine,
+  setAiDifficulty,
 }) => {
   const isPlacing = inputMode === 'place';
 
@@ -807,6 +822,42 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </div>
         )}
+
+        {viewMode === 'STRATEGIC' && (
+          <div style={{ background: 'rgba(0,0,0,0.4)', padding: '16px', borderRadius: '16px', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
+              ENEMY AI {aiEnabled ? `→ ${aiDoctrine} · ${aiDifficulty}` : '→ off'}
+            </div>
+            <button
+              onClick={() => setAiEnabled(!aiEnabled)}
+              style={{ width: '100%', padding: '8px', borderRadius: '8px', marginBottom: '8px',
+                background: aiEnabled ? '#1d4ed8' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                border: '1px solid rgba(255,255,255,0.1)', fontWeight: 700, cursor: 'pointer' }}>
+              {aiEnabled ? 'AI ENABLED (blue)' : 'AI OFF'}
+            </button>
+            {aiEnabled && (
+              <>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                  {DOCTRINES.map(d => (
+                    <button key={d} onClick={() => setAiDoctrine(d)}
+                      style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
+                        background: aiDoctrine === d ? '#0ea5e9' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                        border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{d}</button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {DIFFICULTIES.map(f => (
+                    <button key={f} onClick={() => setAiDifficulty(f)}
+                      style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
+                        background: aiDifficulty === f ? '#d97706' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                        border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{f}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <button onClick={regenerateWorld} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
           REGENERATE ECOSYSTEM
         </button>

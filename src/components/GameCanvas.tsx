@@ -143,8 +143,6 @@ export const GameCanvas: React.FC = () => {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiDoctrine, setAiDoctrine] = useState<Doctrine>('balanced');
   const [aiDifficulty, setAiDifficulty] = useState<Difficulty>('normal');
-  // Task 9 wires these setters into the HUD; void refs keep tsc happy until then.
-  void setAiEnabled; void setAiDoctrine; void setAiDifficulty;
   // Set true once terrain-related textures (currently just grass) finish loading.
   // drawMap reads it via deps so the map redraws once textures are ready.
   const [terrainTexturesLoaded, setTerrainTexturesLoaded] = useState(false);
@@ -854,6 +852,12 @@ export const GameCanvas: React.FC = () => {
       cpRegenN={cpRegenN}
       setCpMax={setCpMax}
       setCpRegenN={setCpRegenN}
+      aiEnabled={aiEnabled}
+      aiDoctrine={aiDoctrine}
+      aiDifficulty={aiDifficulty}
+      setAiEnabled={setAiEnabled}
+      setAiDoctrine={setAiDoctrine}
+      setAiDifficulty={setAiDifficulty}
     />
   );
 };
