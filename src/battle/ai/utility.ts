@@ -1,4 +1,4 @@
-import type { Team, Unit, GroupOrder, OrderMode } from '../simulate';
+import type { Team, Unit, OrderMode } from '../simulate';
 import { CP_COSTS, type CpIntent } from '../command-points';
 import type { AiRole, UtilityWeights } from '../../data/ai';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
@@ -29,8 +29,6 @@ export interface ScoreInput {
   enemyUnits: Unit[];
   weights: UtilityWeights;
   cp: number;
-  /** Already-issued order for this group (to value "keep current" at cost 0). */
-  current: GroupOrder | undefined;
   getHeight: (h: Hex) => number;
   rng: () => number;
   noise: number;
@@ -109,7 +107,7 @@ export function chooseAction(input: ScoreInput): ActionChoice | null {
   }
 
   cands.push({
-    choice: { mode: 'hold', heading: fwd, attackTarget: null, intent: 'hold' },
+    choice: { mode: 'hold', heading: fwd, attackTarget: centre, intent: 'hold' },
     base: weights.risk * outnumbered + weights.height * (getHeight(centre) / 12) * 0.5
       + (role === 'defendLine' || role === 'reserve' ? 0.4 : 0),
   });

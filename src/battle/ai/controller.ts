@@ -3,6 +3,7 @@ import type { GroupId, Team } from '../simulate';
 import type { Doctrine, Difficulty, AiRole } from '../../data/ai';
 import { AI } from '../../data/ai';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
+import { CP_COSTS } from '../command-points';
 import { assignRoles } from './commander';
 import { planDeployment, type Placement } from './deploy';
 import { chooseAction, makeRng } from './utility';
@@ -69,6 +70,8 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // --- Command: per group, on its reaction cadence, choose & issue an action. ---
     const typeByKey = new Map(state.gridData.map(g => [HexUtils.key(g.hex), g.type]));
     const getHeight = (h: Hex): number => heightOf(typeByKey.get(HexUtils.key(h)) ?? '');
+    const commandBudget = Math.floor(state.cp * diff.cpBudgetFrac);
+    let cpSpent = 0;
     for (const g of GROUP_IDS) {
       const role = roles.get(g);
       if (!role) continue;
@@ -81,14 +84,18 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       const order = state.myOrders.find(o => o.groupId === g);
       const choice = chooseAction({
         team, role, groupUnits, enemyUnits: state.enemyUnits.filter(u => u.hp > 0),
-        weights: doc.weights, cp: state.cp, current: order, getHeight, rng, noise: diff.decisionNoise,
+        weights: doc.weights, cp: state.cp, getHeight, rng, noise: diff.decisionNoise,
       });
       if (!choice) continue;
       // Don't re-issue an identical order (wastes CP).
       if (order && order.mode === choice.mode &&
           (order.attackTarget?.q ?? null) === (choice.attackTarget?.q ?? null) &&
           (order.attackTarget?.r ?? null) === (choice.attackTarget?.r ?? null)) continue;
-      state.issueOrder(g, { mode: choice.mode, heading: choice.heading, attackTarget: choice.attackTarget }, choice.intent);
+      const cost = CP_COSTS[choice.intent];
+      if (cpSpent + cost > commandBudget) continue;
+      if (state.issueOrder(g, { mode: choice.mode, heading: choice.heading, attackTarget: choice.attackTarget }, choice.intent)) {
+        cpSpent += cost;
+      }
     }
   };
 }
