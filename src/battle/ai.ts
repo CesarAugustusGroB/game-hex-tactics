@@ -12,7 +12,7 @@
  */
 
 import type { Hex } from '../hex-engine/HexUtils';
-import type { GroupOrder, Team, GroupId, Unit } from './simulate';
+import type { GroupOrder, Team, GroupId, Unit, UnitType } from './simulate';
 import { type CpIntent } from './command-points';
 
 /** What an AI may change on an existing order. Team/groupId identify the order and
@@ -31,6 +31,15 @@ export interface AiTickState {
   gridData: ReadonlyArray<{ hex: Hex; type: string }>;
   /** Snapshot of the team's CP at the start of the tick (read-only). */
   cp: number;
+  /** Undeployed units left in this team's roster, by type. */
+  roster: Readonly<Record<UnitType, number>>;
+  /** Hex keys of this team's deploy zone (host-computed via deployZoneFor). */
+  deployZone: ReadonlySet<string>;
+  /** Paint a cohort: place up to COHORT_SIZE units from `anchorHex` + neighbours into the
+   *  given group, debiting `placeCohort` CP and decrementing the roster. Returns true if at
+   *  least one unit was placed. No-op (false) if the anchor's footprint is fully occupied,
+   *  off-zone, roster-empty, or CP can't cover it. */
+  placeCohort: (groupId: GroupId, anchorHex: Hex, unitType: UnitType) => boolean;
   /** Bound to this controller's team. Group must belong to the same team. Returns
    *  true if the order was issued, false if rejected for lack of CP. */
   issueOrder: (groupId: GroupId, change: OrderChange, intent: CpIntent) => boolean;
