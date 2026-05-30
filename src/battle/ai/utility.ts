@@ -1,5 +1,5 @@
 import type { Team, Unit, GroupOrder, OrderMode } from '../simulate';
-import type { CpIntent } from '../command-points';
+import { CP_COSTS, type CpIntent } from '../command-points';
 import type { AiRole, UtilityWeights } from '../../data/ai';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { CAPTURE_CENTER } from '../../data/game';
@@ -116,19 +116,14 @@ export function chooseAction(input: ScoreInput): ActionChoice | null {
 
   if (outnumbered && groupUnits.some(u => u.hp < 40)) {
     cands.push({
-      choice: { mode: 'retreat', heading: fwd, attackTarget: null, intent: 'retreat' },
+      choice: { mode: 'retreat', heading: (fwd + 3) % 6, attackTarget: null, intent: 'retreat' },
       base: weights.risk * 1.2,
     });
   }
 
-  const COST: Record<CpIntent, number> = {
-    idle: 0, meta: 0, debug: 0, cycleHeading: 1, cycleFormation: 1, march: 2, firstMarch: 4,
-    placeCohort: 2, orderDrag: 3, hold: 4, retreat: 2, banish: 4, retreatEngaged: 4,
-    banishEngaged: 8, charge: 6, unleash: 6,
-  };
   let best: ActionChoice | null = null, bestScore = -Infinity;
   for (const c of cands) {
-    if (cp < COST[c.choice.intent]) continue;
+    if (cp < CP_COSTS[c.choice.intent]) continue;
     const score = c.base + (rng() - 0.5) * 2 * noise;
     if (score > bestScore) { bestScore = score; best = c.choice; }
   }
