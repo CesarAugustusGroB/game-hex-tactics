@@ -67,10 +67,8 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     }
 
     // --- Command: per group, on its reaction cadence, choose & issue an action. ---
-    const getHeight = (h: Hex): number => {
-      const d = state.gridData.find(g => g.hex.q === h.q && g.hex.r === h.r);
-      return d ? heightOf(d.type) : 0;
-    };
+    const typeByKey = new Map(state.gridData.map(g => [HexUtils.key(g.hex), g.type]));
+    const getHeight = (h: Hex): number => heightOf(typeByKey.get(HexUtils.key(h)) ?? '');
     for (const g of GROUP_IDS) {
       const role = roles.get(g);
       if (!role) continue;
