@@ -45,6 +45,9 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
           .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, key: k }; });
         deployPlan = planDeployment({
           roleMix: doc.roleMix, forceScale: diff.forceScale, freeHexes, roster: state.roster,
+          // Blue's deploy zone is the top strip (small py) marching down → front = larger py;
+          // red is the bottom strip marching up → front = smaller py.
+          frontSign: team === 'red' ? -1 : 1,
         });
       }
       if (deployIdx >= deployPlan.length) {
