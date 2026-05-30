@@ -18,15 +18,10 @@ export interface DoctrineConfig {
 }
 
 export interface DifficultyConfig {
-  /** A group re-decides every N ticks (cadence). */
   reactionTicks: number;
-  /** Random perturbation added to utility scores before argmax (0 = optimal). */
   decisionNoise: number;
-  /** Fraction of available CP the AI permits itself to spend per decision window. */
   cpBudgetFrac: number;
-  /** Scales how much of the roster the AI deploys. */
   forceScale: number;
-  /** Ticks between commander role re-assignments. */
   commanderCadence: number;
 }
 
@@ -37,5 +32,5 @@ export interface AiConfig {
 
 export const AI: AiConfig = raw as AiConfig;
 
-export const DOCTRINES: Doctrine[] = ['balanced', 'aggressive', 'defensive'];
-export const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
+export const DOCTRINES = Object.keys(AI.doctrines) as Doctrine[];
+export const DIFFICULTIES = Object.keys(AI.difficulties) as Difficulty[];
