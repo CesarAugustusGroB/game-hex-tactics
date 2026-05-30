@@ -1,0 +1,21 @@
+{
+  "doctrines": {
+    "balanced": {
+      "roleMix": { "centerHold": 1, "defendLine": 1, "raid": 1, "reserve": 1 },
+      "weights": { "objective": 1.0, "targetWeakness": 0.6, "height": 0.4, "risk": 0.7, "cpHeadroom": 0.3 }
+    },
+    "aggressive": {
+      "roleMix": { "centerHold": 1, "defendLine": 0, "raid": 2, "reserve": 1 },
+      "weights": { "objective": 1.3, "targetWeakness": 0.8, "height": 0.2, "risk": 0.3, "cpHeadroom": 0.2 }
+    },
+    "defensive": {
+      "roleMix": { "centerHold": 1, "defendLine": 2, "raid": 0, "reserve": 1 },
+      "weights": { "objective": 0.8, "targetWeakness": 0.5, "height": 0.7, "risk": 1.1, "cpHeadroom": 0.4 }
+    }
+  },
+  "difficulties": {
+    "easy":   { "reactionTicks": 12, "decisionNoise": 0.5, "cpBudgetFrac": 0.5, "forceScale": 0.6,  "commanderCadence": 30 },
+    "normal": { "reactionTicks": 6,  "decisionNoise": 0.2, "cpBudgetFrac": 0.8, "forceScale": 0.85, "commanderCadence": 20 },
+    "hard":   { "reactionTicks": 2,  "decisionNoise": 0.0, "cpBudgetFrac": 1.0, "forceScale": 1.0,  "commanderCadence": 12 }
+  }
+}
