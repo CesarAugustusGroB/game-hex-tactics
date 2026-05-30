@@ -64,7 +64,11 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       if (!strategic) return;
       const strategicKey = HexUtils.key(strategic);
       const units = ctx.armiesRef.current.get(strategicKey) ?? [];
-      if (units.length === 0) return;
+      // Don't bail on an empty field while an AI is registered — it must be allowed to deploy
+      // its own army from an empty start. Otherwise the AI can't act until the player puts a
+      // unit down (the controller's placeCohort runs inside the AI phase below).
+      const hasAi = !!(getAiController('red') || getAiController('blue'));
+      if (units.length === 0 && !hasAi) return;
       const grid = ctx.gridDataRef.current;
       const gridSet = new Set(grid.map(d => HexUtils.key(d.hex)));
       const terrainAt = new Map(grid.map(d => [HexUtils.key(d.hex), d.type]));
@@ -163,6 +167,8 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       // armiesRef synchronously). Re-read so the sim — and the end-of-tick setArmies that
       // derives `survivors` — include them; otherwise newly-placed units are dropped this tick.
       const liveUnits = ctx.armiesRef.current.get(strategicKey) ?? units;
+      // Field still empty after the AI phase (no AI deployed yet) — nothing to simulate.
+      if (liveUnits.length === 0) return;
       const result = simulateTick(liveUnits, ctx.groupOrdersRef.current, {
         damagePerTick: DAMAGE_PER_TICK,
         currentTick: ctx.tickCounterRef.current,
