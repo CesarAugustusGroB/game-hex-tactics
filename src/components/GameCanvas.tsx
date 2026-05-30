@@ -32,6 +32,9 @@ import { type OrderDrag } from '../canvas/input/orderDrag';
 import { usePixiApp, type PixiAppCtx } from '../canvas/PixiApp';
 import { useBattleTick, type BattleTickCtx } from '../canvas/useBattleTick';
 import { GRID_RADIUS, DEFAULT_MAP_TYPE, type MapTypeId } from '../data/world-gen';
+import { registerAiController } from '../battle/ai';
+import { makeAiController } from '../battle/ai/controller';
+import type { Doctrine, Difficulty } from '../data/ai';
 
 const INITIAL_SEED = Math.floor(Math.random() * 0x100000000);
 
@@ -137,6 +140,11 @@ export const GameCanvas: React.FC = () => {
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
   const [rosters, setRosters] = useState<Rosters>(makeInitialRosters);
   const [isBattleRunning, setIsBattleRunning] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiDoctrine, setAiDoctrine] = useState<Doctrine>('balanced');
+  const [aiDifficulty, setAiDifficulty] = useState<Difficulty>('normal');
+  // Task 9 wires these setters into the HUD; void refs keep tsc happy until then.
+  void setAiEnabled; void setAiDoctrine; void setAiDifficulty;
   // Set true once terrain-related textures (currently just grass) finish loading.
   // drawMap reads it via deps so the map redraws once textures are ready.
   const [terrainTexturesLoaded, setTerrainTexturesLoaded] = useState(false);
@@ -529,6 +537,13 @@ export const GameCanvas: React.FC = () => {
     setMarchedGroups,
   };
   useBattleTick(battleCtx, isBattleRunning);
+
+  // Install the enemy AI for `blue` when enabled; tear down when off or on config change.
+  useEffect(() => {
+    if (!aiEnabled) { registerAiController('blue', null); return; }
+    registerAiController('blue', makeAiController('blue', aiDoctrine, aiDifficulty));
+    return () => registerAiController('blue', null);
+  }, [aiEnabled, aiDoctrine, aiDifficulty]);
 
   // RETREAT: orderly pull-back — issue sim 'retreat' mode (walks the block backward and
   // auto-clears the order when it lands in the deploy zone). Works mid-melee (the sim ignores
