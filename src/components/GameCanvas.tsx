@@ -502,6 +502,7 @@ export const GameCanvas: React.FC = () => {
   const battleCtx: BattleTickCtx = {
     currentStrategicHexRef,
     armiesRef,
+    rostersRef,
     groupOrdersRef,
     gridDataRef,
     scoreRef,

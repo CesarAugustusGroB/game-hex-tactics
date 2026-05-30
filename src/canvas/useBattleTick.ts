@@ -3,8 +3,8 @@ import type { MutableRefObject, RefObject, Dispatch, SetStateAction } from 'reac
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import { simulateTick } from '../battle/simulate';
-import type { Team, GroupId } from '../battle/simulate';
+import { simulateTick, MAX_HP_BY_TYPE } from '../battle/simulate';
+import type { Team, GroupId, UnitType, Unit } from '../battle/simulate';
 import { getAiController } from '../battle/ai';
 import type { OrderChange } from '../battle/ai';
 import { getTerrainMods } from '../battle/terrain';
@@ -13,6 +13,7 @@ import { spawnMeleeEffects } from './render/meleeFx';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
   POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
+  COHORT_SIZE, INITIAL_ROSTER,
   captureZoneKeys, deployZoneFor,
   type Armies, type GroupOrders, type Rosters,
 } from './constants';
@@ -24,6 +25,7 @@ const CENTER_ZONE_KEYS = captureZoneKeys();
 export interface BattleTickCtx {
   currentStrategicHexRef: MutableRefObject<Hex | null>;
   armiesRef: MutableRefObject<Armies>;
+  rostersRef: MutableRefObject<Rosters>;
   groupOrdersRef: MutableRefObject<GroupOrders>;
   gridDataRef: MutableRefObject<{ hex: Hex; type: string }[]>;
   scoreRef: MutableRefObject<{ red: number; blue: number }>;
@@ -97,6 +99,52 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
             allOrders: ctx.groupOrdersRef.current,
             gridData: grid,
             cp: ctx.commandPointsRef.current[team],
+            roster: ctx.rostersRef.current.get(team) ?? { ...INITIAL_ROSTER },
+            deployZone: deployZones[team],
+            placeCohort: (gid, anchor, unitType: UnitType) => {
+              const roster = ctx.rostersRef.current.get(team) ?? { ...INITIAL_ROSTER };
+              const remaining = roster[unitType] ?? 0;
+              if (remaining <= 0) return false;
+              const zone = deployZones[team];
+              const existing = ctx.armiesRef.current.get(strategicKey) ?? [];
+              const occupied = new Set(existing.map(u => HexUtils.key(u.tacticalHex)));
+              const target: Hex[] = [];
+              const candidates: Hex[] = [anchor, ...HexUtils.getNeighbors(anchor)];
+              const cap = Math.min(COHORT_SIZE, remaining);
+              for (const c of candidates) {
+                if (target.length >= cap) break;
+                const k = HexUtils.key(c);
+                if (!zone.has(k) || occupied.has(k)) continue;
+                target.push(c);
+                occupied.add(k);
+              }
+              if (target.length === 0) return false;
+              const debited = debit(ctx.commandPointsRef.current, team, 'placeCohort');
+              if (!debited) return false;
+              ctx.commandPointsRef.current = debited;
+              ctx.setCommandPoints(debited);
+              const newUnits: Unit[] = target.map(h => ({
+                id: crypto.randomUUID(),
+                team,
+                unitType,
+                tacticalHex: h,
+                homeHex: h,
+                groupId: gid,
+                hp: MAX_HP_BY_TYPE[unitType],
+                state: 'idle' as const,
+                nextMoveTick: 0,
+                visionRadius: getTerrainMods(terrainAt.get(HexUtils.key(h))).visionRadius,
+              }));
+              const nextArmies = new Map(ctx.armiesRef.current);
+              nextArmies.set(strategicKey, [...existing, ...newUnits]);
+              ctx.armiesRef.current = nextArmies;
+              ctx.setArmies(nextArmies);
+              const nextRosters = new Map(ctx.rostersRef.current);
+              nextRosters.set(team, { ...roster, [unitType]: roster[unitType] - newUnits.length });
+              ctx.rostersRef.current = nextRosters;
+              ctx.setRosters(nextRosters);
+              return true;
+            },
             issueOrder: (gid, change, intent) => {
               const next = debit(ctx.commandPointsRef.current, team, intent);
               if (next === null) return false;
