@@ -90,7 +90,7 @@ export function chooseAction(input: ScoreInput): ActionChoice | null {
   const cpHeadroom = Math.min(1, cp / 12);
 
   cands.push({
-    choice: { mode: 'march', heading: fwd, attackTarget: null, intent: 'march' },
+    choice: { mode: 'march', heading: fwd, attackTarget: objective, intent: 'march' },
     base: weights.objective * Math.min(1, distToObjective / 10),
   });
 
