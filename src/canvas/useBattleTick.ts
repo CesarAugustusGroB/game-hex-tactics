@@ -159,7 +159,11 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
           console.error(`[ai] controller for team ${team} threw:`, err);
         }
       }
-      const result = simulateTick(units, ctx.groupOrdersRef.current, {
+      // The AI phase may have appended freshly-deployed units via placeCohort (which mutates
+      // armiesRef synchronously). Re-read so the sim — and the end-of-tick setArmies that
+      // derives `survivors` — include them; otherwise newly-placed units are dropped this tick.
+      const liveUnits = ctx.armiesRef.current.get(strategicKey) ?? units;
+      const result = simulateTick(liveUnits, ctx.groupOrdersRef.current, {
         damagePerTick: DAMAGE_PER_TICK,
         currentTick: ctx.tickCounterRef.current,
         captureZone: CAPTURE_ZONE_HEXES,
