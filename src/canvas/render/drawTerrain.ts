@@ -5,10 +5,31 @@ import { type WaterFilterHandle, WATER_FILTER_CONFIGS, createWaterFilter } from 
 import { deployZoneFor, captureZoneKeys, CAPTURE_CENTER } from '../constants';
 import { grassChunkPatch } from '../detail-rules';
 
+// Flat-top hex corner unit vectors (vertex i at angle 60·i), precomputed once.
+const HEX_CORNERS = Array.from({ length: 6 }, (_, i) => {
+  const a = (Math.PI / 180) * (60 * i);
+  return { cos: Math.cos(a), sin: Math.sin(a) };
+});
+/** The 6 hex-top vertices at pixel centre `pos`, lifted by `height`. */
+const hexTopVerts = (pos: { x: number; y: number }, height: number): { x: number; y: number }[] =>
+  HEX_CORNERS.map(c => ({ x: pos.x + HexUtils.size * c.cos, y: pos.y + HexUtils.size * c.sin - height }));
+const flatVerts = (vs: { x: number; y: number }[]): number[] => vs.flatMap(v => [v.x, v.y]);
+/** Cliff/zone face quad: the shared top edge (v1→v2) dropped straight down by `dh`. */
+const faceQuad = (topV: { x: number; y: number }[], v1: number, v2: number, dh: number): number[] =>
+  [topV[v1].x, topV[v1].y, topV[v2].x, topV[v2].y, topV[v2].x, topV[v2].y + dh, topV[v1].x, topV[v1].y + dh];
+
+// Edge → [vertex a, vertex b, neighbour axial-dir index] (flat-top, vertex i at 60·i).
+const HEX_EDGES: [number, number, number][] = [
+  [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
+];
+// The 3 downhill-visible faces (S / SE / SW); the other 3 sit inside the hex top in 2.5D.
+const CLIFF_EDGES: [number, number, number][] = [[1, 2, 5], [0, 1, 0], [2, 3, 4]];
+// Per-CLIFF_EDGES shade for prism-side fills (S darker than SE / SW).
+const CLIFF_EDGE_SHADES = [0.70, 0.55, 0.55];
+
 export interface TerrainRenderContext {
   terrainGfx: PIXI.Graphics;
   terrainOverlay: PIXI.Container;
-  gridGfx: PIXI.Graphics;
   deployZoneGfx: PIXI.Graphics;
   captureZoneGfx: PIXI.Graphics;
   captureFlagSprite: PIXI.Sprite | null;
@@ -44,7 +65,6 @@ export interface TerrainRenderContext {
   waterFilters: WaterFilterHandle[];
   // Data
   gridData: { hex: Hex; type: string }[];
-  showGrid: boolean;
   viewMode: 'STRATEGIC' | 'TACTICAL';
 }
 
@@ -52,17 +72,14 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
   const {
     terrainGfx: tGfx,
     terrainOverlay: overlay,
-    gridGfx: gGfx,
     deployZoneGfx: dzGfx,
     captureZoneGfx: czGfx,
     captureFlagSprite: flagSprite,
     gridData,
-    showGrid,
     viewMode,
   } = ctx;
 
   tGfx.clear();
-  gGfx.clear();
   dzGfx.clear();
   czGfx.clear();
 
@@ -81,14 +98,8 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     const pos = HexUtils.hexToPixel(item.hex);
     const tDef = TERRAINS[item.type] || TERRAINS.SEA;
     const h = tDef.height;
-    const s = HexUtils.size;
-    const top: { x: number; y: number }[] = [];
-    const base: { x: number; y: number }[] = [];
-    for (let i = 0; i < 6; i++) {
-      const r = Math.PI / 180 * (60 * i);
-      top.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) - h });
-      base.push({ x: pos.x + s * Math.cos(r), y: pos.y + s * Math.sin(r) });
-    }
+    const top = hexTopVerts(pos, h);
+    const base = hexTopVerts(pos, 0);
     // PIXI v8 gotcha: `Color.multiply(number)` treats the number as a hex int via
     // bit-shifts (0.7 | 0 = 0 → black), so pass an RGB array.
     const drawSide = (v1: number, v2: number, shade: number, bottomH = 0, color = tDef.color) => {
@@ -126,18 +137,18 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     } else {
       fillStyle = { color: tDef.color };
     }
-    const topPoints: number[] = [];
-    for (let i = 0; i < 6; i++) { topPoints.push(top[i].x, top[i].y); }
-    tGfx.poly(topPoints).fill(fillStyle);
+    tGfx.poly(flatVerts(top)).fill(fillStyle);
     if (!isTexturedBiome(item.type)) drawWalls();
   });
 
   // Global-UV overlays: one TilingSprite per terrain type, masked to the union of that
   // biome's hex tops. The sprite tiles in its own local space (not per-polygon bbox),
   // so neighbouring hexes see different continuous patches of the texture.
-  ctx.waterFilters.length = 0;
   for (const child of overlay.children.slice()) {
     if ('mask' in child) (child as PIXI.Container).mask = null;
+    // Water parents carry the shared, cached water filter — detach it before destroy so
+    // the reusable filter (and its GL program) outlives this container.
+    (child as PIXI.Container).filters = [];
     // Water layer containers live one level down inside the filtered deepSea/coastal
     // parents now — null their masks too before the recursive destroy.
     for (const grandchild of (child as PIXI.Container).children ?? []) {
@@ -176,122 +187,42 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
   // but a broad low-alpha stroke softens the colour step between adjacent water hexes.
   const buildSeaDepthBlend = (): PIXI.Graphics => {
     const g = new PIXI.Graphics();
-    const waterBlendEdges: [number, number, number][] = [
-      [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
-    ];
+    const seaH = TERRAINS.SEA.height;
     for (const item of gridData) {
       if (item.type !== 'SEA') continue;
-      const seaH = TERRAINS.SEA.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - seaH });
-      }
-      for (const [v1, v2, dirIdx] of waterBlendEdges) {
+      const topV = hexTopVerts(HexUtils.hexToPixel(item.hex), seaH);
+      for (const [v1, v2, dirIdx] of HEX_EDGES) {
         const dir = HexUtils.directions[dirIdx];
         const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
         if (nType !== 'DEEP_SEA') continue;
-        g
-          .moveTo(topV[v1].x, topV[v1].y)
-          .lineTo(topV[v2].x, topV[v2].y)
-          .stroke({ width: 28, color: 0x4f7f8c, alpha: 0.10 });
-        g
-          .moveTo(topV[v1].x, topV[v1].y)
-          .lineTo(topV[v2].x, topV[v2].y)
-          .stroke({ width: 13, color: 0x6fa5ad, alpha: 0.08 });
+        g.moveTo(topV[v1].x, topV[v1].y).lineTo(topV[v2].x, topV[v2].y).stroke({ width: 28, color: 0x4f7f8c, alpha: 0.10 });
+        g.moveTo(topV[v1].x, topV[v1].y).lineTo(topV[v2].x, topV[v2].y).stroke({ width: 13, color: 0x6fa5ad, alpha: 0.08 });
       }
     }
     return g;
   };
-  // Same edges as `cliffEdges` below; duplicated because these builders are defined
-  // earlier than that const.
-  const cliffEdgesLocal: [number, number, number][] = [[1, 2, 5], [0, 1, 0], [2, 3, 4]];
-  const buildRiverSeaCliffs = (): PIXI.Graphics => {
+  // Cliff faces for a biome: a quad down each S/SE/SW edge that faces a shorter neighbour.
+  // `neighbourTypes` (if set) limits which neighbours trigger a face (e.g. RIVER only spills
+  // into SEA/DEEP_SEA); otherwise any shorter neighbour (or the map edge) does.
+  interface BiomeCliffStyle {
+    fill: { color: number; alpha: number };
+    stroke?: { width: number; color: number; alpha: number };
+    neighbourTypes?: Set<string>;
+  }
+  const buildBiomeCliffs = (type: string, style: BiomeCliffStyle): PIXI.Graphics => {
     const g = new PIXI.Graphics();
+    const baseH = TERRAINS[type].height;
     for (const item of gridData) {
-      if (item.type !== 'RIVER') continue;
-      const riverH = TERRAINS.RIVER.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - riverH });
-      }
-      for (const [v1, v2, dirIdx] of cliffEdgesLocal) {
+      if (item.type !== type) continue;
+      const topV = hexTopVerts(HexUtils.hexToPixel(item.hex), baseH);
+      for (const [v1, v2, dirIdx] of CLIFF_EDGES) {
         const dir = HexUtils.directions[dirIdx];
         const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
-        if (nType !== 'SEA' && nType !== 'DEEP_SEA') continue;
-        const nH = TERRAINS[nType]?.height ?? 0;
-        if (riverH <= nH) continue;
-        const dh = riverH - nH;
-        g
-          .poly([
-            topV[v1].x, topV[v1].y,
-            topV[v2].x, topV[v2].y,
-            topV[v2].x, topV[v2].y + dh,
-            topV[v1].x, topV[v1].y + dh,
-          ])
-          .fill({ color: 0xeafcff, alpha: 0.78 })
-          .stroke({ width: 1, color: 0xffffff, alpha: 0.85 });
-      }
-    }
-    return g;
-  };
-  const buildGrassEarthCliffs = (): PIXI.Graphics => {
-    const g = new PIXI.Graphics();
-    for (const item of gridData) {
-      if (item.type !== 'GRASSLAND') continue;
-      const grassH = TERRAINS.GRASSLAND.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - grassH });
-      }
-      for (const [v1, v2, dirIdx] of cliffEdgesLocal) {
-        const dir = HexUtils.directions[dirIdx];
-        const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
+        if (style.neighbourTypes && (!nType || !style.neighbourTypes.has(nType))) continue;
         const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
-        if (grassH <= nH) continue;
-        const dh = grassH - nH;
-        g
-          .poly([
-            topV[v1].x, topV[v1].y,
-            topV[v2].x, topV[v2].y,
-            topV[v2].x, topV[v2].y + dh,
-            topV[v1].x, topV[v1].y + dh,
-          ])
-          .fill({ color: 0x8a6a3f, alpha: 0.82 });
-      }
-    }
-    return g;
-  };
-  const buildForestEarthCliffs = (): PIXI.Graphics => {
-    const g = new PIXI.Graphics();
-    for (const item of gridData) {
-      if (item.type !== 'FOREST') continue;
-      const forestH = TERRAINS.FOREST.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + HexUtils.size * Math.cos(r), y: pos.y + HexUtils.size * Math.sin(r) - forestH });
-      }
-      for (const [v1, v2, dirIdx] of cliffEdgesLocal) {
-        const dir = HexUtils.directions[dirIdx];
-        const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
-        const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
-        if (forestH <= nH) continue;
-        const dh = forestH - nH;
-        g
-          .poly([
-            topV[v1].x, topV[v1].y,
-            topV[v2].x, topV[v2].y,
-            topV[v2].x, topV[v2].y + dh,
-            topV[v1].x, topV[v1].y + dh,
-          ])
-          .fill({ color: 0x4f3824, alpha: 0.86 });
+        if (baseH <= nH) continue;
+        const q = g.poly(faceQuad(topV, v1, v2, baseH - nH)).fill(style.fill);
+        if (style.stroke) q.stroke(style.stroke);
       }
     }
     return g;
@@ -358,7 +289,14 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       includeCliffs: false,
       waterFilter: 'coastal',
     },
-    { type: 'RIVER', texture: ctx.riverTex, tint: 0xFFFFFF, tilePx: 120, afterLayer: buildRiverSeaCliffs },
+    {
+      type: 'RIVER', texture: ctx.riverTex, tint: 0xFFFFFF, tilePx: 120,
+      afterLayer: () => buildBiomeCliffs('RIVER', {
+        fill: { color: 0xeafcff, alpha: 0.78 },
+        stroke: { width: 1, color: 0xffffff, alpha: 0.85 },
+        neighbourTypes: new Set(['SEA', 'DEEP_SEA']),
+      }),
+    },
     {
       type: 'RIVER',
       texture: ctx.riverFlowVariationTex,
@@ -391,7 +329,10 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       alpha: 0.45,
       blendMode: 'screen',
     },
-    { type: 'GRASSLAND', texture: ctx.grassTex, tint: 0xFFFFFF, tilePx: 200, afterLayer: buildGrassEarthCliffs },
+    {
+      type: 'GRASSLAND', texture: ctx.grassTex, tint: 0xFFFFFF, tilePx: 200,
+      afterLayer: () => buildBiomeCliffs('GRASSLAND', { fill: { color: 0x8a6a3f, alpha: 0.82 } }),
+    },
     {
       type: 'GRASSLAND',
       texture: ctx.grassMacroNoiseTex,
@@ -429,7 +370,10 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       blendMode: 'normal',
       hexFilter: (h) => grassChunkPatch(h.q, h.r, grassWorldSeed) === 'FLOWERY',
     },
-    { type: 'FOREST', texture: ctx.forestTex, tint: 0xFFFFFF, tilePx: 100, afterLayer: buildForestEarthCliffs },
+    {
+      type: 'FOREST', texture: ctx.forestTex, tint: 0xFFFFFF, tilePx: 100,
+      afterLayer: () => buildBiomeCliffs('FOREST', { fill: { color: 0x4f3824, alpha: 0.86 } }),
+    },
     {
       type: 'FOREST',
       texture: ctx.forestMacroVariationTex,
@@ -508,62 +452,49 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
       paintCliffsBefore: 'SNOW',
     },
   ];
-  // Cliff edges (taller hex → shorter neighbour). vertex pair + axial direction. Only
-  // S / SE / SW — the other three would render inside the hex top in 2.5D.
-  const cliffEdges: [number, number, number][] = [
-    [1, 2, 5], [0, 1, 0], [2, 3, 4],
-  ];
+  // Shaded prism sides for the textured land biomes (HILL / MOUNTAIN / SNOW) — fills each
+  // S/SE/SW face with the biome colour darkened per CLIFF_EDGE_SHADES, into a caller-owned
+  // Graphics so it can be inserted at the right z (just under the biome's tiled overlay).
   const drawTerrainCliffs = (target: PIXI.Graphics, terrainType: string) => {
     const terrain = TERRAINS[terrainType];
     if (!terrain) return;
     const terrainH = terrain.height;
-    const sz = HexUtils.size;
-    const terrainEdges: [number, number, number, number][] = [
-      [2, 1, 5, 0.70],
-      [1, 0, 0, 0.55],
-      [2, 3, 4, 0.55],
-    ];
-
     for (const item of gridData) {
       if (item.type !== terrainType) continue;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - terrainH });
-      }
-
-      for (const [v1, v2, dirIdx, shade] of terrainEdges) {
+      const topV = hexTopVerts(HexUtils.hexToPixel(item.hex), terrainH);
+      CLIFF_EDGES.forEach(([v1, v2, dirIdx], ei) => {
         const dir = HexUtils.directions[dirIdx];
-        const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
-        const nType = terrainAt.get(nKey);
+        const nType = terrainAt.get(HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r }));
         const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
-        if (terrainH <= nH) continue;
-        const dh = terrainH - nH;
-        target
-          .poly([
-            topV[v1].x, topV[v1].y,
-            topV[v2].x, topV[v2].y,
-            topV[v2].x, topV[v2].y + dh,
-            topV[v1].x, topV[v1].y + dh,
-          ])
-          .fill({
-            color: PIXI.Color.shared.setValue(terrain.color).multiply([shade, shade, shade, 1]).toNumber(),
-          });
-      }
+        if (terrainH <= nH) return;
+        const shade = CLIFF_EDGE_SHADES[ei];
+        target.poly(faceQuad(topV, v1, v2, terrainH - nH)).fill({
+          color: PIXI.Color.shared.setValue(terrain.color).multiply([shade, shade, shade, 1]).toNumber(),
+        });
+      });
     }
   };
   // One filtered parent per water config → a single render-to-texture pass for all layers
   // sharing that filter, instead of one pass per layer. Water layers are contiguous at the
   // start of globalUvOverlays, so these parents are added first = lowest z (correct).
   const waterParents: Partial<Record<'deepSea' | 'coastal', PIXI.Container>> = {};
+  // Cache one handle per kind for the app's lifetime. Recreating the filter each redraw
+  // recompiles a GL program and leaks the previous one; the ticker reads ctx.waterFilters
+  // for uTime, so the cache lives there.
+  const handleFor = (kind: 'deepSea' | 'coastal'): WaterFilterHandle => {
+    let handle = ctx.waterFilters.find(h => h.kind === kind);
+    if (!handle) {
+      handle = createWaterFilter(WATER_FILTER_CONFIGS[kind]);
+      handle.kind = kind;
+      ctx.waterFilters.push(handle);
+    }
+    return handle;
+  };
   const ensureWaterParent = (kind: 'deepSea' | 'coastal'): PIXI.Container => {
     let p = waterParents[kind];
     if (!p) {
       p = new PIXI.Container();
-      const handle = createWaterFilter(WATER_FILTER_CONFIGS[kind]);
-      p.filters = [handle.filter];
-      ctx.waterFilters.push(handle);
+      p.filters = [handleFor(kind).filter];
       overlay.addChild(p);
       waterParents[kind] = p;
     }
@@ -582,7 +513,6 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     );
     if (hexes.length === 0) continue;
     const hexH = (TERRAINS[layer.type] ?? TERRAINS.SEA).height;
-    const sz = HexUtils.size;
     // Base layers (no hexFilter) extend the mask to the visible cliff faces against
     // shorter neighbours — biome texture continues down the cliff instead of leaving a
     // dark shaded wall. Decoration layers (dry/dense/flowery patches) stay top-only.
@@ -590,15 +520,11 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const d of hexes) {
       const p = HexUtils.hexToPixel(d.hex);
-      const topY = p.y - hexH;
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        const vx = p.x + sz * Math.cos(r);
-        const vy = topY + sz * Math.sin(r);
-        if (vx < minX) minX = vx;
-        if (vx > maxX) maxX = vx;
-        if (vy < minY) minY = vy;
-        if (vy > maxY) maxY = vy;
+      for (const v of hexTopVerts(p, hexH)) {
+        if (v.x < minX) minX = v.x;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.y > maxY) maxY = v.y;
       }
       if (includeCliffs && p.y > maxY) maxY = p.y; // cliffs drop down by at most hexH (= p.y).
     }
@@ -617,32 +543,15 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     layerContainer.addChild(tile);
     const mask = new PIXI.Graphics();
     for (const d of hexes) {
-      const p = HexUtils.hexToPixel(d.hex);
-      const topY = p.y - hexH;
-      const topV: { x: number; y: number }[] = [];
-      const pts: number[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        const vx = p.x + sz * Math.cos(r);
-        const vy = topY + sz * Math.sin(r);
-        topV.push({ x: vx, y: vy });
-        pts.push(vx, vy);
-      }
-      mask.poly(pts).fill({ color: 0xffffff });
+      const topV = hexTopVerts(HexUtils.hexToPixel(d.hex), hexH);
+      mask.poly(flatVerts(topV)).fill({ color: 0xffffff });
       if (!includeCliffs) continue;
-      for (const [v1, v2, dirIdx] of cliffEdges) {
+      for (const [v1, v2, dirIdx] of CLIFF_EDGES) {
         const dir = HexUtils.directions[dirIdx];
-        const nKey = HexUtils.key({ q: d.hex.q + dir.q, r: d.hex.r + dir.r });
-        const nType = terrainAt.get(nKey);
+        const nType = terrainAt.get(HexUtils.key({ q: d.hex.q + dir.q, r: d.hex.r + dir.r }));
         const nH = nType ? (TERRAINS[nType]?.height ?? 0) : 0;
         if (hexH <= nH) continue;
-        const dh = hexH - nH;
-        mask.poly([
-          topV[v1].x, topV[v1].y,
-          topV[v2].x, topV[v2].y,
-          topV[v2].x, topV[v2].y + dh,
-          topV[v1].x, topV[v1].y + dh,
-        ]).fill({ color: 0xffffff });
+        mask.poly(faceQuad(topV, v1, v2, hexH - nH)).fill({ color: 0xffffff });
       }
     }
     const parent = layer.waterFilter ? ensureWaterParent(layer.waterFilter) : overlay;
@@ -660,24 +569,14 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
   if (viewMode === 'TACTICAL') {
     const redZone = deployZoneFor('red', gridData);
     const blueZone = deployZoneFor('blue', gridData);
-    const sz = HexUtils.size;
-    const zoneEdges: [number, number, number][] = [
-      [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
-    ];
     for (const item of gridData) {
       const k = HexUtils.key(item.hex);
       const zone = redZone.has(k) ? redZone : blueZone.has(k) ? blueZone : null;
       if (!zone) continue;
       const color = zone === redZone ? 0xff3344 : 0x3b82f6;
-      const tDef = TERRAINS[item.type] || TERRAINS.SEA;
-      const hh = tDef.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - hh });
-      }
-      for (const [v1, v2, dirIdx] of zoneEdges) {
+      const hh = (TERRAINS[item.type] || TERRAINS.SEA).height;
+      const topV = hexTopVerts(HexUtils.hexToPixel(item.hex), hh);
+      for (const [v1, v2, dirIdx] of HEX_EDGES) {
         const dir = HexUtils.directions[dirIdx];
         const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
         if (zone.has(nKey)) continue;
@@ -695,27 +594,13 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
   if (flagSprite) flagSprite.visible = viewMode === 'TACTICAL';
   if (viewMode === 'TACTICAL') {
     const zone = captureZoneKeys();
-    const sz = HexUtils.size;
-    const zoneEdges: [number, number, number][] = [
-      [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
-    ];
     for (const item of gridData) {
       const k = HexUtils.key(item.hex);
       if (!zone.has(k)) continue;
-      const tDef = TERRAINS[item.type] || TERRAINS.SEA;
-      const hh = tDef.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const pts: number[] = [];
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        const vx = pos.x + sz * Math.cos(r);
-        const vy = pos.y + sz * Math.sin(r) - hh;
-        topV.push({ x: vx, y: vy });
-        pts.push(vx, vy);
-      }
-      czGfx.poly(pts).fill({ color: 0xfacc15, alpha: 0.28 });
-      for (const [v1, v2, dirIdx] of zoneEdges) {
+      const hh = (TERRAINS[item.type] || TERRAINS.SEA).height;
+      const topV = hexTopVerts(HexUtils.hexToPixel(item.hex), hh);
+      czGfx.poly(flatVerts(topV)).fill({ color: 0xfacc15, alpha: 0.28 });
+      for (const [v1, v2, dirIdx] of HEX_EDGES) {
         const dir = HexUtils.directions[dirIdx];
         const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
         if (zone.has(nKey)) continue;
@@ -730,59 +615,63 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
     // Flag sprite sits on the centre hex top — y offset by that hex's terrain height.
     const flag = flagSprite;
     if (flag) {
-      const centerTile = gridData.find(d => d.hex.q === CAPTURE_CENTER.q && d.hex.r === CAPTURE_CENTER.r);
-      const hh = centerTile ? (TERRAINS[centerTile.type]?.height ?? 0) : 0;
+      const centerType = terrainAt.get(HexUtils.key(CAPTURE_CENTER));
+      const hh = centerType ? (TERRAINS[centerType]?.height ?? 0) : 0;
       const pos = HexUtils.hexToPixel(CAPTURE_CENTER);
       flag.x = pos.x;
       flag.y = pos.y - hh;
     }
   }
 
-  // Each shared edge is stroked ONCE — by the taller hex (tiebreak: axial-key compare).
-  // Stops double-line artefacts at elevation boundaries where each side would otherwise
-  // draw its own outline at its own height.
-  if (showGrid) {
-    // Edge → vertex pair → neighbour axial dir (flat-top, r = 60·i).
-    const gridEdges: [number, number, number][] = [
-      [5, 0, 1], [0, 1, 0], [1, 2, 5], [2, 3, 4], [3, 4, 3], [4, 5, 2],
-    ];
-    // The two neighbour dirs whose hexes also share each vertex (flat-top, vertex i at
-    // 60·i). A vertex is lifted to the tallest of the (up to 3) hexes touching it, so a
-    // shorter hex's grid edge climbs to meet a taller neighbour's raised corner instead
-    // of being drawn at its own height and poking a stub across the taller hex's top.
-    const vertexDirs: [number, number][] = [[0, 1], [0, 5], [5, 4], [4, 3], [3, 2], [2, 1]];
-    const sz = HexUtils.size;
-    const heightAt = (q: number, r: number): number => {
-      const t = terrainAt.get(HexUtils.key({ q, r }));
-      return t ? (TERRAINS[t]?.height ?? 0) : 0;
-    };
-    for (const item of gridData) {
-      const tDef = TERRAINS[item.type] || TERRAINS.SEA;
-      const hh = tDef.height;
-      const pos = HexUtils.hexToPixel(item.hex);
-      const myKey = HexUtils.key(item.hex);
-      const topV: { x: number; y: number }[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = Math.PI / 180 * (60 * i);
-        let vh = hh;
-        for (const d of vertexDirs[i]) {
-          const nb = HexUtils.directions[d];
-          const nbh = heightAt(item.hex.q + nb.q, item.hex.r + nb.r);
-          if (nbh > vh) vh = nbh;
-        }
-        topV.push({ x: pos.x + sz * Math.cos(r), y: pos.y + sz * Math.sin(r) - vh });
+}
+
+export interface GridRenderContext {
+  gridGfx: PIXI.Graphics;
+  gridData: { hex: Hex; type: string }[];
+  showGrid: boolean;
+}
+
+// Drawn into its own `gridGfx` so toggling the grid never rebuilds the terrain pipeline.
+// Each shared edge is stroked ONCE — by the taller hex (tiebreak: axial-key compare).
+// Stops double-line artefacts at elevation boundaries where each side would otherwise
+// draw its own outline at its own height.
+export function drawGrid({ gridGfx: gGfx, gridData, showGrid }: GridRenderContext): void {
+  gGfx.clear();
+  if (!showGrid) return;
+  const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
+  // The two neighbour dirs whose hexes also share each vertex (flat-top, vertex i at
+  // 60·i). A vertex is lifted to the tallest of the (up to 3) hexes touching it, so a
+  // shorter hex's grid edge climbs to meet a taller neighbour's raised corner instead
+  // of being drawn at its own height and poking a stub across the taller hex's top.
+  const vertexDirs: [number, number][] = [[0, 1], [0, 5], [5, 4], [4, 3], [3, 2], [2, 1]];
+  const sz = HexUtils.size;
+  const heightAt = (q: number, r: number): number => {
+    const t = terrainAt.get(HexUtils.key({ q, r }));
+    return t ? (TERRAINS[t]?.height ?? 0) : 0;
+  };
+  for (const item of gridData) {
+    const hh = (TERRAINS[item.type] || TERRAINS.SEA).height;
+    const pos = HexUtils.hexToPixel(item.hex);
+    const myKey = HexUtils.key(item.hex);
+    const topV = HEX_CORNERS.map((c, i) => {
+      let vh = hh;
+      for (const d of vertexDirs[i]) {
+        const nb = HexUtils.directions[d];
+        const nbh = heightAt(item.hex.q + nb.q, item.hex.r + nb.r);
+        if (nbh > vh) vh = nbh;
       }
-      for (const [v1, v2, dirIdx] of gridEdges) {
-        const dir = HexUtils.directions[dirIdx];
-        const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
-        const nType = terrainAt.get(nKey);
-        const nH = nType ? (TERRAINS[nType]?.height ?? 0) : -Infinity;
-        const iOwn = !nType || hh > nH || (hh === nH && myKey < nKey);
-        if (!iOwn) continue;
-        gGfx.moveTo(topV[v1].x, topV[v1].y)
-            .lineTo(topV[v2].x, topV[v2].y)
-            .stroke({ width: 1, color: 0x141414, alpha: 1 });
-      }
+      return { x: pos.x + sz * c.cos, y: pos.y + sz * c.sin - vh };
+    });
+    for (const [v1, v2, dirIdx] of HEX_EDGES) {
+      const dir = HexUtils.directions[dirIdx];
+      const nKey = HexUtils.key({ q: item.hex.q + dir.q, r: item.hex.r + dir.r });
+      const nType = terrainAt.get(nKey);
+      const nH = nType ? (TERRAINS[nType]?.height ?? 0) : -Infinity;
+      const iOwn = !nType || hh > nH || (hh === nH && myKey < nKey);
+      if (!iOwn) continue;
+      gGfx.moveTo(topV[v1].x, topV[v1].y)
+          .lineTo(topV[v2].x, topV[v2].y)
+          .stroke({ width: 1, color: 0x141414, alpha: 1 });
     }
   }
 }

@@ -12,10 +12,11 @@ import type { OrderChange } from '../../battle/ai';
 import type { CpIntent } from '../../battle/command-points';
 import {
   DRAG_THRESHOLD_PX, HEADING_ARROWS, TEAM_TINTS, groupOrderKey,
-  deployZoneFor,
+  deployZoneFor, terrainMapFor, gridKeySetFor,
   type Armies, type GroupOrders, type GroupFormations, type GroupDepths, type InputMode,
 } from '../constants';
 import { TERRAINS } from '../terrain-defs';
+import { STAR_STYLE } from '../render/drawUnits';
 
 export interface OrderDrag {
   team: Team;
@@ -132,8 +133,8 @@ export function commitOrderDrag(ctx: OrderDragCtx): void {
     ? computeLineSlotAssignmentsByType(groupUnits, slots, drag.targetHex, lineFrontWidth)
     : computeOrderedSlotAssignments(groupUnits, slots, drag.targetHex);
 
-  const gridSet = new Set(ctx.gridDataRef.current.map(d => HexUtils.key(d.hex)));
-  const terrainAt = new Map(ctx.gridDataRef.current.map(d => [HexUtils.key(d.hex), d.type]));
+  const gridSet = gridKeySetFor(ctx.gridDataRef.current);
+  const terrainAt = terrainMapFor(ctx.gridDataRef.current);
   const allUnits = strategic ? ctx.armiesRef.current.get(HexUtils.key(strategic)) ?? [] : [];
   const groupIds = new Set(groupUnits.map(u => u.id));
   const occupantByHex = new Map<string, Unit>();
@@ -225,11 +226,12 @@ export function renderOrderPreview(ctx: OrderDragCtx): void {
     slots = computeFormationPreview(drag.unitCount, drag.targetHex, heading, drag.formation, drag.depth);
   }
   const teamColor = TEAM_TINTS[drag.team];
+  const terrainAt = terrainMapFor(ctx.gridDataRef.current);
 
   slots.forEach((slot, i) => {
     const pos = HexUtils.hexToPixel(slot);
-    const tile = ctx.gridDataRef.current.find(d => d.hex.q === slot.q && d.hex.r === slot.r);
-    const topY = pos.y - (tile ? TERRAINS[tile.type].height : 0);
+    const tType = terrainAt.get(HexUtils.key(slot));
+    const topY = pos.y - (tType ? TERRAINS[tType].height : 0);
 
     const isLieutenant = i === 0;
     const hex = new PIXI.Graphics();
@@ -245,19 +247,13 @@ export function renderOrderPreview(ctx: OrderDragCtx): void {
     gfx.addChild(hex);
 
     if (isLieutenant) {
-      const star = new PIXI.Text({
-        text: '★',
-        style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
-      });
+      const star = new PIXI.Text({ text: '★', style: STAR_STYLE });
       star.anchor.set(0.5);
       star.x = pos.x;
       star.y = topY - 44;
       gfx.addChild(star);
 
-      const arrow = new PIXI.Text({
-        text: HEADING_ARROWS[heading] ?? '→',
-        style: { fontSize: 14, fontWeight: '900', fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } },
-      });
+      const arrow = new PIXI.Text({ text: HEADING_ARROWS[heading] ?? '→', style: STAR_STYLE });
       arrow.anchor.set(0.5);
       arrow.x = pos.x + 14;
       arrow.y = topY - 44;

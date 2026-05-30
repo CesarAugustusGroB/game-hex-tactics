@@ -81,11 +81,11 @@ export { DAMAGE_PER_TICK } from '../data/combat';
 
 export const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
 
+type GridData = { hex: Hex; type: string }[];
+
 // 0.28 ≈ bottom 28% strip of the visible map. Computed in pixel-y (not axial-r) so
 // the strips read as HORIZONTAL — flat-top axial-r rows are slanted diagonally.
-/** Hex keys belonging to a team's deployment zone, derived from the screen-y extent of
- *  `gridData`. Red gets the bottom strip, blue the top. */
-export const deployZoneFor = (team: Team, gridData: { hex: Hex; type: string }[]): Set<string> => {
+const computeDeployZone = (team: Team, gridData: GridData): Set<string> => {
   const zone = new Set<string>();
   if (gridData.length === 0) return zone;
   let minY = Infinity, maxY = -Infinity;
@@ -101,6 +101,39 @@ export const deployZoneFor = (team: Team, gridData: { hex: Hex; type: string }[]
     if (team === 'red' ? py >= threshold : py <= threshold) zone.add(HexUtils.key(d.hex));
   }
   return zone;
+};
+
+// Per-gridData derived lookups behind a 1-entry identity cache. gridData is a stable array
+// reference until world regen, so the per-tick (battle tick, unit render) and per-frame
+// (order drag) consumers share one build instead of each recomputing O(n) maps/sets every
+// time. Returned collections are read-only by all callers — never mutate them.
+let cacheGrid: GridData | null = null;
+let cacheTerrainAt = new Map<string, string>();
+let cacheGridSet = new Set<string>();
+let cacheDeployZones: Record<Team, Set<string>> = { red: new Set(), blue: new Set() };
+const ensureGridCache = (gridData: GridData): void => {
+  if (cacheGrid === gridData) return;
+  cacheGrid = gridData;
+  cacheTerrainAt = new Map(gridData.map(d => [HexUtils.key(d.hex), d.type]));
+  cacheGridSet = new Set(gridData.map(d => HexUtils.key(d.hex)));
+  cacheDeployZones = { red: computeDeployZone('red', gridData), blue: computeDeployZone('blue', gridData) };
+};
+
+/** hex key → terrain type for every hex. Cached per gridData identity. */
+export const terrainMapFor = (gridData: GridData): Map<string, string> => {
+  ensureGridCache(gridData);
+  return cacheTerrainAt;
+};
+/** Set of all in-bounds hex keys. Cached per gridData identity. */
+export const gridKeySetFor = (gridData: GridData): Set<string> => {
+  ensureGridCache(gridData);
+  return cacheGridSet;
+};
+/** Hex keys belonging to a team's deployment zone, derived from the screen-y extent of
+ *  `gridData`. Red gets the bottom strip, blue the top. Cached per gridData identity. */
+export const deployZoneFor = (team: Team, gridData: GridData): Set<string> => {
+  ensureGridCache(gridData);
+  return cacheDeployZones[team];
 };
 
 /** A group is "sealed" (locked from receiving new units) while it's committed on the
