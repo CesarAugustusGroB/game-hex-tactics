@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enemy AI — Design</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --ink:#e6edf3; --dim:#9aa7b2;
+    --line:#2a3340; --red:#e5534b; --blue:#4c8dd6; --gold:#d8a657; --green:#6cc070;
+    --teal:#56b6c2; --violet:#a371f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 80% -10%,#1a2230,transparent),var(--bg);
+    color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:48px 28px 80px}
+  header h1{font-size:34px;margin:0 0 6px;letter-spacing:-.4px}
+  header p{color:var(--dim);margin:0 0 4px}
+  .axes{display:flex;gap:14px;flex-wrap:wrap;margin:22px 0 8px}
+  .axis{flex:1;min-width:260px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px}
+  .axis h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{padding:5px 11px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line)}
+  .chip.b{background:rgba(76,141,214,.14);color:#86b9ee;border-color:#34506e}
+  .chip.g{background:rgba(216,166,87,.14);color:#e6c179;border-color:#5e5023}
+  section{margin-top:38px}
+  section>h2{font-size:13px;text-transform:uppercase;letter-spacing:.14em;color:var(--teal);
+    margin:0 0 14px;display:flex;align-items:center;gap:10px}
+  section>h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .node{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:150px;flex:1}
+  .node .k{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);margin-bottom:4px}
+  .node .v{font-weight:600}
+  .node small{color:var(--dim);font-weight:400;font-size:12.5px;display:block;margin-top:4px}
+  .arrow{display:flex;align-items:center;color:var(--dim);padding:0 6px;font-size:20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .card h4{margin:0 0 6px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .card p{margin:0;color:var(--dim);font-size:13.5px}
+  code{background:#0b0e13;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12.5px;color:#cdd9e5}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;overflow:hidden}
+  th,td{padding:11px 14px;text-align:center;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left;font-weight:600}
+  thead th{background:var(--panel2);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+  tbody tr:last-child td{border-bottom:none}
+  .num{font-variant-numeric:tabular-nums;font-weight:600}
+  .bar{height:6px;border-radius:4px;background:var(--line);margin-top:5px;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:4px}
+  .mods{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
+  .roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+  .modline{font-size:12.5px;color:var(--dim)}
+  footer{margin-top:46px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:16px}
+  .stack{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px 0}
+  .layer{display:flex;gap:14px;align-items:flex-start;padding:12px 18px;border-bottom:1px solid var(--line)}
+  .layer:last-child{border-bottom:none}
+  .layer .tag{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--violet);min-width:200px}
+  .layer .desc{color:var(--dim);font-size:13.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Enemy AI <span style="color:var(--dim);font-weight:400">— Design</span></h1>
+    <p>Le da cerebro al team <b style="color:var(--blue)">blue</b>: corre el mismo bucle que el jugador — <b>se despliega pintando cohortes</b> desde un roster fijado al inicio, luego <b>comanda</b> sus grupos hacia las condiciones de victoria.</p>
+    <div class="axes">
+      <div class="axis">
+        <h3>Eje 1 · Doctrina <span style="color:var(--dim)">— qué quiere</span></h3>
+        <div class="chips">
+          <span class="chip b">equilibrada</span>
+          <span class="chip b">agresiva</span>
+          <span class="chip b">defensiva</span>
+        </div>
+      </div>
+      <div class="axis">
+        <h3>Eje 2 · Dificultad <span style="color:var(--dim)">— qué tan bien lo ejecuta</span></h3>
+        <div class="chips">
+          <span class="chip g">easy</span>
+          <span class="chip g">normal</span>
+          <span class="chip g">hard</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Pipeline por tick</h2>
+    <div class="flow">
+      <div class="node"><div class="k">Comandante</div><div class="v">Doctrina → roles</div><small>cada ~20 ticks, asigna rol a cada grupo</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="k">Despliegue</div><div class="v">placeCohort</div><small>pinta cohortes hasta el objetivo de fuerza</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="k">Utilidad</div><div class="v">Score → argmax</div><small>elige la mejor acción pagable del grupo</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="k">Host</div><div class="v">issueOrder</div><small>aplica el efecto, cobra CP</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Comandante · Doctrina → mezcla de roles</h2>
+    <table>
+      <thead><tr><th>Doctrina</th><th><span style="color:var(--gold)">centerHold</span></th><th><span style="color:var(--green)">defendLine</span></th><th><span style="color:var(--red)">raid</span></th><th><span style="color:var(--dim)">reserve</span></th></tr></thead>
+      <tbody>
+        <tr><td>equilibrada</td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td class="num">1</td></tr>
+        <tr><td>agresiva</td><td class="num">1</td><td class="num">0</td><td class="num">2</td><td class="num">1</td></tr>
+        <tr><td>defensiva</td><td class="num">1</td><td class="num">2</td><td class="num">0</td><td class="num">1</td></tr>
+      </tbody>
+    </table>
+    <div class="roles" style="margin-top:14px">
+      <div class="card"><h4><span class="dot" style="background:var(--gold)"></span>centerHold</h4><p>Marcha y aguanta la flor central (puntos/seg sin disputar).</p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--green)"></span>defendLine</h4><p>Mantiene formación frente a su zona; contraataca lo que entra.</p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--red)"></span>raid</h4><p>Empuja a tu línea trasera para puntuar (raid &amp; return).</p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--dim)"></span>reserve</h4><p>Espera en casa, rellena bajas, cubre huecos.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Utilidad · candidatos &amp; features</h2>
+    <div class="grid">
+      <div class="card"><h4>Candidatos</h4><p><code>hold</code> (coste 0) · <code>march</code>→objetivo · <code>charge</code>→enemigo débil · <code>unleash</code> · <code>retreat</code></p></div>
+      <div class="card"><h4>Features ponderados</h4><p>avance al objetivo del rol · debilidad del blanco (focus fire) · ventaja de altura · riesgo (flanqueo / inferioridad) · holgura de CP</p></div>
+      <div class="card"><h4>Elección</h4><p><code>argmax</code> entre las acciones <b>pagables</b>. Si gana <code>hold</code>, no gasta CP. Pesos por doctrina.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Moduladores de dificultad</h2>
+    <table>
+      <thead><tr><th></th><th>reactionTicks</th><th>decisionNoise</th><th>cpBudgetFrac</th><th>forceScale</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chip g">easy</span></td><td class="num">12</td><td class="num">0.5</td><td class="num">0.5</td><td class="num">0.6</td></tr>
+        <tr><td><span class="chip g">normal</span></td><td class="num">6</td><td class="num">0.2</td><td class="num">0.8</td><td class="num">0.85</td></tr>
+        <tr><td><span class="chip g">hard</span></td><td class="num">2</td><td class="num">0.0</td><td class="num">1.0</td><td class="num">1.0</td></tr>
+      </tbody>
+    </table>
+    <div class="mods">
+      <div class="modline"><b style="color:var(--ink)">reactionTicks</b> — cadencia: cada cuántos ticks redecide cada grupo.</div>
+      <div class="modline"><b style="color:var(--ink)">decisionNoise</b> — ruido en los scores antes del argmax (RNG con semilla).</div>
+      <div class="modline"><b style="color:var(--ink)">cpBudgetFrac</b> — fracción del CP que se permite gastar por ventana.</div>
+      <div class="modline"><b style="color:var(--ink)">forceScale</b> — tamaño del ejército que despliega.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Módulos</h2>
+    <div class="stack">
+      <div class="layer"><div class="tag">src/battle/ai.ts</div><div class="desc">Registry (existe). Se extiende <code>AiTickState</code> con <code>roster</code>, <code>deployZone</code>, <code>placeCohort</code>.</div></div>
+      <div class="layer"><div class="tag">src/battle/ai/controller.ts</div><div class="desc"><code>makeAiController(team, doctrine, difficulty)</code> → <code>AiTickFn</code>. Estado en closure: roles, último tick de decisión, deployDone.</div></div>
+      <div class="layer"><div class="tag">src/battle/ai/commander.ts</div><div class="desc">Doctrina → asigna un rol a cada grupo (puro).</div></div>
+      <div class="layer"><div class="tag">src/battle/ai/utility.ts</div><div class="desc">Puntúa acciones de un grupo, elige la mejor pagable (puro).</div></div>
+      <div class="layer"><div class="tag">src/battle/ai/deploy.ts</div><div class="desc">Planifica despliegue: composición + plantilla de colocación (puro).</div></div>
+      <div class="layer"><div class="tag">src/data/ai.json + ai.ts</div><div class="desc">Pesos por doctrina, parámetros por dificultad (patrón JSON del proyecto).</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Wiring &amp; testing</h2>
+    <div class="grid">
+      <div class="card"><h4>Wiring</h4><p>Un <code>useEffect</code> en GameCanvas registra el controller para <b style="color:var(--blue)">blue</b> cuando el HUD activa la AI; selector <b>doctrina + dificultad + off</b>. Con AI activa, el jugador es <b style="color:var(--red)">red</b>.</p></div>
+      <div class="card"><h4>Testing</h4><p><code>scripts/test-ai.ts</code> headless con host falso: corre una batalla completa, verifica despliegue, disputa del centro y puntuación; <code>hard</code> &gt; <code>easy</code>.</p></div>
+      <div class="card"><h4>Pureza</h4><p>Todo <code>src/battle/ai/*</code> es libre de React/PIXI → testeable con el harness. Los efectos los provee el host.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    docs/superpowers/specs/2026-05-30-ai-enemy-design.md · rama <code>feature/ai-enemy</code>
+  </footer>
+</div>
+</body>
+</html>
