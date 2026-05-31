@@ -54,6 +54,8 @@ export interface BattleTickCtx {
   // when a group empties so a recycled slot re-pays firstMarch.
   marchedGroupsRef: MutableRefObject<Set<string>>;
   setMarchedGroups: Dispatch<SetStateAction<Set<string>>>;
+  // Schedules a timeout tracked by the host so reset/return/regenerate/unmount cancels it.
+  scheduleTimeout: (fn: () => void, ms: number) => number;
 }
 
 export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
@@ -252,10 +254,10 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
           centerHoldPointsPerTick: CENTER_HOLD_POINTS_PER_TICK,
         },
       });
-      // Units that reached the enemy line leave the field. Removal is async (via setArmies
-      // below → armiesRef mirror), but scoreRef updates synchronously, so single-scoring
-      // relies on React flushing setArmies within one TICK_MS window — otherwise a reached
-      // unit would still be in armiesRef next tick and score again. Safe at 500ms ticks.
+      // Units that reached the enemy line leave the field. armiesRef is the authoritative
+      // field the NEXT tick reads, so survivors are written to it synchronously below — not
+      // only via the async setArmies mirror. Relying on React flushing within one TICK_MS
+      // raced: a backgrounded tab / GC pause could stack two ticks and re-score the same unit.
       const survivors = sc.reachedUnitIds.size > 0
         ? next.filter(u => !sc.reachedUnitIds.has(u.id))
         : next;
@@ -284,13 +286,12 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       if (sc.winner) {
         ctx.setWinBanner(sc.winner);
         ctx.setIsBattleRunning(false);
-        window.setTimeout(() => ctx.setWinBanner(null), 3000);
+        ctx.scheduleTimeout(() => ctx.setWinBanner(null), 3000);
       }
-      ctx.setArmies(prev => {
-        const updated = new Map(prev);
-        updated.set(strategicKey, survivors);
-        return updated;
-      });
+      const updatedArmies = new Map(ctx.armiesRef.current);
+      updatedArmies.set(strategicKey, survivors);
+      ctx.armiesRef.current = updatedArmies; // synchronous: closes the double-scoring window
+      ctx.setArmies(updatedArmies);
       // A group that just emptied (all units died, or raided the line & returned to roster)
       // keeps its stale march/charge/committed order. Reset it to idle so when the freed
       // slot is recycled, the freshly-placed units start idle instead of inheriting the old

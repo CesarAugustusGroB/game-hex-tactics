@@ -7,7 +7,7 @@
  */
 import {
   CP_CAP, CP_INITIAL, CP_COSTS, CP_REGEN_N, CP_REGEN_PER_TICK_STEP,
-  makeInitialCommandPoints, canAfford, debit, applyRegen,
+  makeInitialCommandPoints, canAfford, debit, applyRegen, applyCap,
 } from '../src/battle/command-points';
 
 type Result = { name: string; pass: boolean; detail?: string };
@@ -85,6 +85,19 @@ function check(name: string, cond: boolean, detail?: string) {
 {
   const t = applyRegen({ red: CP_CAP, blue: CP_CAP - 1 }, 1, CP_CAP);
   check('regen caps the high team, ticks up the other', t.red === CP_CAP && t.blue === CP_CAP);
+}
+
+// applyCap — lowering the cap clamps current down, raising it does NOT refill
+{
+  const lowered = applyCap({ red: 50, blue: 200 }, 100);
+  check('applyCap clamps a team above the new cap down to it', lowered.red === 50 && lowered.blue === 100,
+    `red=${lowered.red} blue=${lowered.blue}`);
+  const raised = applyCap({ red: 50, blue: 80 }, 300);
+  check('applyCap does NOT refill teams below the cap', raised.red === 50 && raised.blue === 80,
+    `red=${raised.red} blue=${raised.blue}`);
+  const cp = { red: 50, blue: 50 };
+  check('applyCap returns same ref when nothing changes', applyCap(cp, 100) === cp);
+  check('applyCap does not mutate input', cp.red === 50 && cp.blue === 50);
 }
 
 // regen knob sanity

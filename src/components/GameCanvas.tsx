@@ -16,7 +16,7 @@ import {
 } from '../canvas/constants';
 import {
   type CommandPoints, type CpIntent,
-  makeInitialCommandPoints, debit, canAfford as canAffordPure,
+  makeInitialCommandPoints, debit, canAfford as canAffordPure, applyCap,
   CP_CAP, CP_REGEN_N,
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
@@ -222,8 +222,9 @@ export const GameCanvas: React.FC = () => {
       detailTextures: detailTexturesRef.current,
       gridData,
       detailDensityNoise: detailDensityNoiseRef.current,
+      viewMode,
     });
-  }, [gridData]);
+  }, [gridData, viewMode]);
 
   useEffect(() => { drawDetails(); }, [gridData, terrainTexturesLoaded, drawDetails]);
 
@@ -370,8 +371,10 @@ export const GameCanvas: React.FC = () => {
     const clamped = Math.max(1, Math.min(999, Math.round(v || 0)));
     cpMaxRef.current = clamped;
     setCpMaxState(clamped);
-    // Also the cap, so start both teams full at it (visible immediately).
-    const next: CommandPoints = { red: clamped, blue: clamped };
+    // Editing the cap is a live ceiling change, NOT a refill: trim each team's current
+    // pool down to the new cap (raising it leaves current untouched). Refilling here let
+    // a player reset the whole CP economy mid-battle by tapping the MAX field.
+    const next = applyCap(commandPointsRef.current, clamped);
     commandPointsRef.current = next;
     setCommandPoints(next);
   }, []);
@@ -393,12 +396,30 @@ export const GameCanvas: React.FC = () => {
     return true;
   }, []);
 
+  // Pending UI timeouts (win-banner auto-clear, broke-flash). Tracked so reset / return /
+  // regenerate / unmount cancel them — otherwise a late timer clears the banner of a
+  // freshly-started battle, or fires setState after the component is gone.
+  const pendingTimeoutsRef = useRef<Set<number>>(new Set());
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => {
+      pendingTimeoutsRef.current.delete(id);
+      fn();
+    }, ms);
+    pendingTimeoutsRef.current.add(id);
+    return id;
+  }, []);
+  const clearPendingTimeouts = useCallback(() => {
+    pendingTimeoutsRef.current.forEach(id => window.clearTimeout(id));
+    pendingTimeoutsRef.current.clear();
+  }, []);
+  useEffect(() => clearPendingTimeouts, [clearPendingTimeouts]);
+
   const triggerBrokeFlash = useCallback((team: Team) => {
     setBrokeFlash(prev => ({ ...prev, [team]: true }));
-    window.setTimeout(() => {
+    scheduleTimeout(() => {
       setBrokeFlash(prev => ({ ...prev, [team]: false }));
     }, 200);
-  }, []);
+  }, [scheduleTimeout]);
 
   const updateHighlightsRef = useRef<() => void>(() => {});
 
@@ -538,6 +559,7 @@ export const GameCanvas: React.FC = () => {
     cpMaxRef,
     marchedGroupsRef,
     setMarchedGroups,
+    scheduleTimeout,
   };
   useBattleTick(battleCtx, isBattleRunning);
 
@@ -698,6 +720,7 @@ export const GameCanvas: React.FC = () => {
   }, []);
 
   const resetBattle = useCallback(() => {
+    clearPendingTimeouts();
     setArmies(new Map());
     setInputMode(null);
     setIsBattleRunning(false);
@@ -712,9 +735,10 @@ export const GameCanvas: React.FC = () => {
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
     setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
-  }, []);
+  }, [clearPendingTimeouts]);
 
   const returnToStrategic = useCallback(() => {
+    clearPendingTimeouts();
     setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
     setViewMode('STRATEGIC');
     setCurrentStrategicHex(null);
@@ -731,9 +755,10 @@ export const GameCanvas: React.FC = () => {
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
     setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
-  }, []);
+  }, [clearPendingTimeouts]);
 
   const regenerateWith = useCallback((nextSeed: number, choice: MapTypeChoice) => {
+    clearPendingTimeouts();
     const resolved = resolveMapType(choice, nextSeed);
     setResolvedMapType(resolved);
     setSeed(nextSeed);
@@ -754,7 +779,7 @@ export const GameCanvas: React.FC = () => {
     tickCounterRef.current = 0;
     commandPointsRef.current = makeInitialCommandPoints(cpMaxRef.current);
     setCommandPoints(makeInitialCommandPoints(cpMaxRef.current));
-  }, []);
+  }, [clearPendingTimeouts]);
 
   const regenerateWorld = useCallback(() => regenerateWith(seed, mapTypeChoice), [regenerateWith, seed, mapTypeChoice]);
   const rerollSeed = useCallback(() => regenerateWith(Math.floor(Math.random() * 0x100000000), mapTypeChoice), [regenerateWith, mapTypeChoice]);

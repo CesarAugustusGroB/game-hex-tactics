@@ -11,13 +11,15 @@
     "sim": "tsx scripts/sim-formations.ts",
     "sim:loop": "tsx scripts/sim-battle-loop.ts",
     "test:cp": "tsx scripts/test-command-points.ts",
+    "test:occupancy": "tsx scripts/test-occupancy.ts",
+    "test:boats": "tsx scripts/test-boats.ts",
     "test:scoring": "tsx scripts/sim-scoring.ts",
     "test:hold": "tsx scripts/test-hold.ts",
     "test:follower": "tsx scripts/test-follower-path.ts",
     "test:worldgen": "tsx scripts/test-worldgen.ts",
     "test:hexutils": "tsx scripts/test-hexutils.ts",
     "units:normalize": "python scripts/normalize-units.py",
-    "test:ai": "tsx scripts/test-ai-config.ts && tsx scripts/test-ai-deploy.ts && tsx scripts/test-ai-commander.ts && tsx scripts/test-ai-utility.ts && tsx scripts/test-ai-controller.ts && tsx scripts/test-ai-battle.ts && tsx scripts/test-ai-reinforce.ts"
+    "test:ai": "tsx scripts/test-ai-config.ts && tsx scripts/test-ai-deploy.ts && tsx scripts/test-ai-controller.ts && tsx scripts/test-ai-battle.ts && tsx scripts/test-ai-reinforce.ts && tsx scripts/test-ai-groups.ts && tsx scripts/test-ai-rules.ts"
   },
   "dependencies": {
     "gsap": "^3.14.2",

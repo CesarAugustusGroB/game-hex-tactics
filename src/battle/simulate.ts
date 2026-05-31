@@ -1,5 +1,5 @@
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import { heightDamageBonus, type TerrainMods } from './terrain';
+import { heightDamageBonus, isWaterType, type TerrainMods } from './terrain';
 import {
   CHARGE_DURATION_TICKS,
   CHARGE_IMPACT_RANGE,
@@ -15,6 +15,7 @@ import {
   SKIRMISHER_MISSILE_RANGE,
   SKIRMISHER_MISSILE_DAMAGE,
   SKIRMISHER_KITE_THRESHOLD,
+  BOAT_STATS,
 } from '../data/units';
 
 export type Team = 'red' | 'blue';
@@ -843,11 +844,25 @@ export const simulateTick = (
   orders: Map<string, GroupOrder>,
   config: SimulationConfig,
 ): SimulationResult => {
-  const occupiedByHex = new Map<string, Unit>();
-  for (const u of units) occupiedByHex.set(HexUtils.key(u.tacticalHex), u);
+  // Map to a LIST per hex: co-located units (deploy snap, AI overlap) must all stay
+  // visible to combat. A flat Map<key,Unit> was last-write-wins and silently hid every
+  // unit but the last one sharing a hex.
+  const occupiedByHex = new Map<string, Unit[]>();
+  for (const u of units) {
+    const k = HexUtils.key(u.tacticalHex);
+    const arr = occupiedByHex.get(k);
+    if (arr) arr.push(u);
+    else occupiedByHex.set(k, [u]);
+  }
 
   const working: Unit[] = units.map(u => ({ ...u, state: 'idle' as UnitState }));
   const byId = new Map<string, Unit>(working.map(u => [u.id, u]));
+
+  // A unit on open water is a boat: uniform speed, no charge impact, no missiles, HP capped
+  // to the boat max. Derived from its hex, so it reverts on land with no stored state.
+  const afloat = (u: Unit): boolean => isWaterType(config.mapApi.getTerrainType(u.tacticalHex));
+  const marchSpeedOf = (u: Unit): number =>
+    afloat(u) ? BOAT_STATS.marchSpeed : MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry'];
 
   // Hold-mode defensive reduction per defender (looked up via team:groupId → order).
   // Computed once here so the per-pair damage loop below doesn't have to re-resolve the
@@ -876,10 +891,14 @@ export const simulateTick = (
   const damage = new Map<string, number>();
   const projectiles: Projectile[] = [];
   const meleeEvents: MeleeEvent[] = [];
+  // Enemy candidates for the skirmisher missile scan, split by team once instead of
+  // re-filtering all of `working` per skirmisher.
+  const livingByTeam: Record<Team, Unit[]> = { red: [], blue: [] };
+  for (const u of working) if (u.hp > 0) livingByTeam[u.team].push(u);
   for (const u of working) {
     const adjacentEnemies = HexUtils.getNeighbors(u.tacticalHex)
-      .map(h => occupiedByHex.get(HexUtils.key(h)))
-      .filter((other): other is Unit => !!other && other.team !== u.team);
+      .flatMap(h => occupiedByHex.get(HexUtils.key(h)) ?? [])
+      .filter(other => other.team !== u.team);
     if (adjacentEnemies.length > 0) {
       let target = adjacentEnemies[0];
       for (let i = 1; i < adjacentEnemies.length; i++) {
@@ -907,13 +926,13 @@ export const simulateTick = (
         killed: false,
       });
       u.state = 'fighting';
-    } else if ((u.unitType ?? 'infantry') === 'skirmisher') {
+    } else if ((u.unitType ?? 'infantry') === 'skirmisher' && !afloat(u)) {
       // RANGED: find closest enemy within SKIRMISHER_MISSILE_RANGE. Distance>=2 because
       // distance<=0 is self and distance==1 would have shown up as an adjacent enemy above.
       let target: Unit | null = null;
       let bestD = Infinity;
-      for (const e of working) {
-        if (e.hp <= 0 || e.team === u.team) continue;
+      const foes = livingByTeam[u.team === 'red' ? 'blue' : 'red'];
+      for (const e of foes) {
         const d = HexUtils.distance(u.tacticalHex, e.tacticalHex);
         if (d > SKIRMISHER_MISSILE_RANGE) continue;
         if (d < bestD || (d === bestD && (target === null || e.id < target.id))) {
@@ -936,6 +955,14 @@ export const simulateTick = (
         // them next phase. (Per-tick semantics: throw THEN reposition.)
       }
     }
+  }
+  // Terrain attrition (RIVER/ROCKY/HILL drains HP) folded into the same tally as combat,
+  // BEFORE kill resolution — so a unit that dies from attrition this tick drops out of the
+  // movement-phase occupancy instead of blocking for one final tick. Keyed on the
+  // start-of-tick hex (units haven't moved yet), consistent with combat damage.
+  for (const u of working) {
+    const att = config.mapApi.getTerrainMods(u.tacticalHex).attritionPerTick;
+    if (att > 0) damage.set(u.id, (damage.get(u.id) ?? 0) + att);
   }
   damage.forEach((dmg, id) => {
     const t = byId.get(id);
@@ -1064,9 +1091,7 @@ export const simulateTick = (
       // resolves fractional speed (1.5) to alternating 1/2 hexes per tick. Cooldown is
       // snapshotted at start-of-tick so sub-step 2 isn't blocked by sub-step 1's
       // freshly-written nextMoveTick.
-      const groupSpeed = Math.min(
-        ...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry']),
-      );
+      const groupSpeed = Math.min(...groupUnits.map(marchSpeedOf));
       const steps = stepsForTick(groupSpeed, config.currentTick);
       const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
       for (let step = 0; step < steps; step++) {
@@ -1076,9 +1101,7 @@ export const simulateTick = (
       // Disengage allowed: do NOT skip on 'fighting'. Direction is team-absolute backward
       // (red→S, blue→N) regardless of `heading`, since the player's deploy zone is on a
       // fixed edge of the map.
-      const groupSpeed = Math.min(
-        ...groupUnits.map(u => MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry']),
-      );
+      const groupSpeed = Math.min(...groupUnits.map(marchSpeedOf));
       const steps = stepsForTick(groupSpeed, config.currentTick);
       const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
       const retreatDelta = HexUtils.directions[backwardDir(order.team)];
@@ -1137,7 +1160,7 @@ export const simulateTick = (
         if (u.hp <= 0) continue;
         if (unleashStartBlocked.has(u.id)) continue;
 
-        const unitSpeed = MARCH_HEXES_PER_TICK[u.unitType ?? 'infantry'];
+        const unitSpeed = marchSpeedOf(u);
         const unitSteps = stepsForTick(unitSpeed, config.currentTick);
         for (let step = 0; step < unitSteps; step++) {
           // 1. Validate the existing lock — clear it if the target has resolved.
@@ -1344,7 +1367,7 @@ export const simulateTick = (
       // on ahead. `stepsForTick` here is a no-op (all charge speeds are integers) but
       // kept for symmetry with march/unleash.
       const groupChargeSpeed = Math.min(
-        ...groupUnits.map(u => CHARGE_HEXES_PER_TICK[u.unitType ?? 'infantry']),
+        ...groupUnits.map(u => afloat(u) ? BOAT_STATS.marchSpeed : CHARGE_HEXES_PER_TICK[u.unitType ?? 'infantry']),
       );
       const chargeSteps = stepsForTick(groupChargeSpeed, config.currentTick);
       for (let step = 0; step < chargeSteps; step++) {
@@ -1381,6 +1404,7 @@ export const simulateTick = (
         // skips any enemy already lanced earlier in this charge.
         for (const u of groupUnits) {
           if (u.hp <= 0) continue;
+          if (afloat(u)) continue; // boats don't lance
           for (let i = 1; i <= CHARGE_IMPACT_RANGE; i++) {
             const hex: Hex = { q: u.tacticalHex.q + delta.q * i, r: u.tacticalHex.r + delta.r * i };
             const target = occupancy.get(HexUtils.key(hex));
@@ -1411,26 +1435,15 @@ export const simulateTick = (
     }
   }
 
-  // End-of-tick phase. Two effects, run after damage + movement resolve:
-  //   1. Attrition: hostile terrain (RIVER, ROCKY, HILL) drains HP. Routed through the
-  //      same accumulator + apply pattern as combat damage so the death path is shared
-  //      (groups can dissolve from attrition alone if they sit on bad ground).
-  //   2. Vision refresh: each living unit's `visionRadius` is set from its current hex's
-  //      terrain. Data-only this pass — no consumer reads it yet.
-  // Units that die during attrition are filtered out of the returned `units` below.
-  const attritionDamage = new Map<string, number>();
+  // Vision refresh: each living unit's `visionRadius` is set from its CURRENT (post-movement)
+  // hex's terrain, consumed by the renderer's fog-of-war. (Attrition is folded into the
+  // pre-movement damage tally above so doomed units stop blocking movement this tick.)
   for (const u of working) {
     if (u.hp <= 0) continue;
-    const mods = config.mapApi.getTerrainMods(u.tacticalHex);
-    if (mods.attritionPerTick > 0) {
-      attritionDamage.set(u.id, (attritionDamage.get(u.id) ?? 0) + mods.attritionPerTick);
-    }
-    u.visionRadius = mods.visionRadius;
+    u.visionRadius = config.mapApi.getTerrainMods(u.tacticalHex).visionRadius;
+    // Afloat units carry their HP onto the boat but capped to the uniform boat max.
+    if (afloat(u) && u.hp > BOAT_STATS.maxHp) u.hp = BOAT_STATS.maxHp;
   }
-  attritionDamage.forEach((dmg, id) => {
-    const t = byId.get(id);
-    if (t) t.hp -= dmg;
-  });
 
   return { units: working.filter(u => u.hp > 0), orders: ordersOut, projectiles, meleeEvents };
 };

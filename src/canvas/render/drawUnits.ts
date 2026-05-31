@@ -4,10 +4,33 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../../battle/simulate';
 import { planFollowerLegs, PX_PER_HEX } from './followerPath';
 import type { Unit, Team } from '../../battle/simulate';
-import { getTerrainMods } from '../../battle/terrain';
+import { getTerrainMods, isWaterType } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
 import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, terrainMapFor, type Armies, type GroupOrders } from '../constants';
 import { spawnMovementDust } from './movementFx';
+
+// Axial-disk offsets (distance <= r) precomputed once per radius — replaces a per-call
+// (2r+1)² box scan with a HexUtils.distance test per cell.
+const diskOffsetsByRadius = new Map<number, { dq: number; dr: number }[]>();
+function diskOffsets(r: number): { dq: number; dr: number }[] {
+  let cached = diskOffsetsByRadius.get(r);
+  if (!cached) {
+    cached = [];
+    for (let dq = -r; dq <= r; dq++) {
+      for (let dr = -r; dr <= r; dr++) {
+        if (HexUtils.distance({ q: 0, r: 0 }, { q: dq, r: dr }) <= r) cached.push({ dq, dr });
+      }
+    }
+    diskOffsetsByRadius.set(r, cached);
+  }
+  return cached;
+}
+
+// Fog-of-war visible set is O(friendly units × vision²); cache it across ticks keyed on a
+// cheap signature of the friendly units' positions+radii so a tick where nothing moved
+// reuses the prior set instead of rebuilding.
+let fogSig = '\0';
+let fogSet = new Set<string>();
 
 const UNIT_SPRITE_SIZE = 112;
 const UNIT_SHADOW_OFFSET = { x: 8, y: 18 };
@@ -42,6 +65,7 @@ interface UnitVisual {
   marker: PIXI.Graphics;
   outline: PIXI.Graphics;
   shadow: PIXI.Sprite;
+  boatHull: PIXI.Graphics;
   sprite: PIXI.Sprite;
   hpBg: PIXI.Sprite;
   hpFg: PIXI.Sprite;
@@ -156,6 +180,18 @@ function createUnitVisual(
   shadow.visible = !isFar;
   container.addChild(shadow);
 
+  // Placeholder boat hull: shown (and the soldier rides it) only while the unit is afloat.
+  // Persistent + toggled per tick — swap for real art later. Drawn before the sprite so the
+  // unit renders on top of the hull. Own label so the LOD pass (which toggles 'unit-sprite')
+  // doesn't fight its visibility.
+  const boatHull = new PIXI.Graphics();
+  boatHull.ellipse(0, 16, 38, 13).fill({ color: 0x6b4a2a });          // hull
+  boatHull.rect(-2, -20, 3, 34).fill({ color: 0x4a3418 });            // mast
+  boatHull.poly([2, -20, 26, -2, 2, -2]).fill({ color: 0xe6e0cc });   // sail
+  boatHull.label = 'unit-boat';
+  boatHull.visible = false;
+  container.addChild(boatHull);
+
   const sprite = new PIXI.Sprite(tex);
   sprite.anchor.set(0.5);
   sprite.width = UNIT_SPRITE_SIZE;
@@ -201,7 +237,7 @@ function createUnitVisual(
   arrow.visible = false;
   container.addChild(arrow);
 
-  return { marker, outline, shadow, sprite, hpBg, hpFg, star, arrow, arrowHeading: '→' };
+  return { marker, outline, shadow, boatHull, sprite, hpBg, hpFg, star, arrow, arrowHeading: '→' };
 }
 
 export function drawUnits(ctx: UnitsRenderContext): void {
@@ -291,17 +327,24 @@ export function drawUnits(ctx: UnitsRenderContext): void {
 
   const isFar = ctx.worldScale < LOD_THRESHOLD;
 
-  const visibleHexes = new Set<string>();
+  let visibleHexes = new Set<string>();
   if (ctx.fogOfWar) {
+    let sig = ctx.selectedTeam;
     for (const u of units) {
       if (u.team !== ctx.selectedTeam) continue;
-      const r = u.visionRadius;
-      for (let dq = -r; dq <= r; dq++) {
-        for (let dr = -r; dr <= r; dr++) {
-          const h = { q: u.tacticalHex.q + dq, r: u.tacticalHex.r + dr };
-          if (HexUtils.distance(u.tacticalHex, h) <= r) visibleHexes.add(HexUtils.key(h));
+      sig += `;${u.tacticalHex.q},${u.tacticalHex.r},${u.visionRadius}`;
+    }
+    if (sig === fogSig) {
+      visibleHexes = fogSet;
+    } else {
+      for (const u of units) {
+        if (u.team !== ctx.selectedTeam) continue;
+        for (const { dq, dr } of diskOffsets(u.visionRadius)) {
+          visibleHexes.add(HexUtils.key({ q: u.tacticalHex.q + dq, r: u.tacticalHex.r + dr }));
         }
       }
+      fogSig = sig;
+      fogSet = visibleHexes;
     }
   }
 
@@ -390,6 +433,12 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     // location, not the last-seen one.
     const isHidden = ctx.fogOfWar && u.team !== ctx.selectedTeam && !visibleHexes.has(hexKey);
     container.visible = !isHidden;
+
+    // Afloat → ride the placeholder boat hull and drop the ground shadow. Derived from the
+    // hex terrain, so it reverts on land automatically.
+    const afloat = isWaterType(tileType);
+    v.boatHull.visible = afloat && !isFar;
+    v.shadow.visible = !isFar && !afloat;
 
     // Outline depends on same-team neighbours, which change as units move. clear()+redraw
     // reuses the Graphics object — no per-tick allocation.

@@ -18,7 +18,7 @@ const check = (name: string, cond: boolean, extra = '') => {
   if (cond) pass++; else fail++;
 };
 
-const RADIUS = 6;
+const RADIUS = 8;
 const cells: Hex[] = [];
 for (let q = -RADIUS; q <= RADIUS; q++) for (let r = -RADIUS; r <= RADIUS; r++) cells.push({ q, r });
 const keyset = new Set(cells.map(HexUtils.key));
@@ -37,12 +37,12 @@ const mapApi: MapApi = {
   isInDeployZone: (t, h) => (t === 'blue' ? blueZone : redZone).has(HexUtils.key(h)),
 };
 
-function runBattle(difficulty: Difficulty): { blue: number; placements: number } {
+function runBattle(difficulty: Difficulty): { blue: number; placements: number; peak: number } {
   const ctrl = makeAiController('blue', 'aggressive', difficulty);
   let units: Unit[] = [];
   let roster: Record<UnitType, number> = { infantry: 60, cavalry: 60, skirmisher: 60 };
   const orders = new Map<string, GroupOrder>();
-  let cp = 200, tick = 0, placements = 0;
+  let cp = 200, tick = 0, placements = 0, peak = 0;
   let score: Score = { red: 0, blue: 0 };
 
   for (let i = 0; i < 800; i++) {
@@ -83,6 +83,7 @@ function runBattle(difficulty: Difficulty): { blue: number; placements: number }
     const res = simulateTick(units, orders, { damagePerTick: 10, mapApi, currentTick: tick,
       captureZone: [CAPTURE_CENTER, ...HexUtils.getNeighbors(CAPTURE_CENTER)] });
     units = res.units;
+    peak = Math.max(peak, units.filter(u => u.team === 'blue').length);
     const sr = scoreTick({ units, score, centerKeys,
       scoringZone: { red: blueZone, blue: redZone },
       config: { pointsToWin: POINTS_TO_WIN, pointsPerUnitReached: POINTS_PER_UNIT_REACHED, centerHoldPointsPerTick: CENTER_HOLD_POINTS_PER_TICK } });
@@ -90,7 +91,7 @@ function runBattle(difficulty: Difficulty): { blue: number; placements: number }
     units = units.filter(u => !sr.reachedUnitIds.has(u.id) && u.hp > 0);
     if (sr.winner) break;
   }
-  return { blue: score.blue, placements };
+  return { blue: score.blue, placements, peak };
 }
 
 const easy = runBattle('easy');
@@ -98,8 +99,10 @@ const hard = runBattle('hard');
 
 check('AI deployed units (easy)', easy.placements > 0, `placements=${easy.placements}`);
 check('AI deployed units (hard)', hard.placements > 0, `placements=${hard.placements}`);
-// forceScale is deterministic: hard deploys a larger force than easy. This is the difficulty→army-size axis.
-check('hard deploys a larger force than easy', hard.placements >= easy.placements, `hard=${hard.placements} easy=${easy.placements}`);
+// Difficulty → army-size axis: measure the PEAK standing force fielded, not cumulative
+// placements. Placements is dominated by how fast the battle reaches POINTS_TO_WIN (similar for
+// both difficulties), whereas peak force tracks forceScale→targetUnits deterministically.
+check('hard fields a larger standing force than easy', hard.peak >= easy.peak, `hardPeak=${hard.peak} easyPeak=${easy.peak}`);
 // The full deploy→command→sim→score loop produces points (we don't assert strict hard-vs-easy score
 // ordering: the rigid-block sim + difficulty RNG make exact score comparison an unreliable invariant
 // on a small harness map).

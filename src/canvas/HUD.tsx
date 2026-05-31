@@ -121,7 +121,11 @@ const cpInputStyle: React.CSSProperties = {
   fontSize: '11px', fontWeight: 800, textAlign: 'center',
 };
 
-export const HUD: React.FC<HUDProps> = ({
+// Memoized: GameCanvas re-renders on high-frequency state unrelated to the HUD (hover,
+// pan/zoom). React.memo skips those — the HUD only re-renders when one of its own props
+// changes. (During battle `armies`/`score`/CP still change each tick, so those renders
+// remain; the win is cutting the pointer-driven ones.)
+const HUDInner: React.FC<HUDProps> = ({
   containerRef,
   viewMode,
   isScanning,
@@ -863,3 +867,5 @@ export const HUD: React.FC<HUDProps> = ({
     </div>
   );
 };
+
+export const HUD = React.memo(HUDInner);

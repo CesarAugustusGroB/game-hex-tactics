@@ -111,6 +111,22 @@ const noZone = { red: new Set<string>(), blue: new Set<string>() };
   check('no unitType: refund falls back to infantry', r.rosterDelta.red.infantry === 1);
 }
 
+// 7. Cross-tick idempotency contract: once a reached unit is removed from the field, a
+//    second scoring tick on the survivors must NOT re-award its points. This is the
+//    invariant the tick loop upholds by writing survivors to armiesRef synchronously
+//    (a reached unit lingering one extra tick would double-score).
+{
+  const zoneKey = HexUtils.key({ q: 5, r: -5 });
+  const scoringZone = { red: new Set([zoneKey]), blue: new Set<string>() };
+  const units = [unit('a', 'red', 5, -5)];
+  const t1 = scoreTick({ units, score: { red: 0, blue: 0 }, centerKeys: center, scoringZone, config: cfg });
+  const survivors = units.filter(u => !t1.reachedUnitIds.has(u.id));
+  const t2 = scoreTick({ units: survivors, score: t1.score, centerKeys: center, scoringZone, config: cfg });
+  check('idempotent: first tick scores +1', t1.score.red === 1);
+  check('idempotent: reached unit not in survivors', survivors.length === 0);
+  check('idempotent: second tick adds nothing', t2.score.red === 1 && t2.changed === false);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
   process.exitCode = 1;

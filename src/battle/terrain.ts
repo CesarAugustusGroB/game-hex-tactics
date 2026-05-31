@@ -58,6 +58,11 @@ export const getTerrainMods = (type: string | undefined): TerrainMods => {
   };
 };
 
+/** Open-water terrain: a unit standing here is a boat (uniform stats, no charge/missiles).
+ *  Single source for the afloat check shared by the sim and the renderer. RIVER is land. */
+export const isWaterType = (type: string | undefined): boolean =>
+  type === 'SEA' || type === 'DEEP_SEA';
+
 /** +1% damage per height-unit of elevation advantage, capped at +50%. Values in src/data/combat.json. */
 export { HEIGHT_BONUS_PER_UNIT, HEIGHT_BONUS_CAP };
 

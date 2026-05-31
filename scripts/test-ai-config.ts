@@ -10,11 +10,12 @@ const check = (name: string, cond: boolean, extra = '') => {
 
 check('3 doctrines', DOCTRINES.length === 3);
 check('3 difficulties', DIFFICULTIES.length === 3);
+check('amassCpBudget is a positive number', typeof AI.amassCpBudget === 'number' && AI.amassCpBudget > 0);
+check('has an ordered ruleset with a default fallback', AI.rules.length >= 1 && AI.rules.some(r => r.when === undefined));
 for (const d of DOCTRINES) {
   const c = AI.doctrines[d];
   const mix = c.roleMix.centerHold + c.roleMix.defendLine + c.roleMix.raid + c.roleMix.reserve;
   check(`${d} role mix > 0`, mix > 0, `sum=${mix}`);
-  check(`${d} has weights`, typeof c.weights.objective === 'number');
 }
 for (const f of DIFFICULTIES) {
   const c = AI.difficulties[f];

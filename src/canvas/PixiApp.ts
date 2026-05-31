@@ -131,6 +131,10 @@ export interface PixiAppCtx {
 export function usePixiApp(ctx: PixiAppCtx): void {
   useEffect(() => {
     let isMounted = true;
+    // DOM listeners on the container <div> (owned by React, not destroyed by app.destroy).
+    // Registered with this signal so cleanup removes them — otherwise a remount stacks a
+    // second wheel/contextmenu handler whose closures point at the destroyed app.
+    const domListeners = new AbortController();
     const app = new PIXI.Application();
     const start = async () => {
       await app.init({
@@ -434,13 +438,13 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         world.x -= (mouseLocal.x * newScale - mouseLocal.x * oldScale);
         world.y -= (mouseLocal.y * newScale - mouseLocal.y * oldScale);
         ctx.zoom.current = newScale;
-      }, { passive: false });
+      }, { passive: false, signal: domListeners.signal });
 
       ctx.containerRef.current?.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         cancelOrderDrag(odCtx);
         ctx.setInputMode(null);
-      });
+      }, { signal: domListeners.signal });
 
       // Read world.scale.x (not zoom.current) — GSAP mutates scale directly during the
       // dive animation. Iterate children only on threshold crossings.
@@ -483,6 +487,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
     start();
     return () => {
       isMounted = false;
+      domListeners.abort();
       // Kill GSAP tweens before PIXI destroys their targets — otherwise GSAP keeps
       // updating freed objects for up to TICK_MS after unmount.
       containers.forEach(killUnitTweens);

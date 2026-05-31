@@ -10,6 +10,7 @@ export interface DetailRenderContext {
   detailTextures: Map<string, PIXI.Texture>;
   gridData: { hex: Hex; type: string }[];
   detailDensityNoise: (x: number, y: number) => number;
+  viewMode: 'STRATEGIC' | 'TACTICAL';
 }
 
 // Three-layer scatter (embedded / small / landmark), deterministic per hex via seeded
@@ -20,6 +21,9 @@ export function drawDetails(ctx: DetailRenderContext): void {
     dg.removeChild(child);
     child.destroy();
   }
+  // Decorations are sub-pixel in the zoomed-out STRATEGIC island view — scattering
+  // thousands of Sprites across ~3.8k hexes there is pure cost for no visible gain.
+  if (ctx.viewMode === 'STRATEGIC') return;
   if (detailTextures.size === 0 || gridData.length === 0) return;
   const worldSeed = 1;
   const hexR = HexUtils.size;

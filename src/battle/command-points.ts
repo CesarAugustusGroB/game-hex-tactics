@@ -49,6 +49,16 @@ export function debit(cp: CommandPoints, team: Team, intent: CpIntent): CommandP
   return { ...cp, [team]: cp[team] - cost };
 }
 
+/** Returns new CommandPoints with each team clamped DOWN to `cap` (min(current, cap)).
+ *  Raising the cap never refills a team; lowering it trims overflow. Returns the input
+ *  unchanged when both teams are already at or below the cap. Never mutates the input. */
+export function applyCap(cp: CommandPoints, cap: number): CommandPoints {
+  const r = Math.min(cp.red, cap);
+  const b = Math.min(cp.blue, cap);
+  if (r === cp.red && b === cp.blue) return cp;
+  return { red: r, blue: b };
+}
+
 /** Returns new CommandPoints with both teams gaining `amountPerTick` CP, clamped to `cap`.
  *  Called every tick; CP accrues fractionally (rounded to 0.01 to avoid float drift).
  *  Returns the input unchanged when nothing moves. */

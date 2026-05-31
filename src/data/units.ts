@@ -11,7 +11,14 @@ export interface UnitConfig {
   kiteThreshold?: number;
 }
 
-export const UNITS: Record<UnitType, UnitConfig> = raw;
+// `boat` is the uniform afloat stat block — not a UnitType, so it's split out before UNITS
+// (which derive() iterates and must hold only the real unit types).
+const { boat: boatRaw, ...unitsRaw } = raw;
+
+export interface BoatStats { maxHp: number; marchSpeed: number; }
+export const BOAT_STATS: BoatStats = boatRaw;
+
+export const UNITS: Record<UnitType, UnitConfig> = unitsRaw;
 
 // Legacy-shape derivations — preserve existing per-record exports.
 const derive = <K extends keyof UnitConfig>(key: K): Record<UnitType, UnitConfig[K]> =>

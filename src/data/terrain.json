@@ -1,6 +1,8 @@
 {
-  "DEEP_SEA":  { "color": "#1a2a3a", "label": "Deep Water", "height":   2, "walkable": false },
-  "SEA":       { "color": "#2a3a4a", "label": "Shallows",   "height":   5, "walkable": false },
+  "DEEP_SEA":  { "color": "#1a2a3a", "label": "Deep Water", "height":   2, "walkable": true,
+                 "defenseMult": 0.85, "moveCost": 1, "attritionPerTick": 0.00, "visionRadius": 5 },
+  "SEA":       { "color": "#2a3a4a", "label": "Shallows",   "height":   5, "walkable": true,
+                 "defenseMult": 0.85, "moveCost": 1, "attritionPerTick": 0.00, "visionRadius": 5 },
   "SAND":      { "color": "#bdaa8a", "label": "Shoreline",  "height":   8, "walkable": true,
                  "defenseMult": 0.95, "moveCost": 1, "attritionPerTick": 0.00, "visionRadius": 3 },
   "GRASSLAND": { "color": "#5a7a4a", "label": "Lowlands",   "height":  12, "walkable": true,
