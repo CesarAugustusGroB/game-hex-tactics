@@ -1,5 +1,5 @@
 {
-  "tickDamage": 20,
+  "tickDamage": 26,
   "charge":  { "durationTicks": 3, "impactRange": 2 },
   "hold":    { "reductionPerTick": 0.05, "reductionCap": 0.40, "autoIdleAfterTicks": 8 },
   "support": { "reductionPerAlly": 0.05, "reductionCap": 0.25 },
