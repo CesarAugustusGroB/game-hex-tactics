@@ -15,16 +15,17 @@ export interface TacticalKeyboardCtx {
   toggleMode: (mode: Exclude<OrderMode, 'march'>) => void;
   marchForward: () => void;
   banishGroup: () => void;
+  toggleFormation: () => void;
 }
 
 export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
   const { viewMode, selectedGroupRef, selectedTeamRef, currentStrategicHexRef, armiesRef,
-    setInputMode, setIsScanning, toggleMode, marchForward, banishGroup } = ctx;
+    setInputMode, setIsScanning, toggleMode, marchForward, banishGroup, toggleFormation } = ctx;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if (!'qwerasdf'.includes(k)) return;
+      if (!'qwerasdfg'.includes(k)) return;
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -53,10 +54,12 @@ export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
         banishGroup();
       } else if (k === 'f') {
         toggleMode('retreat');
+      } else if (k === 'g') {
+        toggleFormation();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [viewMode, toggleMode, marchForward, banishGroup, selectedGroupRef, selectedTeamRef,
+  }, [viewMode, toggleMode, marchForward, banishGroup, toggleFormation, selectedGroupRef, selectedTeamRef,
     currentStrategicHexRef, armiesRef, setInputMode, setIsScanning]);
 }

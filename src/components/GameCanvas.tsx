@@ -711,6 +711,17 @@ export const GameCanvas: React.FC = () => {
     });
   }, [issueOrder, chargeCP, triggerBrokeFlash]);
 
+  // Toggle the selected group's march formation between KEEP (rigid block) and LOOSE
+  // (per-unit advance). Free — it's a stance, not an order. Committed (unleashed) groups
+  // are locked. Persists across mode changes via issueOrder's merge.
+  const toggleFormation = useCallback(() => {
+    const gid = selectedGroupRef.current;
+    const team = selectedTeamRef.current;
+    const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
+    if (cur?.committed) return;
+    issueOrder(team, gid, { looseFormation: !cur?.looseFormation });
+  }, [issueOrder]);
+
   const toggleScan = useCallback(() => {
     setIsScanning(s => {
       const next = !s;
@@ -786,7 +797,7 @@ export const GameCanvas: React.FC = () => {
 
   useTacticalKeyboard({
     viewMode, selectedGroupRef, selectedTeamRef, currentStrategicHexRef, armiesRef,
-    setInputMode, setIsScanning, toggleMode, marchForward, banishGroup,
+    setInputMode, setIsScanning, toggleMode, marchForward, banishGroup, toggleFormation,
   });
 
   useGlobalShortcuts({
@@ -865,6 +876,7 @@ export const GameCanvas: React.FC = () => {
       toggleScan={toggleScan}
       toggleMode={toggleMode}
       marchForward={marchForward}
+      toggleFormation={toggleFormation}
       banishGroup={banishGroup}
       resetBattle={resetBattle}
       returnToStrategic={returnToStrategic}

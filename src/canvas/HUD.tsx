@@ -65,6 +65,7 @@ export interface HUDProps {
   toggleMode: (mode: Exclude<OrderMode, 'march'>) => void;
   marchForward: () => void;
   banishGroup: () => void;
+  toggleFormation: () => void;
   resetBattle: () => void;
   returnToStrategic: () => void;
   regenerateWorld: () => void;
@@ -165,6 +166,7 @@ const HUDInner: React.FC<HUDProps> = ({
   toggleMode,
   marchForward,
   banishGroup,
+  toggleFormation,
   resetBattle,
   returnToStrategic,
   regenerateWorld,
@@ -504,6 +506,7 @@ const HUDInner: React.FC<HUDProps> = ({
               const unleashActive = orderMode === 'unleash';
               const holdActive = orderMode === 'hold';
               const idleActive = orderMode === 'idle';
+              const looseActive = !!order?.looseFormation;
               const holdTicks = order?.holdTicks ?? 0;
               const holdPct = Math.round(Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP) * 100);
               const chargeRemaining = order?.chargeTicksRemaining;
@@ -744,6 +747,26 @@ const HUDInner: React.FC<HUDProps> = ({
                         </button>
                       );
                     })()}
+                    {/* G — KEEP / LOOSE formation: rigid block vs per-unit advance (march only). Free. */}
+                    <button
+                      disabled={!canEdit}
+                      title={
+                        committed ? '🔒 Group committed — retreat to redeploy'
+                        : looseActive ? 'Loose: each unit advances at its own speed/possibility — click to KEEP formation (shortcut: G)'
+                        : 'Keep formation: rigid block, slowest pace, freezes if blocked — click to go LOOSE (shortcut: G)'
+                      }
+                      onClick={() => { if (canEdit) toggleFormation(); }}
+                      style={{
+                        ...btnBase,
+                        background: looseActive ? '#0ea5e9' : 'rgba(255,255,255,0.04)',
+                        color: !canEdit ? '#475569' : looseActive ? 'white' : '#94a3b8',
+                        border: looseActive ? '1px solid #0ea5e9' : '1px solid rgba(255,255,255,0.1)',
+                        cursor: !canEdit ? 'not-allowed' : 'pointer',
+                        opacity: !canEdit ? 0.5 : 1,
+                      }}
+                    >
+                      {looseActive ? 'LOOSE (G)' : 'KEEP (G)'}
+                    </button>
                   </div>
                 </div>
               );

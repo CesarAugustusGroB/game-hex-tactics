@@ -7,6 +7,8 @@ import {
   HOLD_REDUCTION_PER_TICK,
   HOLD_REDUCTION_CAP,
   HOLD_AUTO_IDLE_AFTER_TICKS,
+  SUPPORT_REDUCTION_PER_ALLY,
+  SUPPORT_REDUCTION_CAP,
 } from '../data/combat';
 import {
   MARCH_HEXES_PER_TICK,
@@ -114,6 +116,11 @@ export interface GroupOrder {
    *  retreating group lands every living unit back inside its team's deploy zone (so the
    *  player may issue a fresh order on the redeployed group). */
   committed?: boolean;
+  /** March formation toggle. Falsy (default) = KEEP: rigid block — group advances at the
+   *  slowest unit's pace and freezes whole if any unit is blocked. True = LOOSE: each unit
+   *  advances at its own speed and its own possibility; a blocked or fighting unit sits out
+   *  without freezing the rest. Only affects `mode: 'march'`. */
+  looseFormation?: boolean;
 }
 
 export interface MapApi {
@@ -200,6 +207,8 @@ export {
   HOLD_REDUCTION_PER_TICK,
   HOLD_REDUCTION_CAP,
   HOLD_AUTO_IDLE_AFTER_TICKS,
+  SUPPORT_REDUCTION_PER_ALLY,
+  SUPPORT_REDUCTION_CAP,
 } from '../data/combat';
 
 // Per-unit-type tunables — values in src/data/units.json. Re-exported under their
@@ -230,6 +239,12 @@ export const stepsForTick = (speed: number, tick: number): number =>
  *  scratch to rebuild the bonus. */
 export const holdReduction = (holdTicks: number): number =>
   Math.min(holdTicks * HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP);
+
+/** Support bonus: every living adjacent ally adds `SUPPORT_REDUCTION_PER_ALLY` to the
+ *  damage-taken reduction, capped at `SUPPORT_REDUCTION_CAP`. Stacks multiplicatively with
+ *  the hold bonus. */
+export const supportReduction = (allyCount: number): number =>
+  Math.min(allyCount * SUPPORT_REDUCTION_PER_ALLY, SUPPORT_REDUCTION_CAP);
 
 const groupOrderKey = (team: Team, groupId: GroupId): string => `${team}:${groupId}`;
 
@@ -877,6 +892,17 @@ export const simulateTick = (
     }
   }
 
+  // Support bonus per defender: count living same-team neighbours (start-of-tick positions,
+  // reusing occupiedByHex) and convert to a damage-taken reduction. Computed once so the
+  // per-pair loop just looks it up.
+  const supportReductionByUnit = new Map<string, number>();
+  for (const u of working) {
+    const allies = HexUtils.getNeighbors(u.tacticalHex)
+      .flatMap(h => occupiedByHex.get(HexUtils.key(h)) ?? [])
+      .filter(other => other.team === u.team && other.hp > 0).length;
+    if (allies > 0) supportReductionByUnit.set(u.id, supportReduction(allies));
+  }
+
   // Combat phase: each unit attacks. MELEE for anyone with adjacent enemies; RANGED for
   // skirmishers with NO adjacent enemy and at least one enemy within
   // SKIRMISHER_MISSILE_RANGE. A skirmisher engaged in melee drops their javelins and
@@ -909,8 +935,9 @@ export const simulateTick = (
       const hDef = config.mapApi.getTerrainHeight(target.tacticalHex);
       const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
       const holdRed = holdReductionByUnit.get(target.id) ?? 0;
+      const supportRed = supportReductionByUnit.get(target.id) ?? 0;
       const heightBonus = heightDamageBonus(hAtt, hDef);
-      const dmg = ((config.damagePerTick * (1 + heightBonus)) / defenseMult) * (1 - holdRed);
+      const dmg = ((config.damagePerTick * (1 + heightBonus)) / defenseMult) * (1 - holdRed) * (1 - supportRed);
       damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
       meleeEvents.push({
         attackerId: u.id,
@@ -943,7 +970,8 @@ export const simulateTick = (
       if (target) {
         const defenseMult = config.mapApi.getTerrainMods(target.tacticalHex).defenseMult;
         const holdRed = holdReductionByUnit.get(target.id) ?? 0;
-        const dmg = (SKIRMISHER_MISSILE_DAMAGE / defenseMult) * (1 - holdRed);
+        const supportRed = supportReductionByUnit.get(target.id) ?? 0;
+        const dmg = (SKIRMISHER_MISSILE_DAMAGE / defenseMult) * (1 - holdRed) * (1 - supportRed);
         damage.set(target.id, (damage.get(target.id) ?? 0) + dmg);
         projectiles.push({
           fromHex: u.tacticalHex,
@@ -1085,17 +1113,40 @@ export const simulateTick = (
     }
 
     if (mode === 'march') {
+      const delta = HexUtils.directions[order.heading];
+      const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
+      if (order.looseFormation) {
+        // LOOSE: per-unit advance at each unit's own speed and own possibility. A fighting
+        // or blocked unit sits out without freezing the rest. Front-first (ranked toward the
+        // target) so a lead unit vacates its hex before the follower behind tries to step in.
+        const ranked = projectedRanking(groupUnits, order.attackTarget ?? groupUnits[0].tacticalHex);
+        for (const ui of ranked) {
+          const u = groupUnits[ui];
+          if (u.state === 'fighting' || startBlocked.has(u.id)) continue;
+          const steps = stepsForTick(marchSpeedOf(u), config.currentTick);
+          for (let step = 0; step < steps; step++) {
+            const next: Hex = { q: u.tacticalHex.q + delta.q, r: u.tacticalHex.r + delta.r };
+            if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) break;
+            if (occupancy.get(HexUtils.key(next))) break;
+            occupancy.delete(HexUtils.key(u.tacticalHex));
+            u.tacticalHex = next;
+            u.state = 'moving';
+            applyEntryCooldown(u, next, false);
+            occupancy.set(HexUtils.key(next), u);
+          }
+        }
+        continue;
+      }
       if (groupUnits.some(u => u.state === 'fighting')) continue;
-      // Group march speed = MIN over the group, so mixed cavalry+infantry advances at
+      // KEEP: group march speed = MIN over the group, so mixed cavalry+infantry advances at
       // infantry pace and mixed skirmisher+infantry at infantry pace. `stepsForTick`
       // resolves fractional speed (1.5) to alternating 1/2 hexes per tick. Cooldown is
       // snapshotted at start-of-tick so sub-step 2 isn't blocked by sub-step 1's
       // freshly-written nextMoveTick.
       const groupSpeed = Math.min(...groupUnits.map(marchSpeedOf));
       const steps = stepsForTick(groupSpeed, config.currentTick);
-      const startBlocked = new Set(groupUnits.filter(isOnCooldown).map(u => u.id));
       for (let step = 0; step < steps; step++) {
-        if (!tryRigidBlockStep(groupUnits, HexUtils.directions[order.heading], startBlocked)) break;
+        if (!tryRigidBlockStep(groupUnits, delta, startBlocked)) break;
       }
     } else if (mode === 'retreat') {
       // Disengage allowed: do NOT skip on 'fighting'. Direction is team-absolute backward

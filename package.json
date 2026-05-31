@@ -15,6 +15,8 @@
     "test:boats": "tsx scripts/test-boats.ts",
     "test:scoring": "tsx scripts/sim-scoring.ts",
     "test:hold": "tsx scripts/test-hold.ts",
+    "test:support": "tsx scripts/test-support.ts",
+    "test:loose": "tsx scripts/test-loose-formation.ts",
     "test:follower": "tsx scripts/test-follower-path.ts",
     "test:worldgen": "tsx scripts/test-worldgen.ts",
     "test:hexutils": "tsx scripts/test-hexutils.ts",
