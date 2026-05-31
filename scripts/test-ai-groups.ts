@@ -1,5 +1,6 @@
-// The AI must obey the player's group rules: fill ONE active group at a time, mass it before
-// launching, never deposit units into a sealed (launched) group. Run: npx tsx scripts/test-ai-groups.ts
+// The AI builds a WIDE front: it fills multiple lateral bands (groups) in parallel rather than one
+// at a time, holds the line until the front is built, then launches — and never deposits units into
+// a sealed (launched) group. Run: npx tsx scripts/test-ai-groups.ts
 import { makeAiController } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, GroupId, UnitType, Team } from '../src/battle/simulate';
@@ -83,14 +84,14 @@ const unsealedNonEmpty = (h: Harness, zone: Set<string>): number =>
     return gu.length > 0 && !isGroupSealed(aliveOf(h.units), h.orders, zone, 'blue', g);
   }).length;
 
-// 1. At no tick are there two unsealed non-empty groups at once (fill one group at a time).
+// 1. The front is built WIDE: multiple bands (groups) fill in parallel before the line launches.
 {
   const h = makeHarness([], { infantry: 200, cavalry: 200, skirmisher: 200 });
   const zone = makeZone();
   const farEnemy: Unit = { id: 'e', team: 'red', unitType: 'infantry', tacticalHex: { q: 5, r: 40 }, homeHex: { q: 5, r: 40 }, groupId: 1, hp: 100, state: 'idle', nextMoveTick: 0, visionRadius: 1 };
   let maxConcurrent = 0;
   for (let t = 1; t <= 60; t++) { h.runTick(t, [farEnemy]); maxConcurrent = Math.max(maxConcurrent, unsealedNonEmpty(h, zone)); }
-  check('never fills 2+ groups at once (one active group)', maxConcurrent <= 1, `maxConcurrentUnsealed=${maxConcurrent}`);
+  check('fills multiple bands in parallel (wide front)', maxConcurrent >= 2, `maxConcurrentUnsealed=${maxConcurrent}`);
   check('still deploys (sanity)', h.units.length > 0, `units=${h.units.length}`);
 }
 
