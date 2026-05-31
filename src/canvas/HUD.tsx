@@ -114,6 +114,15 @@ const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affor
   );
 };
 
+const PANEL_BASE: React.CSSProperties = {
+  position: 'absolute', top: 24, color: '#f8fafc', background: 'rgba(15, 23, 42, 0.85)',
+  backdropFilter: 'blur(24px)', padding: '32px', borderRadius: '32px',
+  border: '1px solid rgba(255, 255, 255, 0.12)', width: '360px',
+  maxHeight: 'calc(100vh - 48px)', overflowY: 'auto',
+  boxShadow: '0 40px 80px rgba(0, 0, 0, 0.9)', zIndex: 100, pointerEvents: 'auto',
+  fontFamily: '"Inter", sans-serif',
+};
+
 const cpInputStyle: React.CSSProperties = {
   width: '40px', marginLeft: '4px', padding: '2px 4px',
   background: 'rgba(0,0,0,0.5)', color: '#f8fafc',
@@ -346,13 +355,9 @@ const HUDInner: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* HUD - Professional Glassmorphism */}
-      <div style={{
-        position: 'absolute', top: 24, left: 24, color: '#f8fafc', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(24px)',
-        padding: '32px', borderRadius: '32px', border: '1px solid rgba(255, 255, 255, 0.12)',
-        width: '360px', boxShadow: '0 40px 80px rgba(0, 0, 0, 0.9)', zIndex: 100, pointerEvents: 'auto',
-        fontFamily: '"Inter", sans-serif'
-      }}>
+      {/* HUD — split into two glassmorphism panels: LEFT = play (dive/deploy/orders/battle),
+          RIGHT = config (grid/fog/AI/world/reset/regenerate). */}
+      <div style={{ ...PANEL_BASE, left: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>{viewMode} COMMAND</h2>
           <span style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 800, letterSpacing: '1px' }}>SYSTEM READY</span>
@@ -453,22 +458,6 @@ const HUDInner: React.FC<HUDProps> = ({
             );
           })}
         </div>
-
-        <button
-          onClick={() => setShowGrid(!showGrid)}
-          style={{ width: '100%', padding: '12px', background: showGrid ? 'rgba(59, 130, 246, 0.1)' : '#10b981', color: showGrid ? '#60a5fa' : 'white', border: showGrid ? '1px solid rgba(59, 130, 246, 0.5)' : 'none', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
-        >
-          GRID SYSTEM: {showGrid ? 'ACTIVE' : 'DEACTIVATED'}
-        </button>
-
-        {viewMode === 'TACTICAL' && (
-          <button
-            onClick={() => setFogOfWar(f => !f)}
-            style={{ width: '100%', padding: '12px', background: fogOfWar ? '#10b981' : 'rgba(59, 130, 246, 0.1)', color: fogOfWar ? 'white' : '#60a5fa', border: fogOfWar ? 'none' : '1px solid rgba(59, 130, 246, 0.5)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
-          >
-            FOG OF WAR: {fogOfWar ? 'ACTIVE' : 'DEACTIVATED'}
-          </button>
-        )}
 
         {viewMode === 'TACTICAL' && (
           <div style={{
@@ -748,38 +737,6 @@ const HUDInner: React.FC<HUDProps> = ({
                 </div>
               );
             })}
-            <div style={{ background: 'rgba(0,0,0,0.4)', padding: '16px', borderRadius: '16px', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
-                ENEMY AI {aiEnabled ? `→ ${aiDoctrine} · ${aiDifficulty}` : '→ off'}
-              </div>
-              <button
-                onClick={() => setAiEnabled(!aiEnabled)}
-                style={{ width: '100%', padding: '8px', borderRadius: '8px', marginBottom: '8px',
-                  background: aiEnabled ? '#1d4ed8' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
-                  border: '1px solid rgba(255,255,255,0.1)', fontWeight: 700, cursor: 'pointer' }}>
-                {aiEnabled ? 'AI ENABLED (blue)' : 'AI OFF'}
-              </button>
-              {aiEnabled && (
-                <>
-                  <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                    {DOCTRINES.map(d => (
-                      <button key={d} onClick={() => setAiDoctrine(d)}
-                        style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
-                          background: aiDoctrine === d ? '#0ea5e9' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
-                          border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{d}</button>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    {DIFFICULTIES.map(f => (
-                      <button key={f} onClick={() => setAiDifficulty(f)}
-                        style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
-                          background: aiDifficulty === f ? '#d97706' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
-                          border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{f}</button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
             <button
               onClick={() => setIsBattleRunning(b => !b)}
               style={{
@@ -794,20 +751,65 @@ const HUDInner: React.FC<HUDProps> = ({
           </div>
         )}
 
-        {/* RESET BATTLE — wipe all units on the current tactical map, restore both
-            rosters, clear orders + score + winBanner. Keeps the world and
-            view; for replaying the same map without regenerating terrain. */}
-        {viewMode === 'TACTICAL' && (
-          <button
-            onClick={resetBattle}
-            style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px' }}
-          >RESET BATTLE</button>
-        )}
+      </div>
+
+      {/* RIGHT PANEL — configuration (display toggles, enemy AI, world gen, battle management). */}
+      <div style={{ ...PANEL_BASE, right: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>CONFIG</h2>
+          <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 800, letterSpacing: '1px' }}>SETTINGS</span>
+        </div>
 
         <button
-          onClick={returnToStrategic}
-          style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '32px' }}
-        >RETURN TO STRATEGIC OVERVIEW</button>
+          onClick={() => setShowGrid(!showGrid)}
+          style={{ width: '100%', padding: '12px', background: showGrid ? 'rgba(59, 130, 246, 0.1)' : '#10b981', color: showGrid ? '#60a5fa' : 'white', border: showGrid ? '1px solid rgba(59, 130, 246, 0.5)' : 'none', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
+        >
+          GRID SYSTEM: {showGrid ? 'ACTIVE' : 'DEACTIVATED'}
+        </button>
+
+        {viewMode === 'TACTICAL' && (
+          <button
+            onClick={() => setFogOfWar(f => !f)}
+            style={{ width: '100%', padding: '12px', background: fogOfWar ? '#10b981' : 'rgba(59, 130, 246, 0.1)', color: fogOfWar ? 'white' : '#60a5fa', border: fogOfWar ? 'none' : '1px solid rgba(59, 130, 246, 0.5)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px', transition: '0.2s' }}
+          >
+            FOG OF WAR: {fogOfWar ? 'ACTIVE' : 'DEACTIVATED'}
+          </button>
+        )}
+
+        {viewMode === 'TACTICAL' && (
+          <div style={{ background: 'rgba(0,0,0,0.4)', padding: '16px', borderRadius: '16px', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', marginBottom: '10px' }}>
+              ENEMY AI {aiEnabled ? `→ ${aiDoctrine} · ${aiDifficulty}` : '→ off'}
+            </div>
+            <button
+              onClick={() => setAiEnabled(!aiEnabled)}
+              style={{ width: '100%', padding: '8px', borderRadius: '8px', marginBottom: '8px',
+                background: aiEnabled ? '#1d4ed8' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                border: '1px solid rgba(255,255,255,0.1)', fontWeight: 700, cursor: 'pointer' }}>
+              {aiEnabled ? 'AI ENABLED (blue)' : 'AI OFF'}
+            </button>
+            {aiEnabled && (
+              <>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                  {DOCTRINES.map(d => (
+                    <button key={d} onClick={() => setAiDoctrine(d)}
+                      style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
+                        background: aiDoctrine === d ? '#0ea5e9' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                        border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{d}</button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {DIFFICULTIES.map(f => (
+                    <button key={f} onClick={() => setAiDifficulty(f)}
+                      style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
+                        background: aiDifficulty === f ? '#d97706' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                        border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{f}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {viewMode === 'STRATEGIC' && (
           <div style={{ background: 'rgba(0,0,0,0.4)', padding: '16px', borderRadius: '16px', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -859,6 +861,20 @@ const HUDInner: React.FC<HUDProps> = ({
           </div>
         )}
 
+        {/* RESET BATTLE — wipe all units on the current tactical map, restore both
+            rosters, clear orders + score + winBanner. Keeps the world and
+            view; for replaying the same map without regenerating terrain. */}
+        {viewMode === 'TACTICAL' && (
+          <button
+            onClick={resetBattle}
+            style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px' }}
+          >RESET BATTLE</button>
+        )}
+
+        <button
+          onClick={returnToStrategic}
+          style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginBottom: '12px' }}
+        >RETURN TO STRATEGIC OVERVIEW</button>
 
         <button onClick={regenerateWorld} style={{ width: '100%', padding: '20px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: 'white', border: 'none', borderRadius: '16px', fontSize: '14px', fontWeight: '900', cursor: 'pointer', boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)' }}>
           REGENERATE ECOSYSTEM
