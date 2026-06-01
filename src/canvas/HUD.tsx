@@ -115,13 +115,18 @@ const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affor
   );
 };
 
+// Whole-HUD shrink: the panels are designed at full px sizes, so one transform scales every
+// font/padding/radius uniformly. Anchored to each panel's own corner (see call sites) so they
+// stay pinned at the 24px inset. Tweak HUD_SCALE to taste.
+const HUD_SCALE = 0.62;
 const PANEL_BASE: React.CSSProperties = {
   position: 'absolute', top: 24, color: '#f8fafc', background: 'rgba(15, 23, 42, 0.85)',
   backdropFilter: 'blur(24px)', padding: '32px', borderRadius: '32px',
   border: '1px solid rgba(255, 255, 255, 0.12)', width: '360px',
-  maxHeight: 'calc(100vh - 48px)', overflowY: 'auto',
+  maxHeight: `calc((100vh - 48px) / ${HUD_SCALE})`, overflowY: 'auto',
   boxShadow: '0 40px 80px rgba(0, 0, 0, 0.9)', zIndex: 100, pointerEvents: 'auto',
   fontFamily: '"Inter", sans-serif',
+  transform: `scale(${HUD_SCALE})`,
 };
 
 const cpInputStyle: React.CSSProperties = {
@@ -359,7 +364,7 @@ const HUDInner: React.FC<HUDProps> = ({
 
       {/* HUD — split into two glassmorphism panels: LEFT = play (dive/deploy/orders/battle),
           RIGHT = config (grid/fog/AI/world/reset/regenerate). */}
-      <div style={{ ...PANEL_BASE, left: 24 }}>
+      <div style={{ ...PANEL_BASE, left: 24, transformOrigin: 'top left' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>{viewMode} COMMAND</h2>
           <span style={{ fontSize: '10px', color: '#3b82f6', fontWeight: 800, letterSpacing: '1px' }}>SYSTEM READY</span>
@@ -777,7 +782,7 @@ const HUDInner: React.FC<HUDProps> = ({
       </div>
 
       {/* RIGHT PANEL — configuration (display toggles, enemy AI, world gen, battle management). */}
-      <div style={{ ...PANEL_BASE, right: 24 }}>
+      <div style={{ ...PANEL_BASE, right: 24, transformOrigin: 'top right' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>CONFIG</h2>
           <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 800, letterSpacing: '1px' }}>SETTINGS</span>

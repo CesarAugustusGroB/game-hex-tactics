@@ -3,7 +3,7 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { getTerrainMods } from '../../battle/terrain';
 import { MAX_HP_BY_TYPE, type Team, type GroupId, type UnitType, type Unit } from '../../battle/simulate';
 import {
-  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, terrainMapFor, activeFillGroup,
+  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, terrainMapFor, isGroupSealed,
   type Armies, type Rosters, type InputMode, type GroupOrders,
 } from '../constants';
 import type { CpIntent } from '../../battle/command-points';
@@ -40,12 +40,16 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
   if (remaining <= 0) return;
   const strategicKey = HexUtils.key(strategicHex);
   const existing = ctx.armiesRef.current.get(strategicKey) ?? [];
-  // New cohorts always fill the active group (the one being filled, or the next free
-  // slot). A group that has marched stays sealed until it empties or redeploys home; once
-  // all four are sealed there's nowhere to deploy.
+  // New cohorts fill the SELECTED group — the player picks which band to build (click a unit,
+  // a HUD group button, or 1-4) and can fill any group in any order. The only block is a
+  // SEALED group: one that has marched/launched stays locked until it empties or redeploys
+  // home, so its slot can't be refilled mid-attack.
   const aliveTeam = existing.filter(u => u.team === team && u.hp > 0);
-  const groupId = activeFillGroup(aliveTeam, ctx.groupOrdersRef.current, zone, team);
-  if (groupId === null) { ctx.triggerBrokeFlash(team); return; }
+  const groupId = ctx.selectedGroupRef.current;
+  if (isGroupSealed(aliveTeam, ctx.groupOrdersRef.current, zone, team, groupId)) {
+    ctx.triggerBrokeFlash(team);
+    return;
+  }
   const occupied = new Set(existing.map(u => HexUtils.key(u.tacticalHex)));
   const target: Hex[] = [];
   const candidates: Hex[] = [hex, ...HexUtils.getNeighbors(hex)];
@@ -90,8 +94,6 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
     next.set(team, { ...r, [unitType]: r[unitType] - newUnits.length });
     return next;
   });
-  // Keep the HUD selection on the group being filled, so order buttons target it.
-  if (ctx.selectedGroupRef.current !== groupId) ctx.setSelectedGroup(groupId);
 }
 
 export function paintAt(hex: Hex, ctx: PaintModeCtx): void {

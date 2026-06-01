@@ -12,7 +12,7 @@ import {
   INITIAL_ROSTER, RETREAT_REFUND_FRAC,
   makeInitialRosters,
   groupOrderKey,
-  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged, activeFillGroup,
+  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged,
 } from '../canvas/constants';
 import {
   type CommandPoints, type CpIntent,
@@ -528,8 +528,9 @@ export const GameCanvas: React.FC = () => {
     for (const g of GROUP_IDS) {
       if (isGroupSealed(alive, groupOrders, selectedDeployZone, selectedTeam, g)) sealed.add(g);
     }
-    return { sealedGroups: sealed, activeGroup: activeFillGroup(alive, groupOrders, selectedDeployZone, selectedTeam) };
-  }, [armies, groupOrders, currentStrategicHex, selectedTeam, selectedDeployZone]);
+    // The fill target is whatever group is selected, as long as it isn't sealed (launched).
+    return { sealedGroups: sealed, activeGroup: sealed.has(selectedGroup) ? null : selectedGroup };
+  }, [armies, groupOrders, currentStrategicHex, selectedTeam, selectedDeployZone, selectedGroup]);
 
   const battleCtx: BattleTickCtx = {
     currentStrategicHexRef,

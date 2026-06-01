@@ -424,6 +424,16 @@ export function usePixiApp(ctx: PixiAppCtx): void {
               gsap.fromTo(world.scale, { x: 0.2, y: 0.2 }, { x: 0.8, y: 0.8, duration: 0.8, ease: 'power2.out' });
             },
           });
+        } else if (ctx.inputModeRef.current === null && ctx.currentStrategicHexRef.current) {
+          // Tactical click on one of the selected team's units → select that unit's group.
+          // (Skipped during order/place modes, which own the click.)
+          const sk = HexUtils.key(ctx.currentStrategicHexRef.current);
+          const team = ctx.selectedTeamRef.current;
+          const clickedKey = HexUtils.key(hex);
+          const hit = (ctx.armiesRef.current.get(sk) ?? []).find(
+            u => u.team === team && u.hp > 0 && HexUtils.key(u.tacticalHex) === clickedKey,
+          );
+          if (hit) ctx.setSelectedGroup(hit.groupId);
         }
       });
 
