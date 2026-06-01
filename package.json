@@ -21,7 +21,7 @@
     "test:worldgen": "tsx scripts/test-worldgen.ts",
     "test:hexutils": "tsx scripts/test-hexutils.ts",
     "units:normalize": "python scripts/normalize-units.py",
-    "test:ai": "tsx scripts/test-ai-config.ts && tsx scripts/test-ai-deploy.ts && tsx scripts/test-ai-controller.ts && tsx scripts/test-ai-battle.ts && tsx scripts/test-ai-reinforce.ts && tsx scripts/test-ai-groups.ts && tsx scripts/test-ai-rules.ts && tsx scripts/test-ai-front.ts && tsx scripts/test-ai-rotation.ts && tsx scripts/test-ai-advance.ts"
+    "test:ai": "tsx scripts/test-ai-config.ts && tsx scripts/test-ai-deploy.ts && tsx scripts/test-ai-controller.ts && tsx scripts/test-ai-battle.ts && tsx scripts/test-ai-reinforce.ts && tsx scripts/test-ai-groups.ts && tsx scripts/test-ai-rules.ts && tsx scripts/test-ai-front.ts && tsx scripts/test-ai-rotation.ts && tsx scripts/test-ai-advance.ts && tsx scripts/test-ai-mass.ts"
   },
   "dependencies": {
     "gsap": "^3.14.2",

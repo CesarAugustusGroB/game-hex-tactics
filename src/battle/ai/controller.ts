@@ -1,5 +1,5 @@
 import type { AiTickFn, AiTickState } from '../ai';
-import type { GroupId, Team } from '../simulate';
+import type { GroupId, Team, UnitType } from '../simulate';
 import type { Doctrine, Difficulty } from '../../data/ai';
 import { AI } from '../../data/ai';
 import { HexUtils } from '../../hex-engine/HexUtils';
@@ -27,6 +27,12 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
   const frontSign = team === 'red' ? -1 : 1;
+
+  // Unit type a group deploys: front groups (1..N) take doc.front[i]; the next group is the reserve.
+  const typeOfGroup = (g: GroupId): UnitType => {
+    const idx = GROUP_IDS.indexOf(g);
+    return idx >= 0 && idx < doc.front.length ? doc.front[idx] : doc.reserve;
+  };
 
   // Total standing-force cap (half the zone) and the per-band share that spreads it WIDE across the
   // four bands rather than deep in one. Resolved once the deploy zone is known.
@@ -58,7 +64,6 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     const rosterTotal = state.roster.infantry + state.roster.cavalry + state.roster.skirmisher;
     const budget = Math.floor(state.cp * diff.cpBudgetFrac);
     let cpSpent = 0;
-    let totalUnits = myUnits.length;
 
     // Per-group facts. A band may amass while unsealed, below its lateral share, and resources
     // remain. The ai.json rule list turns these facts into amass/march per group.
@@ -73,11 +78,9 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // budget is shared fairly across bands. Per-tick rotation resonated with the slow CP regen
     // (a placement every ~N ticks, N a multiple of the band count) and kept feeding the same
     // band — starving cavalry/skirmisher. Per-placement rotation is timing-independent. ---
-    let placedAny = false;
     const amassOrder = groups.map((_, i) => groups[(amassCursor + i) % groups.length]);
     for (const grp of amassOrder) {
-      const canAmass = !grp.sealed && grp.size < bandShare
-        && totalUnits < targetUnits && freeZoneCount > 0 && rosterTotal > 0;
+      const canAmass = !grp.sealed && grp.size < bandShare && freeZoneCount > 0 && rosterTotal > 0;
       const ctx: RuleCtx = {
         size: grp.size,
         massed: grp.size >= bandShare,
@@ -96,24 +99,27 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
 
       for (const p of plan) {
         if (grp.size >= bandShare) break;     // this band reached its width share
-        if (totalUnits >= targetUnits) break; // total standing-force cap
         if (cpSpent + 2 > budget) break;
         if (!state.placeCohort(p.groupId, p.anchorHex, p.unitType)) continue;
         amassCursor = (amassCursor + 1) % groups.length; // next cohort starts the scan one band on
         cpSpent += 2;
         grp.size += COHORT_SIZE;
-        totalUnits += COHORT_SIZE;
         freeZoneCount -= COHORT_SIZE;
-        placedAny = true;
         cpSpentAmassing.set(grp.g, (cpSpentAmassing.get(grp.g) ?? 0) + 2);
         for (const c of [p.anchorHex, ...HexUtils.getNeighbors(p.anchorHex)]) occupied.add(HexUtils.key(c));
       }
     }
 
-    // --- March phase: the front is "built" once nothing more could be placed this tick. Hold the
-    // in-zone line until then so the whole front advances together; groups already outside the zone
-    // keep advancing regardless. ---
-    const frontBuilt = !placedAny;
+    // --- March phase: the front is "built" once no band can grow any further — every band has
+    // reached its bandShare, or genuinely can't (zone full / its unit type exhausted). Crucially
+    // this is NOT "nothing placed this tick": on a CP-starved tick a half-filled band places
+    // nothing yet still wants to grow, so it must keep HOLDING — otherwise later (CP-poor) waves
+    // launched at a fraction of bandShare while the first (CP-rich) wave filled completely. ---
+    const frontBuilt = groups.every(grp => {
+      if (grp.size === 0 || grp.sealed) return true;
+      const canGrowMore = grp.size < bandShare && freeZoneCount > 0 && (state.roster[typeOfGroup(grp.g)] ?? 0) > 0;
+      return !canGrowMore;
+    });
     const marchOrder = groups.map((_, i) => groups[(marchCursor + i) % groups.length]);
     for (const grp of marchOrder) {
       if (grp.size === 0) continue;
