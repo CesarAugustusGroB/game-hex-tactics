@@ -35,6 +35,11 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
 
   const cpSpentAmassing = new Map<GroupId, number>();
   const lastDecisionTick = new Map<GroupId, number>();
+  // Round-robin starts for the amass and march scans so a scarce CP budget is shared fairly across
+  // bands instead of always feeding the lowest-numbered ones. Cursors advance once PER ACTION TAKEN
+  // (not per tick) so the rotation can't resonate with the CP-regen period.
+  let amassCursor = 0;
+  let marchCursor = 0;
 
   return (state: AiTickState): void => {
     const myUnits = state.myUnits.filter(u => u.hp > 0);
@@ -63,9 +68,14 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       return { g, groupUnits, size: groupUnits.length, sealed };
     });
 
-    // --- Amass phase: widen every eligible band in parallel, front-row-first. ---
+    // --- Amass phase: widen every eligible band in parallel, front-row-first. Scan order starts
+    // at a round-robin cursor that advances once PER COHORT PLACED (not per tick) so a scarce CP
+    // budget is shared fairly across bands. Per-tick rotation resonated with the slow CP regen
+    // (a placement every ~N ticks, N a multiple of the band count) and kept feeding the same
+    // band — starving cavalry/skirmisher. Per-placement rotation is timing-independent. ---
     let placedAny = false;
-    for (const grp of groups) {
+    const amassOrder = groups.map((_, i) => groups[(amassCursor + i) % groups.length]);
+    for (const grp of amassOrder) {
       const canAmass = !grp.sealed && grp.size < bandShare
         && totalUnits < targetUnits && freeZoneCount > 0 && rosterTotal > 0;
       const ctx: RuleCtx = {
@@ -89,6 +99,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         if (totalUnits >= targetUnits) break; // total standing-force cap
         if (cpSpent + 2 > budget) break;
         if (!state.placeCohort(p.groupId, p.anchorHex, p.unitType)) continue;
+        amassCursor = (amassCursor + 1) % groups.length; // next cohort starts the scan one band on
         cpSpent += 2;
         grp.size += COHORT_SIZE;
         totalUnits += COHORT_SIZE;
@@ -103,7 +114,8 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // in-zone line until then so the whole front advances together; groups already outside the zone
     // keep advancing regardless. ---
     const frontBuilt = !placedAny;
-    for (const grp of groups) {
+    const marchOrder = groups.map((_, i) => groups[(marchCursor + i) % groups.length]);
+    for (const grp of marchOrder) {
       if (grp.size === 0) continue;
       // grp.size counts units placed THIS tick (absent from the start-of-tick snapshot); those
       // cohorts land in the deploy zone, so a group whose snapshot units are all in-zone (or was
@@ -117,9 +129,15 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       if (order && order.mode === 'march'
         && order.attackTarget?.q === CAPTURE_CENTER.q && order.attackTarget?.r === CAPTURE_CENTER.r) continue;
       if (cpSpent + CP_COSTS.march > budget) continue;
-      if (state.issueOrder(grp.g, { mode: 'march', heading: forwardHeading(state.team), attackTarget: { ...CAPTURE_CENTER } }, 'march')) {
+      // LOOSE march: the AI fields large, tightly-packed bands that touch at their lateral
+      // boundaries. A rigid block is all-or-nothing, so a single boundary unit whose forward hex
+      // holds an adjacent band's unit freezes the entire 80+-unit band forever — only the first
+      // band (clear path) ever advanced. Per-unit advance lets the band flow forward around the
+      // few blocked boundary units, so every flank actually attacks.
+      if (state.issueOrder(grp.g, { mode: 'march', heading: forwardHeading(state.team), attackTarget: { ...CAPTURE_CENTER }, looseFormation: true }, 'march')) {
         cpSpent += CP_COSTS.march;
         lastDecisionTick.set(grp.g, state.tick);
+        marchCursor = (marchCursor + 1) % groups.length; // next march starts the scan one band on
       }
     }
   };
