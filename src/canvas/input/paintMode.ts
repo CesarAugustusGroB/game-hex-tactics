@@ -3,7 +3,7 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { getTerrainMods } from '../../battle/terrain';
 import { MAX_HP_BY_TYPE, type Team, type GroupId, type UnitType, type Unit } from '../../battle/simulate';
 import {
-  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, terrainMapFor, isGroupSealed,
+  COHORT_SIZE, INITIAL_ROSTER, deployZoneFor, terrainMapFor, isGroupSealed, activeFillGroup,
   type Armies, type Rosters, type InputMode, type GroupOrders,
 } from '../constants';
 import type { CpIntent } from '../../battle/command-points';
@@ -45,10 +45,14 @@ export function paintPlace(hex: Hex, ctx: PaintModeCtx): void {
   // SEALED group: one that has marched/launched stays locked until it empties or redeploys
   // home, so its slot can't be refilled mid-attack.
   const aliveTeam = existing.filter(u => u.team === team && u.hp > 0);
-  const groupId = ctx.selectedGroupRef.current;
+  let groupId = ctx.selectedGroupRef.current;
   if (isGroupSealed(aliveTeam, ctx.groupOrdersRef.current, zone, team, groupId)) {
-    ctx.triggerBrokeFlash(team);
-    return;
+    // Selected group is sealed (launched) — fall back to the next fillable group and select it,
+    // instead of refusing the placement. If every group is sealed there's nowhere to deploy.
+    const next = activeFillGroup(aliveTeam, ctx.groupOrdersRef.current, zone, team);
+    if (next === null) { ctx.triggerBrokeFlash(team); return; }
+    groupId = next;
+    ctx.setSelectedGroup(next);
   }
   const occupied = new Set(existing.map(u => HexUtils.key(u.tacticalHex)));
   const target: Hex[] = [];
