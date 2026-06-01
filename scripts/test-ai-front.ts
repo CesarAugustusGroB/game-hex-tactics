@@ -1,7 +1,7 @@
-// The AI must build a WIDE front across the whole deploy-zone width — not amass a deep column in
-// one corner/band. Drives makeAiController against a faithful blob-cohort host over a wide strip
-// zone and asserts the peak in-zone formation spans most of the width and is wider than it is deep.
-// Run: npx tsx scripts/test-ai-front.ts
+// Doctrine: a WIDE front of THREE lateral bands (groups 1-3) across the deploy-zone width, plus a
+// RESERVE band (group 4) deployed at a spot further BACK (away from the enemy edge), not in the
+// front line. Drives makeAiController over a wide strip and asserts the front spans most of the
+// width and the reserve sits behind it. Run: npx tsx scripts/test-ai-front.ts
 import { makeAiController } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, UnitType } from '../src/battle/simulate';
@@ -45,8 +45,7 @@ const placeCohort = (gid: number, anchor: Hex, unitType: UnitType): boolean => {
   return true;
 };
 
-// Build phase only (no enemies, no movement): watch the front grow and capture its peak footprint.
-let peakCoverage = 0, peakLateral = 0, peakDepth = 0;
+// Build phase only (no enemies, no movement): let the formation fill.
 for (let t = 1; t <= 20; t++) {
   cp = Math.min(200, cp + 0.1);
   const state: AiTickState = {
@@ -59,17 +58,23 @@ for (let t = 1; t <= 20; t++) {
     placeCohort,
   };
   ctrl(state);
-  const inZone = units.filter(u => deployZone.has(HexUtils.key(u.tacticalHex)));
-  if (inZone.length < 8) continue;
-  const xs = inZone.map(u => HexUtils.hexToPixel(u.tacticalHex).x);
-  const lateral = new Set(xs.map(x => Math.round(x))).size;
-  const depth = new Set(inZone.map(u => Math.round(HexUtils.hexToPixel(u.tacticalHex).y))).size;
-  const coverage = (Math.max(...xs) - Math.min(...xs)) / zoneW;
-  if (coverage > peakCoverage) { peakCoverage = coverage; peakLateral = lateral; peakDepth = depth; }
 }
 
-check('front spans most of the deploy-zone width', peakCoverage >= 0.6, `coverage=${peakCoverage.toFixed(2)}`);
-check('front is wider than it is deep', peakLateral > peakDepth, `lateral=${peakLateral} depth=${peakDepth}`);
+const py = (u: Unit) => HexUtils.hexToPixel(u.tacticalHex).y;
+const inZone = units.filter(u => deployZone.has(HexUtils.key(u.tacticalHex)));
+const front = inZone.filter(u => u.groupId !== 4);  // groups 1-3 = front line
+const reserve = inZone.filter(u => u.groupId === 4); // group 4 = reserve
+const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / (xs.length || 1);
+
+const frontXs = front.map(u => HexUtils.hexToPixel(u.tacticalHex).x);
+const frontCoverage = front.length ? (Math.max(...frontXs) - Math.min(...frontXs)) / zoneW : 0;
+
+check('front line spans most of the deploy-zone width', frontCoverage >= 0.6, `coverage=${frontCoverage.toFixed(2)}`);
+check('front is built from the three non-reserve bands', new Set(front.map(u => u.groupId)).size === 3, `bands=${[...new Set(front.map(u => u.groupId))].sort()}`);
+check('reserve band was deployed', reserve.length > 0, `n=${reserve.length}`);
+// Blue marches toward larger py (front = high py), so "behind" = lower py.
+check('reserve sits behind the front line', reserve.length > 0 && mean(reserve.map(py)) < mean(front.map(py)),
+  `reserveY=${mean(reserve.map(py)).toFixed(0)} frontY=${mean(front.map(py)).toFixed(0)}`);
 
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail > 0 ? 1 : 0);

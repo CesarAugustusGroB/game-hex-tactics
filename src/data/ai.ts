@@ -1,13 +1,16 @@
 import raw from './ai.json';
 import type { AiRule } from '../battle/ai/rules';
 
+import type { UnitType } from '../battle/simulate';
+
 export type Doctrine = 'balanced' | 'aggressive' | 'defensive';
 export type Difficulty = 'easy' | 'normal' | 'hard';
-export type AiRole = 'centerHold' | 'defendLine' | 'raid' | 'reserve';
 
 export interface DoctrineConfig {
-  /** How many groups lean to each role — still drives the deploy planner's band/unit-type layout. */
-  roleMix: Record<AiRole, number>;
+  /** Unit type for each lateral FRONT band, left→right. Length = number of front groups (3). */
+  front: UnitType[];
+  /** Unit type of the RESERVE group held behind the front line. */
+  reserve: UnitType;
 }
 
 export interface DifficultyConfig {

@@ -5,9 +5,9 @@
     { "do": "march" }
   ],
   "doctrines": {
-    "balanced":   { "roleMix": { "centerHold": 1, "defendLine": 1, "raid": 1, "reserve": 1 } },
-    "aggressive": { "roleMix": { "centerHold": 1, "defendLine": 0, "raid": 2, "reserve": 1 } },
-    "defensive":  { "roleMix": { "centerHold": 1, "defendLine": 2, "raid": 0, "reserve": 1 } }
+    "balanced":   { "front": ["infantry", "cavalry", "skirmisher"], "reserve": "infantry" },
+    "aggressive": { "front": ["cavalry", "infantry", "skirmisher"], "reserve": "cavalry" },
+    "defensive":  { "front": ["skirmisher", "cavalry", "infantry"], "reserve": "skirmisher" }
   },
   "difficulties": {
     "easy":   { "reactionTicks": 12, "cpBudgetFrac": 0.5, "forceScale": 0.6  },

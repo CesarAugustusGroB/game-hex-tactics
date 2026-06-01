@@ -1,5 +1,4 @@
 import type { GroupId, UnitType } from '../simulate';
-import type { AiRole, DoctrineConfig } from '../../data/ai';
 import { COHORT_SIZE } from '../../data/game';
 import { HexUtils } from '../../hex-engine/HexUtils';
 
@@ -11,16 +10,11 @@ export interface Placement {
 
 const GROUP_IDS: GroupId[] = [1, 2, 3, 4];
 
-/** Preferred unit type per role (cavalry raids, skirmishers screen, infantry holds). */
-const ROLE_UNIT: Record<AiRole, UnitType> = {
-  centerHold: 'infantry',
-  defendLine: 'infantry',
-  raid: 'cavalry',
-  reserve: 'skirmisher',
-};
-
 export interface DeployInput {
-  roleMix: DoctrineConfig['roleMix'];
+  /** Unit type per lateral FRONT band, left→right. Front group i ← frontTypes[i]. */
+  frontTypes: UnitType[];
+  /** Unit type of the RESERVE group, held behind the front line. */
+  reserveType: UnitType;
   forceScale: number;
   /** Free deploy-zone hexes (any order — placement is geometry-driven, not order-driven). */
   freeHexes: { q: number; r: number; key: string }[];
@@ -29,26 +23,26 @@ export interface DeployInput {
   /** Orientation of "forward": +1 if the front edge (facing the enemy) is the larger-py side
    *  of the zone (blue, top strip marching down), -1 if the smaller-py side (red, bottom strip). */
   frontSign: number;
+  /** Randomness for reserve placement. Defaults to Math.random; inject a seeded RNG to make
+   *  reserve positioning deterministic (a later pass will replace random-back with a chosen spot). */
+  rng?: () => number;
 }
 
+/** Back fraction of the zone (by forward-depth) the reserve deploys into. */
+const RESERVE_BACK_FRAC = 0.3;
+
 /**
- * Lay the army out along the FRONT edge of the deploy zone, one group per lateral band:
+ * Lay the army out: the NON-RESERVE groups form a wide FRONT line, one per lateral band along the
+ * front edge; the RESERVE group is held BACK at a random spot away from the enemy (deterministic
+ * placement will come later). Rationale for the bands:
  * - `waves` cohorts per group (scaled by forceScale) → difficulty controls total force.
- * - Each group owns a disjoint lateral (px) slice, so groups deploy in separate columns. The
- *   sim's rigid-block march steps a whole group together and fails if any forward cell is taken
- *   by another group — packing groups in one corner mutually interlocks them and nobody advances.
- *   Separate bands + front placement keep each group's forward cells clear and units close to
- *   the centre/enemy line. Pure; the caller applies each placement via state.placeCohort.
+ * - Each front group owns a disjoint lateral (px) slice, so they deploy in separate columns; the
+ *   reserve sits in the back rows so it doesn't clog the front's forward cells. Pure (modulo the
+ *   injected `rng`); the caller applies each placement via state.placeCohort.
  */
 export function planDeployment(input: DeployInput): Placement[] {
-  const { roleMix, forceScale, freeHexes, roster, frontSign } = input;
-
-  const roles: AiRole[] = [];
-  (['centerHold', 'defendLine', 'raid', 'reserve'] as AiRole[]).forEach(role => {
-    for (let i = 0; i < roleMix[role]; i++) roles.push(role);
-  });
-  const groupRoles = roles.slice(0, GROUP_IDS.length);
-  if (groupRoles.length === 0 || freeHexes.length === 0) return [];
+  const { frontTypes, reserveType, forceScale, freeHexes, roster, frontSign, rng = Math.random } = input;
+  if (freeHexes.length === 0) return [];
 
   const waves = Math.max(1, Math.round(forceScale * 2));
 
@@ -61,30 +55,40 @@ export function planDeployment(input: DeployInput): Placement[] {
   const xs = pts.map(p => p.lat);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const span = (maxX - minX) || 1;
-  const nGroups = groupRoles.length;
+  const nFront = Math.max(1, frontTypes.length);
 
   const placements: Placement[] = [];
   const remaining: Record<UnitType, number> = { ...roster };
 
-  for (let g = 0; g < nGroups; g++) {
-    const role = groupRoles[g];
-    const unitType = ROLE_UNIT[role];
-    const lo = minX + (g / nGroups) * span;
-    const hi = minX + ((g + 1) / nGroups) * span;
-    // This group's lateral slice [lo, hi), front-most first. The last slice is inclusive so the
-    // rightmost column isn't dropped by the half-open boundary.
-    const band = pts
-      .filter(p => p.lat >= lo && (g === nGroups - 1 ? p.lat <= hi : p.lat < hi))
-      .sort((a, b) => b.fwd - a.fwd);
+  // Take up to `waves` cohort anchors from a candidate list, stepping `step` apart.
+  const placeFrom = (cands: { q: number; r: number }[], groupId: GroupId, unitType: UnitType, step: number) => {
     let idx = 0;
     for (let w = 0; w < waves; w++) {
-      if (remaining[unitType] <= 0) break;
-      if (idx >= band.length) break;
-      const anchor = band[idx];
-      idx += COHORT_SIZE;
-      placements.push({ groupId: GROUP_IDS[g], anchorHex: { q: anchor.q, r: anchor.r }, unitType });
+      if (remaining[unitType] <= 0 || idx >= cands.length) break;
+      const a = cands[idx];
+      idx += step;
+      placements.push({ groupId, anchorHex: { q: a.q, r: a.r }, unitType });
       remaining[unitType] -= Math.min(COHORT_SIZE, remaining[unitType]);
     }
-  }
+  };
+
+  // FRONT: groups 1..nFront, one lateral band each, front-most rows first.
+  frontTypes.forEach((unitType, bandPos) => {
+    const lo = minX + (bandPos / nFront) * span;
+    const hi = minX + ((bandPos + 1) / nFront) * span;
+    const band = pts
+      .filter(p => p.lat >= lo && (bandPos === nFront - 1 ? p.lat <= hi : p.lat < hi))
+      .sort((a, b) => b.fwd - a.fwd);
+    placeFrom(band, GROUP_IDS[bandPos], unitType, COHORT_SIZE);
+  });
+
+  // RESERVE: the group right after the front bands, at random anchors from the back rows
+  // (lowest fwd = farthest from the enemy).
+  const reserveGroupId = GROUP_IDS[nFront] ?? GROUP_IDS[GROUP_IDS.length - 1];
+  const backCount = Math.max(1, Math.floor(pts.length * RESERVE_BACK_FRAC));
+  const back = [...pts].sort((a, b) => a.fwd - b.fwd).slice(0, backCount);
+  const shuffled = back.map(p => ({ p, k: rng() })).sort((a, b) => a.k - b.k).map(x => x.p);
+  placeFrom(shuffled, reserveGroupId, reserveType, 1);
+
   return placements;
 }

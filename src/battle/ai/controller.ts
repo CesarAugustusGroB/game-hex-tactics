@@ -91,7 +91,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         .filter(k => !occupied.has(k))
         .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, key: k }; });
       const plan = planDeployment({
-        roleMix: doc.roleMix, forceScale: diff.forceScale, freeHexes, roster: state.roster, frontSign,
+        frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster: state.roster, frontSign,
       }).filter(p => p.groupId === grp.g);
 
       for (const p of plan) {
