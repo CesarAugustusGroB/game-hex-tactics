@@ -1,9 +1,20 @@
 {
   "amassCpBudget": 100,
   "rules": [
+    { "when": { "isReserve": true, "threatened": true, "atDefensePos": true }, "do": "hold" },
+    { "when": { "isReserve": true, "threatened": true }, "do": "defend" },
     { "when": { "canAmass": true, "cpSpentAmassingLt": 100 }, "do": "amass" },
     { "do": "march" }
   ],
+  "counter": {
+    "vpWeight": 0.6,
+    "pressureWeight": 0.4,
+    "breacherWeight": 0.34,
+    "raiderWeight": 0.17,
+    "enemyCenterWeight": 0.3,
+    "maxLaunchReduction": 0.75,
+    "raidWatchRadius": 2
+  },
   "doctrines": {
     "balanced":   { "front": ["infantry", "cavalry", "skirmisher"], "reserve": "infantry" },
     "aggressive": { "front": ["cavalry", "infantry", "skirmisher"], "reserve": "cavalry" },

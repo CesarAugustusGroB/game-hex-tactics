@@ -2,15 +2,36 @@ import type { AiTickFn, AiTickState } from '../ai';
 import type { GroupId, Team, UnitType } from '../simulate';
 import type { Doctrine, Difficulty } from '../../data/ai';
 import { AI } from '../../data/ai';
-import { HexUtils } from '../../hex-engine/HexUtils';
+import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { CP_COSTS } from '../command-points';
 import { COHORT_SIZE, CAPTURE_CENTER } from '../../data/game';
+import { POINTS_TO_WIN } from '../../data/scoring';
 import { planDeployment } from './deploy';
 import { GROUP_IDS, isGroupSealed } from '../groups';
 import { evaluateRules, type RuleCtx } from './rules';
+import { perceive } from './perception';
+import type { Unit } from '../simulate';
 
 // Team-forward heading index: red marches up (dir 2), blue marches down (dir 5).
 const forwardHeading = (team: Team): number => (team === 'red' ? 2 : 5);
+
+// March moves along `heading` (one of 6 fixed dirs), NOT toward attackTarget — so to send a
+// group toward an arbitrary hex (e.g. a raid behind our line) we pick the heading whose single
+// step lands closest to the target.
+const headingToward = (from: Hex, to: Hex): number => {
+  let best = 0, bestD = Infinity;
+  HexUtils.directions.forEach((d, i) => {
+    const dist = HexUtils.distance({ q: from.q + d.q, r: from.r + d.r }, to);
+    if (dist < bestD) { bestD = dist; best = i; }
+  });
+  return best;
+};
+
+const centroidOf = (units: Unit[]): Hex => {
+  let q = 0, r = 0;
+  for (const u of units) { q += u.tacticalHex.q; r += u.tacticalHex.r; }
+  return { q: Math.round(q / units.length), r: Math.round(r / units.length) };
+};
 
 /**
  * Build a stateful per-tick controller for `team`. The deploy doctrine is WIDE-FIRST: every
@@ -33,6 +54,9 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     const idx = GROUP_IDS.indexOf(g);
     return idx >= 0 && idx < doc.front.length ? doc.front[idx] : doc.reserve;
   };
+  // The band held behind the front line: the doctrine's reserve. It's the group that peels off to
+  // intercept raids on our own deploy zone instead of pushing the centre.
+  const reserveGid = GROUP_IDS[doc.front.length];
 
   // Total standing-force cap (half the zone) and the per-band share that spreads it WIDE across the
   // four bands rather than deep in one. Resolved once the deploy zone is known.
@@ -49,6 +73,28 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
 
   return (state: AiTickState): void => {
     const myUnits = state.myUnits.filter(u => u.hp > 0);
+    // The eyes: enemies in/near our line and who holds the centre. Drives reserve defence below.
+    const threat = perceive(state, { raidWatchRadius: AI.counter.raidWatchRadius });
+    const threatened = threat.raidThreatHex != null;
+    const threatUnits = threatened ? [...threat.breachers, ...threat.raiders] : [];
+
+    // Danger of defeat ∈ [0,1], blending the VP race (how close the enemy is to winning / our
+    // deficit) with observable pressure (raiders on our line, enemy holding the centre). It lowers
+    // the launch bar below: the more we're losing, the fewer amassed units we wait for before we
+    // counterattack — better to commit a partial front than to die fully assembled.
+    const c = AI.counter;
+    const myScore = state.myScore ?? 0;
+    const enemyScore = state.enemyScore ?? 0;
+    // Blend absolute enemy progress toward the win with how far they're ahead of us, so a lead of
+    // our own genuinely lowers the alarm. (max(enemyScore, enemyScore - myScore) collapsed to just
+    // enemyScore for any myScore ≥ 0 — the deficit term never counted.)
+    const enemyProgress = enemyScore / POINTS_TO_WIN;
+    const deficit = Math.max(0, enemyScore - myScore) / POINTS_TO_WIN;
+    const vpDanger = 0.5 * enemyProgress + 0.5 * deficit;
+    const pressure = threat.breachers.length * c.breacherWeight
+      + threat.raiders.length * c.raiderWeight
+      + (threat.centerControl === 'enemy' ? c.enemyCenterWeight : 0);
+    const danger = Math.min(1, Math.max(0, c.vpWeight * Math.min(1, vpDanger) + c.pressureWeight * Math.min(1, pressure)));
     if (targetUnits < 0) {
       // Half the zone is the hard-difficulty ceiling; forceScale shrinks it so easier AIs field a
       // smaller standing army. bandShare spreads the cap WIDE across the four bands, not deep.
@@ -61,7 +107,11 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
 
     const occupied = new Set(myUnits.map(u => HexUtils.key(u.tacticalHex)));
     let freeZoneCount = [...state.deployZone].filter(k => !occupied.has(k)).length;
-    const rosterTotal = state.roster.infantry + state.roster.cavalry + state.roster.skirmisher;
+    // Local roster copy: state.roster is a start-of-tick snapshot the host does NOT mutate in place
+    // (placeCohort swaps in a fresh map), so we decrement our own copy as we deploy to keep
+    // canAmass / canGrowMore honest within the tick.
+    const roster: Record<UnitType, number> = { ...state.roster };
+    let rosterTotal = roster.infantry + roster.cavalry + roster.skirmisher;
     const budget = Math.floor(state.cp * diff.cpBudgetFrac);
     let cpSpent = 0;
 
@@ -94,7 +144,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         .filter(k => !occupied.has(k))
         .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, key: k }; });
       const plan = planDeployment({
-        frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster: state.roster, frontSign,
+        frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster, frontSign,
       }).filter(p => p.groupId === grp.g);
 
       for (const p of plan) {
@@ -105,6 +155,8 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         cpSpent += 2;
         grp.size += COHORT_SIZE;
         freeZoneCount -= COHORT_SIZE;
+        roster[p.unitType] = Math.max(0, roster[p.unitType] - COHORT_SIZE);
+        rosterTotal = Math.max(0, rosterTotal - COHORT_SIZE);
         cpSpentAmassing.set(grp.g, (cpSpentAmassing.get(grp.g) ?? 0) + 2);
         for (const c of [p.anchorHex, ...HexUtils.getNeighbors(p.anchorHex)]) occupied.add(HexUtils.key(c));
       }
@@ -115,23 +167,74 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // this is NOT "nothing placed this tick": on a CP-starved tick a half-filled band places
     // nothing yet still wants to grow, so it must keep HOLDING — otherwise later (CP-poor) waves
     // launched at a fraction of bandShare while the first (CP-rich) wave filled completely. ---
-    const frontBuilt = groups.every(grp => {
+    // Counterattack: at danger 0 the launch bar is the full bandShare (unchanged behaviour); as
+    // danger rises it drops toward COHORT_SIZE, so a half-built front launches early rather than
+    // waiting. A band is "ready" once it reaches the (lowered) launchShare OR genuinely can't grow.
+    const launchShare = Math.max(COHORT_SIZE, Math.ceil(bandShare * (1 - c.maxLaunchReduction * danger)));
+    const frontReady = groups.every(grp => {
       if (grp.size === 0 || grp.sealed) return true;
-      const canGrowMore = grp.size < bandShare && freeZoneCount > 0 && (state.roster[typeOfGroup(grp.g)] ?? 0) > 0;
+      if (grp.size >= launchShare) return true;
+      const canGrowMore = grp.size < bandShare && freeZoneCount > 0 && (roster[typeOfGroup(grp.g)] ?? 0) > 0;
       return !canGrowMore;
     });
     const marchOrder = groups.map((_, i) => groups[(marchCursor + i) % groups.length]);
+    // Defence is time-critical (raids score on contact), so when our line is threatened let the
+    // reserve claim CP before the front spends the budget on centre-march orders. Stable sort keeps
+    // the round-robin order among the rest.
+    if (threatened) marchOrder.sort((a, b) => Number(b.g === reserveGid) - Number(a.g === reserveGid));
     for (const grp of marchOrder) {
       if (grp.size === 0) continue;
       // grp.size counts units placed THIS tick (absent from the start-of-tick snapshot); those
       // cohorts land in the deploy zone, so a group whose snapshot units are all in-zone (or was
       // empty at snapshot) is still fully in-zone. Use grp.size, not the stale snapshot length.
       const inZone = grp.groupUnits.every(u => state.deployZone.has(HexUtils.key(u.tacticalHex)));
-      if (inZone && !frontBuilt) continue;
+
+      const isReserve = grp.g === reserveGid;
+      // In contact with the raid once any of our units is adjacent to a breacher/raider → hold.
+      const atDefensePos = isReserve && threatened
+        && grp.groupUnits.some(gu => threatUnits.some(t => HexUtils.distance(gu.tacticalHex, t.tacticalHex) <= 1));
+      const action = evaluateRules(AI.rules, {
+        size: grp.size, massed: grp.size >= bandShare, inZone,
+        cpSpentAmassing: cpSpentAmassing.get(grp.g) ?? 0, canAmass: false,
+        isReserve, threatened, atDefensePos,
+      });
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;
       if (state.tick - last < diff.reactionTicks) continue;
       const order = state.myOrders.find(o => o.groupId === grp.g);
+
+      if (action === 'hold') {
+        if (order?.mode === 'hold') continue;                 // already anchoring
+        if (cpSpent + CP_COSTS.hold > budget) continue;
+        if (state.issueOrder(grp.g, { mode: 'hold' }, 'hold')) {
+          cpSpent += CP_COSTS.hold;
+          lastDecisionTick.set(grp.g, state.tick);
+        }
+        continue;
+      }
+
+      if (action === 'defend') {
+        const tgt = threat.raidThreatHex!;
+        // A cohort placed THIS tick isn't in grp.groupUnits yet (only in grp.size) → no positions to
+        // average; it defends next tick once it's in the snapshot. Guards centroidOf([]) → NaN heading.
+        if (grp.groupUnits.length === 0) continue;
+        // March moves along `heading` (not attackTarget), so aim the heading at the raid behind us.
+        // Re-issue only when the needed heading actually changes — keying the skip on attackTarget
+        // proximity would leave a stale heading when a moving threat needs a new direction.
+        const heading = headingToward(centroidOf(grp.groupUnits), tgt);
+        if (order?.mode === 'march' && order.heading === heading) continue;
+        if (cpSpent + CP_COSTS.march > budget) continue;
+        // attackTarget only ranks units front-to-back so the rear ranks (nearest the breach) lead.
+        if (state.issueOrder(grp.g, { mode: 'march', heading, attackTarget: { ...tgt }, looseFormation: true }, 'march')) {
+          cpSpent += CP_COSTS.march;
+          lastDecisionTick.set(grp.g, state.tick);
+        }
+        continue;
+      }
+
+      // action 'march' — the fallback rule (or null, unreachable while the ruleset keeps a
+      // condition-less catch-all): push the centre objective.
+      if (inZone && !frontReady) continue;
       if (order && order.mode === 'march'
         && order.attackTarget?.q === CAPTURE_CENTER.q && order.attackTarget?.r === CAPTURE_CENTER.r) continue;
       if (cpSpent + CP_COSTS.march > budget) continue;

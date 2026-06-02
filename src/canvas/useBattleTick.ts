@@ -106,6 +106,8 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
             allOrders: ctx.groupOrdersRef.current,
             gridData: grid,
             cp: ctx.commandPointsRef.current[team],
+            myScore: ctx.scoreRef.current[team],
+            enemyScore: ctx.scoreRef.current[team === 'red' ? 'blue' : 'red'],
             roster: ctx.rostersRef.current.get(team) ?? { ...INITIAL_ROSTER },
             deployZone: deployZones[team],
             placeCohort: (gid, anchor, unitType: UnitType) => {

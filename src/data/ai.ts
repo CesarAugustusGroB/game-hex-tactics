@@ -7,8 +7,10 @@ export type Doctrine = 'balanced' | 'aggressive' | 'defensive';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
 export interface DoctrineConfig {
-  /** Unit type for each lateral FRONT band, left→right. Length = number of front groups (3). */
-  front: UnitType[];
+  /** Unit type for each lateral FRONT band, left→right. EXACTLY 3 (a fixed tuple) so the 4th of
+   *  GROUP_IDS is unambiguously the reserve — the controller derives `reserveGid` as
+   *  `GROUP_IDS[front.length]` and relies on this length being 3. */
+  front: [UnitType, UnitType, UnitType];
   /** Unit type of the RESERVE group held behind the front line. */
   reserve: UnitType;
 }
@@ -22,12 +24,31 @@ export interface DifficultyConfig {
   forceScale: number;
 }
 
+/** Counterattack tuning: how "danger of defeat" is blended and how far it lowers the launch bar. */
+export interface CounterConfig {
+  /** Weight of the VP signal (how close the enemy is to winning / our deficit) in danger. */
+  vpWeight: number;
+  /** Weight of the observable-pressure signal (raids on our zone, enemy holding centre). */
+  pressureWeight: number;
+  /** Pressure contribution per enemy already inside our deploy zone. */
+  breacherWeight: number;
+  /** Pressure contribution per enemy approaching our deploy zone. */
+  raiderWeight: number;
+  /** Pressure contribution when the enemy alone holds the centre. */
+  enemyCenterWeight: number;
+  /** Max fraction the per-band launch threshold can be cut at full danger (0..1). */
+  maxLaunchReduction: number;
+  /** Hex distance out from our deploy zone at which an enemy counts as an approaching raider. */
+  raidWatchRadius: number;
+}
+
 export interface AiConfig {
   /** CP a group may spend amassing before it marches (referenced by the `cpSpentAmassingLt`
    *  condition in the default ruleset). */
   amassCpBudget: number;
   /** Authored behaviour: ordered `condition → action` rules, first match wins. */
   rules: AiRule[];
+  counter: CounterConfig;
   doctrines: Record<Doctrine, DoctrineConfig>;
   difficulties: Record<Difficulty, DifficultyConfig>;
 }

@@ -31,6 +31,11 @@ export interface AiTickState {
   gridData: ReadonlyArray<{ hex: Hex; type: string }>;
   /** Snapshot of the team's CP at the start of the tick (read-only). */
   cp: number;
+  /** Victory points, this team's and the enemy's, as of the previous tick (scoring runs after
+   *  the AI phase). Optional: omitted by headless harnesses → treated as 0/0, i.e. no danger
+   *  signal. Drives the counterattack threshold (more deficit → launch with fewer units). */
+  myScore?: number;
+  enemyScore?: number;
   /** Undeployed units left in this team's roster, by type. */
   roster: Readonly<Record<UnitType, number>>;
   /** Hex keys of this team's deploy zone (host-computed via deployZoneFor). */
