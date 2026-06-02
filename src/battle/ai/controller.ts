@@ -9,7 +9,7 @@ import { POINTS_TO_WIN } from '../../data/scoring';
 import { planDeployment } from './deploy';
 import { GROUP_IDS, isGroupSealed } from '../groups';
 import { evaluateRules, type RuleCtx } from './rules';
-import { perceive } from './perception';
+import { perceive, CENTER_KEYS } from './perception';
 import type { Unit } from '../simulate';
 
 // Team-forward heading index: red marches up (dir 2), blue marches down (dir 5).
@@ -83,6 +83,8 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // the launch bar below: the more we're losing, the fewer amassed units we wait for before we
     // counterattack — better to commit a partial front than to die fully assembled.
     const c = AI.counter;
+    const combat = AI.combat;
+    const liveEnemies = state.enemyUnits.filter(u => u.hp > 0);
     const myScore = state.myScore ?? 0;
     const enemyScore = state.enemyScore ?? 0;
     // Blend absolute enemy progress toward the win with how far they're ahead of us, so a lead of
@@ -193,10 +195,26 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       // In contact with the raid once any of our units is adjacent to a breacher/raider → hold.
       const atDefensePos = isReserve && threatened
         && grp.groupUnits.some(gu => threatUnits.some(t => HexUtils.distance(gu.tacticalHex, t.tacticalHex) <= 1));
+
+      // Nearest live enemy to this group (drives the charge target/heading); holdsCentre = a foot
+      // on the flower. Both are false/Infinity for a just-placed cohort (empty snapshot), so the
+      // combat rules can't fire on one — no centroidOf([]) / null-target hazard.
+      let nearestEnemy: Unit | null = null;
+      let enemyDist = Infinity;
+      for (const gu of grp.groupUnits) for (const e of liveEnemies) {
+        const d = HexUtils.distance(gu.tacticalHex, e.tacticalHex);
+        if (d < enemyDist) { enemyDist = d; nearestEnemy = e; }
+      }
+      const holdsCentre = grp.groupUnits.some(gu => CENTER_KEYS.has(HexUtils.key(gu.tacticalHex)));
+
       const action = evaluateRules(AI.rules, {
         size: grp.size, massed: grp.size >= bandShare, inZone,
         cpSpentAmassing: cpSpentAmassing.get(grp.g) ?? 0, canAmass: false,
         isReserve, threatened, atDefensePos,
+        groupType: typeOfGroup(grp.g),
+        enemyInChargeRange: enemyDist <= combat.chargeReach,
+        enemyInPlay: enemyDist <= combat.engageRange,
+        holdsCentre,
       });
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;
@@ -227,6 +245,29 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         // attackTarget only ranks units front-to-back so the rear ranks (nearest the breach) lead.
         if (state.issueOrder(grp.g, { mode: 'march', heading, attackTarget: { ...tgt }, looseFormation: true }, 'march')) {
           cpSpent += CP_COSTS.march;
+          lastDecisionTick.set(grp.g, state.tick);
+        }
+        continue;
+      }
+
+      if (action === 'charge') {
+        if (order?.mode === 'charge' || !nearestEnemy) continue;   // already lancing / no target
+        if (cpSpent + CP_COSTS.charge > budget) continue;
+        // charge, like march, advances AND lances along `heading` — aim it at the nearest enemy.
+        const heading = headingToward(centroidOf(grp.groupUnits), nearestEnemy.tacticalHex);
+        if (state.issueOrder(grp.g, { mode: 'charge', heading }, 'charge')) {
+          cpSpent += CP_COSTS.charge;
+          lastDecisionTick.set(grp.g, state.tick);
+        }
+        continue;
+      }
+
+      if (action === 'unleash') {
+        if (order?.mode === 'unleash') continue;                   // already committed to the unleash
+        if (cpSpent + CP_COSTS.unleash > budget) continue;
+        // unleash self-acquires targets and kites at missile range — no heading to aim.
+        if (state.issueOrder(grp.g, { mode: 'unleash' }, 'unleash')) {
+          cpSpent += CP_COSTS.unleash;
           lastDecisionTick.set(grp.g, state.tick);
         }
         continue;

@@ -3,9 +3,16 @@
   "rules": [
     { "when": { "isReserve": true, "threatened": true, "atDefensePos": true }, "do": "hold" },
     { "when": { "isReserve": true, "threatened": true }, "do": "defend" },
+    { "when": { "groupType": "cavalry", "enemyInChargeRange": true }, "do": "charge" },
+    { "when": { "groupType": "skirmisher", "enemyInPlay": true }, "do": "unleash" },
+    { "when": { "groupType": "infantry", "holdsCentre": true }, "do": "hold" },
     { "when": { "canAmass": true, "cpSpentAmassingLt": 100 }, "do": "amass" },
     { "do": "march" }
   ],
+  "combat": {
+    "chargeReach": 5,
+    "engageRange": 5
+  },
   "counter": {
     "vpWeight": 0.6,
     "pressureWeight": 0.4,

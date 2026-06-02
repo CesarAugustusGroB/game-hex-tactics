@@ -42,6 +42,14 @@ export interface CounterConfig {
   raidWatchRadius: number;
 }
 
+/** Combat engagement thresholds (hex distances) for the per-type fighting rules. */
+export interface CombatConfig {
+  /** Enemy within this distance of a cavalry group triggers a charge. */
+  chargeReach: number;
+  /** Enemy within this distance of a group counts as "in play" (skirmisher unleash). */
+  engageRange: number;
+}
+
 export interface AiConfig {
   /** CP a group may spend amassing before it marches (referenced by the `cpSpentAmassingLt`
    *  condition in the default ruleset). */
@@ -49,6 +57,7 @@ export interface AiConfig {
   /** Authored behaviour: ordered `condition → action` rules, first match wins. */
   rules: AiRule[];
   counter: CounterConfig;
+  combat: CombatConfig;
   doctrines: Record<Doctrine, DoctrineConfig>;
   difficulties: Record<Difficulty, DifficultyConfig>;
 }

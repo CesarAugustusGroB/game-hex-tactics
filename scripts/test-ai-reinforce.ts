@@ -57,10 +57,19 @@ function run(redArmy: boolean): { firstPlaced: number; laterPlaced: number; star
       units.push({ id: `r${id++}`, team: 'red', unitType: 'infantry', tacticalHex: h, homeHex: h,
         groupId: 1, hp: MAX_HP_BY_TYPE.infantry, state: 'idle', nextMoveTick: 0, visionRadius: 1 });
     }
+    // Red advances on the centre too, so the two armies actually collide and blue takes the losses
+    // that drive reinforcement. With Tier 2 the AI holds the centre / charges rather than marching
+    // straight through a static enemy, so a stationary red would never produce any casualties.
+    orders.set('red:1', { team: 'red', groupId: 1, attackTarget: { q: 0, r: 0 }, heading: 2, looseFormation: true });
   }
   let firstPlaced = 0, laterPlaced = 0, startAvgR = 0;
   for (let i = 0; i < 40; i++) {
     tick++;
+    // Catastrophic loss: wipe blue's group 1 mid-battle and verify the AI rebuilds it from the
+    // roster (reinforcement = re-amass of an emptied band). Forced rather than emergent — with
+    // Tier 2 the AI holds/charges and rarely loses a WHOLE band to a 40-tick skirmish, so relying
+    // on combat to annihilate one is brittle.
+    if (redArmy && i === 15) units = units.filter(u => !(u.team === 'blue' && u.groupId === 1));
     cp = { red: Math.min(200, cp.red + 0.1), blue: Math.min(200, cp.blue + 0.1) };
     const hasAi = !!(getAiController('red') || getAiController('blue'));
     if (units.length === 0 && !hasAi) continue;

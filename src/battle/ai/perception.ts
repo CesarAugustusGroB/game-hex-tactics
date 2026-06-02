@@ -37,7 +37,7 @@ export interface PerceiveOptions {
 }
 
 // The 7-hex capture flower is fixed for the whole battle, so build its keyset once.
-const CENTER_KEYS: ReadonlySet<string> = new Set(
+export const CENTER_KEYS: ReadonlySet<string> = new Set(
   [CAPTURE_CENTER, ...HexUtils.getNeighbors(CAPTURE_CENTER)].map(HexUtils.key),
 );
 
