@@ -764,13 +764,9 @@ const HUDInner: React.FC<HUDProps> = ({
                           onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
                           style={{
                             ...btnBase,
-                            background: retreatDisabled ? 'rgba(255,255,255,0.04)'
-                              : (!canAfford(selectedTeam, retreatIntent)) ? UNAFFORD_BG
-                              : 'rgba(255,255,255,0.04)',
+                            background: 'rgba(255,255,255,0.04)',
                             color: retreatDisabled ? '#475569' : '#3b82f6',
-                            border: retreatDisabled ? '1px solid rgba(255,255,255,0.1)'
-                              : (!canAfford(selectedTeam, retreatIntent)) ? UNAFFORD_BORDER
-                              : '1px solid rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.1)',
                             cursor: retreatDisabled ? 'not-allowed' : 'pointer',
                             opacity: retreatDisabled ? 0.5 : 1,
                           }}
