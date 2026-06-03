@@ -3,7 +3,7 @@ import gsap from 'gsap';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../../battle/simulate';
 import { planFollowerLegs, PX_PER_HEX } from './followerPath';
-import type { Unit, Team } from '../../battle/simulate';
+import type { Unit, Team, GroupId } from '../../battle/simulate';
 import { getTerrainMods, isWaterType } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
 import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, terrainMapFor, badgeForOrder, type Armies, type GroupOrders } from '../constants';
@@ -139,6 +139,7 @@ export interface UnitsRenderContext {
   currentStrategicHex: Hex | null;
   viewMode: 'STRATEGIC' | 'TACTICAL';
   selectedTeam: Team;
+  selectedGroup: GroupId;
   fogOfWar: boolean;
   // current world scale — read directly so GSAP dive tweens don't cause stale reads
   worldScale: number;
@@ -455,6 +456,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
 
     // Outline depends on same-team neighbours, which change as units move. clear()+redraw
     // reuses the Graphics object — no per-tick allocation.
+    const isSelGroup = u.team === ctx.selectedTeam && u.groupId === ctx.selectedGroup;
     v.outline.clear();
     for (let k = 0; k < 6; k++) {
       const dir = HexUtils.directions[(6 - k) % 6];
@@ -464,7 +466,9 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       const b = UNIT_VERTS[(k + 1) % 6];
       v.outline.moveTo(a.x, a.y).lineTo(b.x, b.y);
     }
-    v.outline.stroke({ color: teamColor, width: 3, alpha: 0.95 });
+    v.outline.stroke(isSelGroup
+      ? { color: 0xffffff, width: 4, alpha: 1 }
+      : { color: teamColor, width: 3, alpha: 0.95 });
 
     // sprite/shadow/marker visibility is LOD-only and owned by the PixiApp ticker; set at
     // create. unit-detail (HP bar, ★, →) is conditional → owned here, set every tick.
@@ -501,6 +505,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     v.glyph.visible = isLt && !isFar;
     if (isLt) {
       v.glyph.tint = badge.colorInt;
+      v.glyph.scale.set(isSelGroup ? 1.4 : 1);
       if (badge.glyph !== v.glyphChar) {
         v.glyph.text = badge.glyph;
         v.glyphChar = badge.glyph;
