@@ -641,7 +641,7 @@ const HUDInner: React.FC<HUDProps> = ({
                         opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      {chargeActive && chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : costLabel('CHARGE (E)', CP_COSTS.charge)}
+                      {chargeActive ? (chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : 'CHARGE (E)') : costLabel('CHARGE (E)', CP_COSTS.charge)}
                     </button>
                     {/* R — UNLEASH (one-way commit) */}
                     <button
@@ -693,11 +693,11 @@ const HUDInner: React.FC<HUDProps> = ({
                           style={{
                             ...btnBase, fontSize: '12px',
                             background: isMarching ? '#10b981'
-                              : (!canAfford(selectedTeam, marchIntent)) ? UNAFFORD_BG
+                              : (!isMarching && !canAfford(selectedTeam, marchIntent)) ? UNAFFORD_BG
                               : 'rgba(255,255,255,0.04)',
                             color: marchDisabled ? '#475569' : isMarching ? 'white' : '#94a3b8',
                             border: isMarching ? '1px solid #10b981'
-                              : (!canAfford(selectedTeam, marchIntent)) ? UNAFFORD_BORDER
+                              : (!isMarching && !canAfford(selectedTeam, marchIntent)) ? UNAFFORD_BORDER
                               : '1px solid rgba(255,255,255,0.1)',
                             cursor: marchDisabled ? 'not-allowed' : 'pointer',
                             opacity: marchDisabled ? 0.5 : 1,
@@ -742,9 +742,9 @@ const HUDInner: React.FC<HUDProps> = ({
                           onClick={() => { if (!banishDisabled) banishGroup(); }}
                           style={{
                             ...btnBase,
-                            background: banishDisabled ? 'rgba(255,255,255,0.04)' : UNAFFORD_BG,
+                            background: banishDisabled ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.12)',
                             color: banishDisabled ? '#475569' : '#ef4444',
-                            border: banishDisabled ? '1px solid rgba(255,255,255,0.1)' : UNAFFORD_BORDER,
+                            border: banishDisabled ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(239,68,68,0.55)',
                             cursor: banishDisabled ? 'not-allowed' : 'pointer',
                             opacity: banishDisabled ? 0.5 : 1,
                           }}
