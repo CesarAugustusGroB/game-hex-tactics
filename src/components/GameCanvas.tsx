@@ -804,7 +804,7 @@ export const GameCanvas: React.FC = () => {
 
   useGlobalShortcuts({
     viewMode, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
-    currentStrategicHexRef, inputModeRef, rostersRef,
+    currentStrategicHexRef, inputModeRef, rostersRef, armiesRef,
     setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
     setInputMode, setIsScanning, setArmies, clearOrder,
   });

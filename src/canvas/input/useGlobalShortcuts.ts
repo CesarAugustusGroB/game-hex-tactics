@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import type { Team, GroupId, UnitType } from '../../battle/simulate';
+import { GROUP_IDS } from '../constants';
 import type { InputMode, Rosters, Armies } from '../constants';
 
 export interface GlobalShortcutsCtx {
@@ -12,6 +13,7 @@ export interface GlobalShortcutsCtx {
   currentStrategicHexRef: MutableRefObject<Hex | null>;
   inputModeRef: MutableRefObject<InputMode | null>;
   rostersRef: MutableRefObject<Rosters>;
+  armiesRef: MutableRefObject<Armies>;
   setIsBattleRunning: Dispatch<SetStateAction<boolean>>;
   setSelectedTeam: Dispatch<SetStateAction<Team>>;
   setSelectedGroup: Dispatch<SetStateAction<GroupId>>;
@@ -24,7 +26,7 @@ export interface GlobalShortcutsCtx {
 
 export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
   const { viewMode, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
-    currentStrategicHexRef, inputModeRef, rostersRef,
+    currentStrategicHexRef, inputModeRef, rostersRef, armiesRef,
     setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
     setInputMode, setIsScanning, setArmies, clearOrder } = ctx;
 
@@ -34,9 +36,26 @@ export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (viewMode !== 'TACTICAL') return;
-      if (e.key === ' ') {
+      // Enter / P pause-toggle the battle.
+      if (e.key === 'Enter' || e.key === 'p' || e.key === 'P') {
         e.preventDefault();
         setIsBattleRunning(b => !b);
+        return;
+      }
+      // SPACE cycles selection to the next EMPTY group (the next one free to deploy into).
+      if (e.key === ' ') {
+        e.preventDefault();
+        const strategic = currentStrategicHexRef.current;
+        if (!strategic) return;
+        const team = selectedTeamRef.current;
+        const units = armiesRef.current.get(HexUtils.key(strategic)) ?? [];
+        const isEmpty = (g: GroupId) =>
+          !units.some(u => u.team === team && u.groupId === g && u.hp > 0);
+        const start = GROUP_IDS.indexOf(selectedGroupRef.current);
+        for (let i = 1; i <= GROUP_IDS.length; i++) {
+          const g = GROUP_IDS[(start + i) % GROUP_IDS.length];
+          if (isEmpty(g)) { setSelectedGroup(g); break; }
+        }
         return;
       }
       if (e.key === '<' || e.key === ',') {
@@ -80,7 +99,7 @@ export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [viewMode, clearOrder, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
-    currentStrategicHexRef, inputModeRef, rostersRef,
+    currentStrategicHexRef, inputModeRef, rostersRef, armiesRef,
     setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
     setInputMode, setIsScanning, setArmies]);
 }
