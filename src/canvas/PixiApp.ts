@@ -390,6 +390,10 @@ export function usePixiApp(ctx: PixiAppCtx): void {
       app.stage.on('pointerup', () => {
         if (ctx.orderDragRef.current) commitOrderDrag(odCtx);
         ctx.isDragging.current = false;
+        // Placement is a hold-and-drag stroke: releasing ends it AND exits place mode (the active
+        // Z/X/C selection clears). Each lay-down is one deliberate stroke — re-press Z/X/C to place
+        // more. isPaintingRef is only set in 'place' mode, so it's a safe "were we placing?" flag.
+        if (ctx.isPaintingRef.current) ctx.setInputMode(null);
         ctx.isPaintingRef.current = false;
         ctx.lastPaintedKeyRef.current = null;
       });

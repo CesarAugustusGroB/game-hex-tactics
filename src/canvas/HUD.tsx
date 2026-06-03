@@ -7,7 +7,12 @@ import type { InputMode, Armies, GroupOrders, Rosters } from './constants';
 import {
   COHORT_SIZE, RETREAT_REFUND_FRAC,
   TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS, isGroupEngaged, badgeForOrder,
+  CAPTURE_CENTER, CENTER_HOLD_REGEN_BONUS,
 } from './constants';
+
+// The 7-hex capture flower, built once — used to show who currently holds the centre.
+const CENTRE_KEYS = new Set([CAPTURE_CENTER, ...HexUtils.getNeighbors(CAPTURE_CENTER)].map(HexUtils.key));
+const CENTRE_REGEN_PCT = Math.round(CENTER_HOLD_REGEN_BONUS * 100);
 import type { TerrainDef } from './terrain-defs';
 import { CP_COSTS, type CpIntent } from '../battle/command-points';
 import { MAP_TYPE_IDS, type MapTypeId } from '../data/world-gen';
@@ -311,6 +316,24 @@ const HUDInner: React.FC<HUDProps> = ({
               </div>
             );
           })}
+          {(() => {
+            // Who holds the flag right now → +CENTRE_REGEN_PCT% CP regen (uncontested only).
+            const fu = currentStrategicHex ? (armies.get(HexUtils.key(currentStrategicHex)) ?? []) : [];
+            const red = fu.some(u => u.team === 'red' && u.hp > 0 && CENTRE_KEYS.has(HexUtils.key(u.tacticalHex)));
+            const blue = fu.some(u => u.team === 'blue' && u.hp > 0 && CENTRE_KEYS.has(HexUtils.key(u.tacticalHex)));
+            const holder = red && !blue ? 'red' : blue && !red ? 'blue' : null;
+            const label = holder
+              ? `🚩 ${holder.toUpperCase()} HOLDS CENTRE · +${CENTRE_REGEN_PCT}% CP REGEN`
+              : red && blue ? '🚩 CENTRE CONTESTED — NO BONUS'
+                : `🚩 CENTRE OPEN · +${CENTRE_REGEN_PCT}% CP TO WHOEVER HOLDS`;
+            return (
+              <div style={{
+                fontSize: '9px', fontWeight: 800, letterSpacing: '0.5px', textAlign: 'center', marginTop: '8px',
+                paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.08)',
+                color: holder ? (holder === 'red' ? '#ef4444' : '#3b82f6') : '#64748b',
+              }}>{label}</div>
+            );
+          })()}
         </div>
       )}
 
