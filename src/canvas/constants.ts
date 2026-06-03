@@ -1,5 +1,5 @@
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
-import type { Unit, UnitType, Team, GroupOrder, FormationType } from '../battle/simulate';
+import type { Unit, UnitType, Team, GroupOrder, FormationType, OrderMode } from '../battle/simulate';
 import {
   HEADING_ARROWS,
   INITIAL_ROSTER,
@@ -136,3 +136,28 @@ export const deployZoneFor = (team: Team, gridData: GridData): Set<string> => {
   return cacheDeployZones[team];
 };
 
+// Shared order→glyph/color mapping — single source of truth for the HUD accordion
+// (src/canvas/HUD.tsx) and the on-canvas group glyph (src/canvas/render/drawUnits.ts).
+// Glyphs are monochrome single letters on purpose: PIXI .tint colors a white letter
+// reliably but muddies multicolor emoji. `label` carries the full word for the HUD.
+export interface OrderBadge {
+  glyph: string;
+  label: string;
+  colorHex: string; // for CSS (HUD)
+  colorInt: number; // for PIXI .tint
+}
+
+export const ORDER_BADGE: Record<OrderMode | 'none', OrderBadge> = {
+  hold:    { glyph: 'H', label: 'HOLD',    colorHex: '#f59e0b', colorInt: 0xf59e0b },
+  march:   { glyph: 'M', label: 'MARCH',   colorHex: '#10b981', colorInt: 0x10b981 },
+  charge:  { glyph: 'C', label: 'CHARGE',  colorHex: '#dc2626', colorInt: 0xdc2626 },
+  unleash: { glyph: 'U', label: 'UNLEASH', colorHex: '#a855f7', colorInt: 0xa855f7 },
+  retreat: { glyph: 'R', label: 'RETREAT', colorHex: '#3b82f6', colorInt: 0x3b82f6 },
+  idle:    { glyph: 'I', label: 'IDLE',    colorHex: '#64748b', colorInt: 0x64748b },
+  none:    { glyph: '·', label: '—', colorHex: '#64748b', colorInt: 0x64748b },
+};
+
+// No order entry => 'none' (freshly deployed). Order entry without an explicit mode =>
+// 'march' (the sim's movement default).
+export const badgeForOrder = (order?: { mode?: OrderMode } | null): OrderBadge =>
+  order ? ORDER_BADGE[order.mode ?? 'march'] : ORDER_BADGE.none;

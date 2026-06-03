@@ -3,10 +3,10 @@ import gsap from 'gsap';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../../battle/simulate';
 import { planFollowerLegs, PX_PER_HEX } from './followerPath';
-import type { Unit, Team } from '../../battle/simulate';
+import type { Unit, Team, GroupId } from '../../battle/simulate';
 import { getTerrainMods, isWaterType } from '../../battle/terrain';
 import { TERRAINS } from '../terrain-defs';
-import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, terrainMapFor, type Armies, type GroupOrders } from '../constants';
+import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, terrainMapFor, badgeForOrder, type Armies, type GroupOrders } from '../constants';
 import { spawnMovementDust } from './movementFx';
 
 // Axial-disk offsets (distance <= r) precomputed once per radius — replaces a per-call
@@ -46,6 +46,9 @@ const HP_BAR_Y = -40;
 const BADGE_Y = -44;
 // Gold ★ / → style for lieutenant markers — shared with the order-drag preview.
 export const STAR_STYLE = { fontSize: 14, fontWeight: '900' as const, fill: 0xfacc15, stroke: { color: 0x000000, width: 2 } };
+// Order glyph above the lieutenant. White base so PIXI .tint colors it per order mode.
+const GLYPH_STYLE = { fontSize: 13, fontWeight: '900' as const, fill: 0xffffff, stroke: { color: 0x000000, width: 3 } };
+const GLYPH_X = -15; // sits left of the ★ (x=0); → arrow is at x=14 on the right
 
 // Kill EVERY GSAP tween bound to a unit container before destroy. Killing only the
 // container + its position MISSES the children — the unit-sprite carries the melee lunge
@@ -78,6 +81,8 @@ interface UnitVisual {
   star: PIXI.Text;
   arrow: PIXI.Text;
   arrowHeading: string;
+  glyph: PIXI.Text;
+  glyphChar: string;
 }
 // `_path`: pending move waypoints (hex centers) the visual still has to walk through, each
 // tagged with the px/sec speed for that leg. A per-frame follower (advanceUnitFollowers)
@@ -142,6 +147,7 @@ export interface UnitsRenderContext {
   currentStrategicHex: Hex | null;
   viewMode: 'STRATEGIC' | 'TACTICAL';
   selectedTeam: Team;
+  selectedGroup: GroupId;
   fogOfWar: boolean;
   // current world scale — read directly so GSAP dive tweens don't cause stale reads
   worldScale: number;
@@ -236,7 +242,15 @@ function createUnitVisual(
   arrow.visible = false;
   container.addChild(arrow);
 
-  return { marker, outline, shadow, sprite, soldierTex: tex, afloat: false, hpBg, hpFg, star, arrow, arrowHeading: '→' };
+  const glyph = new PIXI.Text({ text: '·', style: GLYPH_STYLE });
+  glyph.anchor.set(0.5);
+  glyph.x = GLYPH_X;
+  glyph.y = BADGE_Y;
+  glyph.label = 'unit-detail';
+  glyph.visible = false;
+  container.addChild(glyph);
+
+  return { marker, outline, shadow, sprite, soldierTex: tex, afloat: false, hpBg, hpFg, star, arrow, arrowHeading: '→', glyph, glyphChar: '·' };
 }
 
 export function drawUnits(ctx: UnitsRenderContext): void {
@@ -453,6 +467,7 @@ export function drawUnits(ctx: UnitsRenderContext): void {
 
     // Outline depends on same-team neighbours, which change as units move. clear()+redraw
     // reuses the Graphics object — no per-tick allocation.
+    const isSelGroup = u.team === ctx.selectedTeam && u.groupId === ctx.selectedGroup;
     v.outline.clear();
     for (let k = 0; k < 6; k++) {
       const dir = HexUtils.directions[(6 - k) % 6];
@@ -462,7 +477,9 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       const b = UNIT_VERTS[(k + 1) % 6];
       v.outline.moveTo(a.x, a.y).lineTo(b.x, b.y);
     }
-    v.outline.stroke({ color: teamColor, width: 3, alpha: 0.95 });
+    v.outline.stroke(isSelGroup
+      ? { color: 0xffffff, width: 4, alpha: 1 }
+      : { color: teamColor, width: 3, alpha: 0.95 });
 
     // sprite/shadow/marker visibility is LOD-only and owned by the PixiApp ticker; set at
     // create. unit-detail (HP bar, ★, →) is conditional → owned here, set every tick.
@@ -490,6 +507,19 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       if (heading !== v.arrowHeading) {
         v.arrow.text = heading;
         v.arrowHeading = heading;
+      }
+    }
+
+    // Order glyph: shown for every lieutenant (one per group). Colored per order mode via
+    // .tint (cheap); .text only re-set when the glyph char changes (Text re-raster is costly).
+    const badge = badgeForOrder(order);
+    v.glyph.visible = isLt && !isFar;
+    if (isLt) {
+      v.glyph.tint = badge.colorInt;
+      v.glyph.scale.set(isSelGroup ? 1.4 : 1);
+      if (badge.glyph !== v.glyphChar) {
+        v.glyph.text = badge.glyph;
+        v.glyphChar = badge.glyph;
       }
     }
   });

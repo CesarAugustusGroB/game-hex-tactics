@@ -260,10 +260,11 @@ export const GameCanvas: React.FC = () => {
       currentStrategicHex,
       viewMode,
       selectedTeam,
+      selectedGroup,
       fogOfWar,
       worldScale: worldRef.current.scale.x,
     });
-  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam]);
+  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam, selectedGroup]);
 
   // Order mutation helpers declared up here (before the mount useEffect / interval useEffect
   // that capture them) so the closures inside those long-lived handlers can resolve the

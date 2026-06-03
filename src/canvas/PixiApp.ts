@@ -398,6 +398,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         if (ctx.isDragging.current) return;
         // Order commits in pointerup (captures drag direction); pointertap is a no-op.
         if (ctx.inputModeRef.current === 'order') return;
+        if (ctx.inputModeRef.current === 'place') return;
         const local = world.toLocal(e.global);
         const hex = HexUtils.pixelToHex({ x: local.x, y: local.y });
         if (ctx.isScanningRef.current) {
