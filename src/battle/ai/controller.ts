@@ -12,12 +12,22 @@ import { evaluateRules, type RuleCtx } from './rules';
 import { perceive, CENTER_KEYS } from './perception';
 import type { Unit } from '../simulate';
 
-// Team-forward heading index: red marches up (dir 2), blue marches down (dir 5).
+// Team-forward / backward heading indices — the only two STRAIGHT (vertical, Δx=0) directions.
+// red marches up (dir 2) / back down (5); blue marches down (dir 5) / back up (2).
 const forwardHeading = (team: Team): number => (team === 'red' ? 2 : 5);
+const backwardHeading = (team: Team): number => (team === 'red' ? 5 : 2);
 
-// March moves along `heading` (one of 6 fixed dirs), NOT toward attackTarget — so to send a
-// group toward an arbitrary hex (e.g. a raid behind our line) we pick the heading whose single
-// step lands closest to the target.
+// March moves along `heading` (one of 6 fixed dirs), NOT toward attackTarget. We deliberately
+// restrict every AI march to the two VERTICAL headings (no diagonal steering): forward if the
+// target sits ahead of the group, backward if behind. Lateral positioning is done by deployment.
+const straightHeading = (team: Team, from: Hex, to: Hex): number => {
+  const sign = team === 'red' ? -1 : 1;
+  const depth = (h: Hex) => sign * HexUtils.hexToPixel(h).y;
+  return depth(to) >= depth(from) ? forwardHeading(team) : backwardHeading(team);
+};
+
+// Charge still aims freely (it's a lance, not a march): pick the heading whose single step lands
+// closest to the target.
 const headingToward = (from: Hex, to: Hex): number => {
   let best = 0, bestD = Infinity;
   HexUtils.directions.forEach((d, i) => {
@@ -310,9 +320,9 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         // yet (only in grp.size) → no positions to average; it acts next tick. Guards centroidOf([]).
         if (grp.groupUnits.length === 0) continue;
         const tgt = action === 'defend' ? threat.raidThreatHex! : myHalfThreatHex!;
-        // Re-issue only when the needed heading actually changes — keying the skip on attackTarget
-        // proximity would leave a stale heading when a moving threat needs a new direction.
-        const heading = headingToward(centroidOf(grp.groupUnits), tgt);
+        // Re-issue only when the needed heading actually changes. STRAIGHT (vertical) heading only —
+        // no diagonal march; the deploy-at-breach step covers lateral coverage.
+        const heading = straightHeading(state.team, centroidOf(grp.groupUnits), tgt);
         if (order?.mode === 'march' && order.heading === heading) continue;
         if (cpSpent + CP_COSTS.march > budget) continue;
         if (state.issueOrder(grp.g, { mode: 'march', heading, attackTarget: { ...tgt }, looseFormation: true }, 'march')) {

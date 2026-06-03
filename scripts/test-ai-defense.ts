@@ -54,10 +54,10 @@ function tick(blue: Unit[], red: Unit[], gid: GroupId = 4): GroupOrder | undefin
   check('reserve HOLDS when in contact with the raid', o?.mode === 'hold', `mode=${o?.mode}`);
 }
 
-// --- Defend: reserve far from a breach marches back toward it ---
+// --- Defend: reserve marches STRAIGHT (never diagonal) toward a breach ahead of it ---
 {
   const reserve = [u('b1', 'blue', { q: -3, r: -8 }, 4), u('b2', 'blue', { q: -2, r: -8 }, 4)];
-  const raider = [u('r1', 'red', { q: 3, r: -9 }, 1)];   // in my zone, far from the reserve
+  const raider = [u('r1', 'red', { q: -2, r: -6 }, 1)];   // in my zone, ahead of the reserve
   const o = tick(reserve, raider);
   const threat = perceive({ myUnits: reserve, enemyUnits: raider, deployZone: zone });
   const from = { q: -2, r: -8 };                          // reserve centroid (rounded)
@@ -71,8 +71,8 @@ function tick(blue: Unit[], red: Unit[], gid: GroupId = 4): GroupOrder | undefin
     !!o?.attackTarget && HexUtils.distance(o.attackTarget, threat.raidThreatHex!) <= 1
     && !(o.attackTarget.q === CAPTURE_CENTER.q && o.attackTarget.r === CAPTURE_CENTER.r),
     `target=${JSON.stringify(o?.attackTarget)} threat=${JSON.stringify(threat.raidThreatHex)}`);
-  check('defend heading points the reserve toward the breach (closes distance)', stepped < here,
-    `here=${here} stepped=${stepped} heading=${o?.heading}`);
+  check('defend heading is STRAIGHT (vertical 2/5), never diagonal', o?.heading === 2 || o?.heading === 5, `heading=${o?.heading}`);
+  check('defend heading advances toward the breach', stepped < here, `here=${here} stepped=${stepped}`);
 }
 
 // --- Release: no threat → reserve reverts to the centre push ---
