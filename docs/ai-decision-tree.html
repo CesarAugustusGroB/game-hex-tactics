@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hex-tactics · Árbol de decisiones de la IA</title>
+<style>
+  :root{
+    --bg:#0e1216; --panel:#161c23; --panel2:#1d252e; --line:#2a3540;
+    --ink:#e8eef3; --dim:#93a3b1; --faint:#64727f;
+    --amass:#6b7280; --march:#3b82f6; --defend:#f59e0b; --hold:#10b981;
+    --charge:#ef4444; --unleash:#a855f7;
+    --t0:#38bdf8; --t1:#f59e0b; --tcounter:#ec4899; --t2:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 24px 80px}
+  h1{font-size:26px;margin:0 0 4px;letter-spacing:.2px}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:1.5px;color:var(--dim);
+    margin:38px 0 14px;border-bottom:1px solid var(--line);padding-bottom:8px}
+  .sub{color:var(--faint);margin:0 0 24px;font-size:13px}
+  code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.86em;
+    background:#0b0f13;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#cbd5e1}
+  .grid{display:grid;gap:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+
+  /* pipeline */
+  .pipe{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px}
+  .pstep{flex:1 1 165px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative}
+  .pstep b{display:block;font-size:13px;margin-bottom:3px}
+  .pstep span{color:var(--dim);font-size:12px}
+  .pstep .n{position:absolute;top:-9px;left:12px;background:var(--t0);color:#06121a;font-weight:700;
+    font-size:11px;border-radius:50%;width:20px;height:20px;display:grid;place-items:center}
+
+  /* decision flow */
+  .flow{counter-reset:r}
+  .rule{display:grid;grid-template-columns:34px 1fr auto;gap:0;align-items:stretch;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+  .rule .idx{background:var(--panel2);display:grid;place-items:center;font-weight:700;color:var(--dim);font-size:13px}
+  .rule .cond{padding:13px 16px}
+  .rule .cond .when{color:var(--dim);font-size:11px;letter-spacing:1px;text-transform:uppercase}
+  .rule .cond .terms{margin-top:4px}
+  .rule .cond .note{color:var(--faint);font-size:12px;margin-top:6px}
+  .rule .act{min-width:230px;border-left:1px solid var(--line);padding:13px 16px;display:flex;flex-direction:column;gap:3px}
+  .rule .act .label{font-weight:700;font-size:14px;text-transform:uppercase;letter-spacing:.6px}
+  .rule .act .eff{color:var(--dim);font-size:12px}
+  .rule .act .cp{color:var(--faint);font-size:11px;margin-top:2px}
+  .fallthrough{color:var(--faint);font-size:11px;text-align:center;margin:-3px 0 6px;letter-spacing:.5px}
+  .pill{display:inline-block;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:600;margin:2px 4px 2px 0;
+    background:var(--panel2);border:1px solid var(--line)}
+  .pill.k{color:#bfe9ff;border-color:#274b5c}
+  .tier{font-size:10px;font-weight:700;letter-spacing:1px;border-radius:4px;padding:1px 6px;color:#0b0f13}
+
+  /* action color spines */
+  .a-amass{border-left:4px solid var(--amass)} .a-amass .label{color:var(--amass)}
+  .a-march{border-left:4px solid var(--march)} .a-march .label{color:var(--march)}
+  .a-defend{border-left:4px solid var(--defend)} .a-defend .label{color:var(--defend)}
+  .a-hold{border-left:4px solid var(--hold)} .a-hold .label{color:var(--hold)}
+  .a-charge{border-left:4px solid var(--charge)} .a-charge .label{color:var(--charge)}
+  .a-unleash{border-left:4px solid var(--unleash)} .a-unleash .label{color:var(--unleash)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  td code{font-size:.9em}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.two{grid-template-columns:1fr}}
+  .formula{font-family:ui-monospace,monospace;background:#0b0f13;border:1px solid var(--line);
+    border-radius:8px;padding:12px 14px;font-size:13px;color:#cbd5e1;overflow-x:auto}
+  .formula .c{color:var(--tcounter)} .formula .d{color:var(--dim)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 18px}
+  .legend span{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .tiers{display:flex;flex-wrap:wrap;gap:10px}
+  .tcard{flex:1 1 200px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .tcard .h{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .tcard .h b{font-size:14px}
+  .tcard p{margin:0;color:var(--dim);font-size:12.5px}
+  .done{color:#10b981;font-weight:700;font-size:12px}
+  .todo{color:var(--faint);font-weight:700;font-size:12px}
+  .foot{color:var(--faint);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Árbol de decisiones de la IA <span style="color:var(--faint);font-weight:400">· hex-tactics</span></h1>
+  <p class="sub">Solo el equipo <code>blue</code> tiene IA. Snapshot del comportamiento autorado en <code>src/data/ai.json</code> + <code>src/battle/ai/</code>. Cada tick: percibe → calcula peligro → despliega (amass) → decide por grupo (abajo).</p>
+
+  <h2>Pipeline por tick</h2>
+  <div class="pipe">
+    <div class="pstep"><span class="n">1</span><b>perceive(state)</b><span>Lee enemigos + geometría: breachers/raiders en mi zona, control del centro, centroide enemigo.</span></div>
+    <div class="pstep"><span class="n">2</span><b>danger ∈ [0,1]</b><span>Mezcla déficit de VP + presión de raids. Baja el umbral de lanzamiento.</span></div>
+    <div class="pstep"><span class="n">3</span><b>amass</b><span>Cada banda coloca cohortes hasta <code>bandShare</code> (round-robin, gated por CP).</span></div>
+    <div class="pstep"><span class="n">4</span><b>frontReady?</b><span>Banda lista al llegar a <code>launchShare</code> (= bandShare·(1−0.75·danger)) o si ya no crece.</span></div>
+    <div class="pstep"><span class="n">5</span><b>decide por grupo</b><span>Evalúa la lista de reglas (primera que matchea gana) y emite la orden.</span></div>
+  </div>
+
+  <h2>El árbol de decisión por grupo (primera regla que matchea gana)</h2>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--t1)"></i>Tier 1 · defensa de reserva</span>
+    <span><i class="dot" style="background:var(--t2)"></i>Tier 2 · combate por tipo</span>
+    <span><i class="dot" style="background:var(--amass)"></i>despliegue / fallback</span>
+  </div>
+
+  <div class="flow">
+
+    <div class="rule a-hold">
+      <div class="idx">1</div>
+      <div class="cond">
+        <div class="when">WHEN <span class="tier" style="background:var(--t1)">T1</span></div>
+        <div class="terms"><span class="pill k">isReserve</span><span class="pill k">threatened</span><span class="pill k">atDefensePos</span></div>
+        <div class="note">La reserva ya está en contacto con un raider en mi zona → ancla.</div>
+      </div>
+      <div class="act"><span class="label">hold</span><span class="eff">Aguanta en el sitio · −40% daño (fortaleza)</span><span class="cp">4 CP</span></div>
+    </div>
+
+    <div class="rule a-defend">
+      <div class="idx">2</div>
+      <div class="cond">
+        <div class="when">WHEN <span class="tier" style="background:var(--t1)">T1</span></div>
+        <div class="terms"><span class="pill k">isReserve</span><span class="pill k">threatened</span></div>
+        <div class="note">Enemigo en/acercándose a mi deploy zone → la reserva marcha a interceptar (<code>heading</code> apuntado a la brecha).</div>
+      </div>
+      <div class="act"><span class="label">defend</span><span class="eff">March → raidThreatHex</span><span class="cp">2 CP</span></div>
+    </div>
+
+    <div class="rule a-charge">
+      <div class="idx">3</div>
+      <div class="cond">
+        <div class="when">WHEN <span class="tier" style="background:var(--t2)">T2</span></div>
+        <div class="terms"><span class="pill k">groupType = cavalry</span><span class="pill k">enemyInChargeRange</span></div>
+        <div class="note">Caballería con enemigo a ≤ <code>chargeReach</code> (5) hex → carga al más cercano. Impacto 52 ignora defensa/hold/altura.</div>
+      </div>
+      <div class="act"><span class="label">charge</span><span class="eff">Lanza along heading → enemigo más cercano</span><span class="cp">6 CP</span></div>
+    </div>
+
+    <div class="rule a-unleash">
+      <div class="idx">4</div>
+      <div class="cond">
+        <div class="when">WHEN <span class="tier" style="background:var(--t2)">T2</span></div>
+        <div class="terms"><span class="pill k">groupType = skirmisher</span><span class="pill k">enemyInPlay</span></div>
+        <div class="note">Escaramuzador con enemigo a ≤ <code>engageRange</code> (5) → unleash: patea y dispara a rango 3 (6.5/tick gratis).</div>
+      </div>
+      <div class="act"><span class="label">unleash</span><span class="eff">Per-unit kite + misiles (se auto-dirige)</span><span class="cp">6 CP</span></div>
+    </div>
+
+    <div class="rule a-hold">
+      <div class="idx">5</div>
+      <div class="cond">
+        <div class="when">WHEN <span class="tier" style="background:var(--t2)">T2</span></div>
+        <div class="terms"><span class="pill k">groupType = infantry</span><span class="pill k">holdsCentre</span></div>
+        <div class="note">Infantería con un pie en la flor central → holdea: fortaleza −40% y farmea 1 VP/tick.</div>
+      </div>
+      <div class="act"><span class="label">hold</span><span class="eff">Ancla el centro capturado</span><span class="cp">4 CP</span></div>
+    </div>
+
+    <div class="rule a-amass">
+      <div class="idx">6</div>
+      <div class="cond">
+        <div class="when">WHEN</div>
+        <div class="terms"><span class="pill">canAmass</span><span class="pill">cpSpentAmassing &lt; 100</span></div>
+        <div class="note">Fase de despliegue: la banda aún cabe (no sellada, &lt; bandShare, hay roster y hueco).</div>
+      </div>
+      <div class="act"><span class="label">amass</span><span class="eff">Coloca una cohorte (4 uds) en la banda</span><span class="cp">2 CP / cohorte</span></div>
+    </div>
+
+    <div class="fallthrough">↓ si nada matchea (catch-all) ↓</div>
+
+    <div class="rule a-march">
+      <div class="idx">7</div>
+      <div class="cond">
+        <div class="when">DEFAULT</div>
+        <div class="terms"><span class="pill">— sin condición —</span></div>
+        <div class="note">Empuje al objetivo. Gated por <code>frontReady</code> mientras la banda sigue en la zona.</div>
+      </div>
+      <div class="act"><span class="label">march</span><span class="eff">March (loose) → centro (0,0)</span><span class="cp">2 CP · 4 el 1er march/grupo</span></div>
+    </div>
+
+  </div>
+
+  <h2>Los "facts" que alimentan las reglas</h2>
+  <div class="panel">
+    <table>
+      <tr><th>Fact</th><th>Significado</th><th>De dónde sale</th></tr>
+      <tr><td><code>isReserve</code></td><td>El grupo es la banda de reserva (grupo 4)</td><td>doctrina · <code>GROUP_IDS[front.length]</code></td></tr>
+      <tr><td><code>threatened</code></td><td>Hay enemigo en/acercándose a mi deploy zone</td><td>perceive → breachers ∪ raiders</td></tr>
+      <tr><td><code>atDefensePos</code></td><td>Una unidad de la reserva está adyacente a la amenaza</td><td>distancia ≤ 1 a breacher/raider</td></tr>
+      <tr><td><code>groupType</code></td><td>Tipo de unidad de la banda (homogénea)</td><td>doctrina · <code>typeOfGroup(g)</code></td></tr>
+      <tr><td><code>enemyInChargeRange</code></td><td>Enemigo a ≤ chargeReach del grupo</td><td>nearest enemy ≤ 5</td></tr>
+      <tr><td><code>enemyInPlay</code></td><td>Enemigo a ≤ engageRange del grupo</td><td>nearest enemy ≤ 5</td></tr>
+      <tr><td><code>holdsCentre</code></td><td>El grupo tiene una unidad en la flor central</td><td>CENTER_KEYS (7 hex)</td></tr>
+      <tr><td><code>canAmass</code></td><td>Banda no sellada, &lt; bandShare, con roster y hueco</td><td>estado de despliegue</td></tr>
+    </table>
+  </div>
+
+  <h2>Contraataque · cuánto peligro baja el umbral de lanzamiento</h2>
+  <div class="two">
+    <div class="panel">
+      <div class="formula">
+<span class="d">// VP: cercanía del rival a ganar + mi déficit</span>
+vpDanger = 0.5·(enemyScore/200)
+         + 0.5·(max(0, enemyScore−myScore)/200)
+
+<span class="d">// presión observable</span>
+pressure = 0.34·breachers + 0.17·raiders
+         + 0.30·(rival holdea centro)
+
+<span class="c">danger</span> = clamp(0.6·vpDanger + 0.4·pressure, 0,1)
+      </div>
+    </div>
+    <div class="panel">
+      <div class="formula">
+<span class="d">// umbral de unidades para lanzar el frente</span>
+launchShare = max(4,
+   ⌈ bandShare · (1 − 0.75·<span class="c">danger</span>) ⌉ )
+
+<span class="d">// danger=0  → launchShare = bandShare (espera lleno)</span>
+<span class="d">// danger=1  → launchShare ≈ 25% (contraataca ya)</span>
+
+frontReady = toda banda ≥ launchShare
+             o ya no puede crecer
+      </div>
+    </div>
+  </div>
+
+  <h2>Doctrinas &amp; dificultad</h2>
+  <div class="two">
+    <div class="panel">
+      <table>
+        <tr><th>Doctrina</th><th>G1</th><th>G2</th><th>G3</th><th>Reserva (G4)</th></tr>
+        <tr><td>balanced</td><td>infantry</td><td>cavalry</td><td>skirmisher</td><td>infantry</td></tr>
+        <tr><td>aggressive</td><td>cavalry</td><td>infantry</td><td>skirmisher</td><td>cavalry</td></tr>
+        <tr><td>defensive</td><td>skirmisher</td><td>cavalry</td><td>infantry</td><td>skirmisher</td></tr>
+      </table>
+    </div>
+    <div class="panel">
+      <table>
+        <tr><th>Dificultad</th><th>reactionTicks</th><th>cpBudgetFrac</th><th>forceScale</th></tr>
+        <tr><td>easy</td><td>12</td><td>0.5</td><td>0.6</td></tr>
+        <tr><td>normal</td><td>6</td><td>0.8</td><td>0.85</td></tr>
+        <tr><td>hard</td><td>2</td><td>1.0</td><td>1.0</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2>Progreso por tiers</h2>
+  <div class="tiers">
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--t0)"></i><b>Tier 0 · Percepción</b><span class="done">✓ HECHO</span></div>
+      <p>"Los ojos": <code>perceive()</code> puro. Breachers/raiders, control del centro, centroide enemigo. Cimiento de todo lo reactivo.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--t1)"></i><b>Tier 1 · Defensa reserva</b><span class="done">✓ HECHO</span></div>
+      <p>La reserva intercepta raids a mi zona: march a la brecha → hold. Cierra el exploit de farmear mi retaguardia.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--tcounter)"></i><b>Contraataque</b><span class="done">✓ HECHO</span></div>
+      <p>danger (VP + presión) baja el umbral: si voy perdiendo, lanzo el frente con menos unidades amasadas.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--t2)"></i><b>Tier 2 · Combate</b><span class="done">✓ HECHO</span></div>
+      <p>Cavalry carga, skirmisher unleash (kite), infantry holdea el centro. Cada tipo pelea con su asimetría.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--faint)"></i><b>Tier 3 · Terreno</b><span class="todo">PENDIENTE</span></div>
+      <p>Rutar por moveCost bajo, evitar RIVER/SNOW, buscar altura para el bonus de daño y para holdear.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--faint)"></i><b>Tier 4 · Foco de fuego</b><span class="todo">PENDIENTE</span></div>
+      <p>Concentrar en el clúster enemigo más débil/cercano en vez de apuntar siempre al centro abstracto.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--faint)"></i><b>Tier 5 · Estrategia VP</b><span class="todo">PENDIENTE</span></div>
+      <p>Jugar según el marcador: holdear si gano, abrir un 2º eje de raids si pierdo.</p></div>
+    <div class="tcard"><div class="h"><i class="dot" style="background:var(--faint)"></i><b>Retirada / banish</b><span class="todo">PENDIENTE</span></div>
+      <p>Retirar grupos heridos y banish-con-reembolso (requiere nueva capacidad en AiTickState).</p></div>
+  </div>
+
+  <p class="foot">Generado desde el estado de la rama <code>feature/systems</code>. Reglas/tunables: <code>src/data/ai.json</code> · lógica: <code>src/battle/ai/{controller,perception,rules}.ts</code> · cobertura: <code>scripts/test-ai-{perception,defense,counter,combat}.ts</code>.</p>
+
+</div>
+</body>
+</html>
