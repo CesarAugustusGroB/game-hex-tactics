@@ -6,7 +6,7 @@ import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '.
 import type { InputMode, Armies, GroupOrders, Rosters } from './constants';
 import {
   POINTS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
-  TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS, isGroupEngaged,
+  TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS, isGroupEngaged, badgeForOrder,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
 import { CP_COSTS, type CpIntent } from '../battle/command-points';
@@ -128,6 +128,43 @@ const cpInputStyle: React.CSSProperties = {
   background: 'rgba(0,0,0,0.5)', color: '#f8fafc',
   border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px',
   fontSize: '11px', fontWeight: 800, textAlign: 'center',
+};
+
+const GroupSummaryRow: React.FC<{
+  gid: GroupId;
+  count: number;
+  order: import('../battle/simulate').GroupOrder | undefined;
+  isSealed: boolean;
+  isActiveFill: boolean;
+  onSelect: () => void;
+}> = ({ gid, count, order, isSealed, isActiveFill, onSelect }) => {
+  const badge = badgeForOrder(order);
+  const empty = count === 0;
+  return (
+    <button
+      onClick={onSelect}
+      title={`Select G${gid} (shortcut: ${gid})`}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+        padding: '8px 10px', marginBottom: '6px', borderRadius: '8px',
+        background: 'rgba(255,255,255,0.03)',
+        border: isActiveFill ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.06)',
+        color: '#cbd5e1', cursor: 'pointer', textAlign: 'left',
+        fontSize: '11px', fontWeight: 700,
+        opacity: isSealed ? 0.82 : empty ? 0.6 : 1,
+      }}
+    >
+      <span style={{ fontWeight: 900 }}>G{gid}</span>
+      <span style={{
+        width: '7px', height: '7px', borderRadius: '50%',
+        background: badge.colorHex, display: 'inline-block',
+      }} />
+      <span style={{ color: badge.colorHex, fontWeight: 800 }}>{empty ? '—' : badge.label}</span>
+      <span style={{ marginLeft: 'auto', color: '#64748b', fontWeight: 600 }}>
+        ×{count}{isSealed ? ' 🔒' : isActiveFill ? ' ▶' : ''}
+      </span>
+    </button>
+  );
 };
 
 // Memoized: GameCanvas re-renders on high-frequency state unrelated to the HUD (hover,
@@ -503,12 +540,25 @@ const HUDInner: React.FC<HUDProps> = ({
                 flex: 1, padding: '6px 4px', fontSize: '10px', fontWeight: 800,
                 borderRadius: '8px', letterSpacing: '0.5px',
               };
+              if (!isSelectedRow) {
+                return (
+                  <GroupSummaryRow
+                    key={gid}
+                    gid={gid}
+                    count={count}
+                    order={order}
+                    isSealed={isSealed}
+                    isActiveFill={isActiveFill}
+                    onSelect={() => setSelectedGroup(gid)}
+                  />
+                );
+              }
               return (
                 <div key={gid} style={{
                   marginBottom: '6px',
                   padding: '4px 6px',
-                  borderLeft: isSelectedRow ? `3px solid ${teamColorHex}` : isActiveFill ? '3px solid #10b981' : '3px solid transparent',
-                  background: isSelectedRow ? `${teamColorHex}14` : isActiveFill ? '#10b98114' : 'transparent',
+                  borderLeft: `3px solid ${teamColorHex}`,
+                  background: `${teamColorHex}14`,
                   borderRadius: '6px',
                   opacity: isSealed ? 0.82 : 1,
                   transition: 'background 120ms, border-color 120ms',
