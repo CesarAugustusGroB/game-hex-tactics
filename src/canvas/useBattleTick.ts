@@ -12,7 +12,7 @@ import { applyRegen, debit, CP_REGEN_PER_TICK_STEP, type CommandPoints } from '.
 import { spawnMeleeEffects } from './render/meleeFx';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
-  POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
+  POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK, CENTER_HOLD_REGEN_BONUS,
   COHORT_SIZE, INITIAL_ROSTER,
   captureZoneKeys, deployZoneFor, terrainMapFor, gridKeySetFor,
   type Armies, type GroupOrders, type Rosters,
@@ -83,7 +83,15 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
       };
       ctx.tickCounterRef.current += 1;
       const cpBefore = ctx.commandPointsRef.current;
-      const cpAfter = applyRegen(cpBefore, CP_REGEN_PER_TICK_STEP * ctx.cpRegenRef.current, ctx.cpMaxRef.current);
+      // Whoever uncontestedly holds the centre flag regens CP faster (+CENTER_HOLD_REGEN_BONUS).
+      const holdsCentre = (team: Team) =>
+        units.some(u => u.team === team && u.hp > 0 && CENTER_ZONE_KEYS.has(HexUtils.key(u.tacticalHex)));
+      const redCentre = holdsCentre('red'), blueCentre = holdsCentre('blue');
+      const centreHolder: Team | null = redCentre && !blueCentre ? 'red' : blueCentre && !redCentre ? 'blue' : null;
+      const cpAfter = applyRegen(
+        cpBefore, CP_REGEN_PER_TICK_STEP * ctx.cpRegenRef.current, ctx.cpMaxRef.current,
+        centreHolder, CENTER_HOLD_REGEN_BONUS,
+      );
       if (cpAfter !== cpBefore) {
         ctx.commandPointsRef.current = cpAfter;
         ctx.setCommandPoints(cpAfter);

@@ -60,13 +60,18 @@ export function applyCap(cp: CommandPoints, cap: number): CommandPoints {
 }
 
 /** Returns new CommandPoints with both teams gaining `amountPerTick` CP, clamped to `cap`.
+ *  `bonusTeam` (the team uncontestedly holding the centre flag) gains `amountPerTick * (1 + bonusFrac)`.
  *  Called every tick; CP accrues fractionally (rounded to 0.01 to avoid float drift).
  *  Returns the input unchanged when nothing moves. */
-export function applyRegen(cp: CommandPoints, amountPerTick: number, cap: number = CP_CAP): CommandPoints {
+export function applyRegen(
+  cp: CommandPoints, amountPerTick: number, cap: number = CP_CAP,
+  bonusTeam: Team | null = null, bonusFrac = 0,
+): CommandPoints {
   if (amountPerTick <= 0) return cp;
-  const grow = (v: number) => Math.min(cap, Math.round((v + amountPerTick) * 100) / 100);
-  const r = grow(cp.red);
-  const b = grow(cp.blue);
+  const gain = (t: Team) => amountPerTick * (t === bonusTeam ? 1 + bonusFrac : 1);
+  const grow = (v: number, t: Team) => Math.min(cap, Math.round((v + gain(t)) * 100) / 100);
+  const r = grow(cp.red, 'red');
+  const b = grow(cp.blue, 'blue');
   if (r === cp.red && b === cp.blue) return cp;
   return { red: r, blue: b };
 }

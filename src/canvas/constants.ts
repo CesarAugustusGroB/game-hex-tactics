@@ -18,6 +18,7 @@ import {
   POINTS_TO_WIN,
   POINTS_PER_UNIT_REACHED,
   CENTER_HOLD_POINTS_PER_TICK,
+  CENTER_HOLD_REGEN_BONUS,
 } from '../data/scoring';
 
 // Re-export under their legacy paths so existing consumers (HUD, render, input handlers,
@@ -46,6 +47,7 @@ export {
   POINTS_TO_WIN,
   POINTS_PER_UNIT_REACHED,
   CENTER_HOLD_POINTS_PER_TICK,
+  CENTER_HOLD_REGEN_BONUS,
 };
 
 export { STRATEGIC_RESOLUTION, DIVE_ZOOM } from '../data/world-gen';

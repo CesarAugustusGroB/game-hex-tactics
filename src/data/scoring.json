@@ -1,5 +1,6 @@
 {
   "pointsToWin": 200,
   "pointsPerUnitReached": 2,
-  "centerHoldPointsPerSecond": 2
+  "centerHoldPointsPerSecond": 2,
+  "centerHoldRegenBonus": 0.3
 }
