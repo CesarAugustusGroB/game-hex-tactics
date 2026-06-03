@@ -1,7 +1,7 @@
 import React from 'react';
 import { HexUtils } from '../hex-engine/HexUtils';
 import type { Hex } from '../hex-engine/HexUtils';
-import type { OrderMode, Team, GroupId, UnitType } from '../battle/simulate';
+import type { OrderMode, Team, GroupId, UnitType, GroupOrder } from '../battle/simulate';
 import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '../battle/simulate';
 import type { InputMode, Armies, GroupOrders, Rosters } from './constants';
 import {
@@ -133,7 +133,7 @@ const cpInputStyle: React.CSSProperties = {
 const GroupSummaryRow: React.FC<{
   gid: GroupId;
   count: number;
-  order: import('../battle/simulate').GroupOrder | undefined;
+  order: GroupOrder | undefined;
   isSealed: boolean;
   isActiveFill: boolean;
   onSelect: () => void;
@@ -519,6 +519,19 @@ const HUDInner: React.FC<HUDProps> = ({
               const teamColorHex = `#${teamColor.toString(16).padStart(6, '0')}`;
               const formationKey = groupOrderKey(selectedTeam, gid);
               const order = groupOrders.get(formationKey);
+              if (!isSelectedRow) {
+                return (
+                  <GroupSummaryRow
+                    key={gid}
+                    gid={gid}
+                    count={count}
+                    order={order}
+                    isSealed={isSealed}
+                    isActiveFill={isActiveFill}
+                    onSelect={() => setSelectedGroup(gid)}
+                  />
+                );
+              }
               const canHold = !!order?.attackTarget;
               const committed = !!order?.committed;
               // Post-unleash lock: every interaction except RETREAT is disabled. The
@@ -540,19 +553,6 @@ const HUDInner: React.FC<HUDProps> = ({
                 flex: 1, padding: '6px 4px', fontSize: '10px', fontWeight: 800,
                 borderRadius: '8px', letterSpacing: '0.5px',
               };
-              if (!isSelectedRow) {
-                return (
-                  <GroupSummaryRow
-                    key={gid}
-                    gid={gid}
-                    count={count}
-                    order={order}
-                    isSealed={isSealed}
-                    isActiveFill={isActiveFill}
-                    onSelect={() => setSelectedGroup(gid)}
-                  />
-                );
-              }
               return (
                 <div key={gid} style={{
                   marginBottom: '6px',
