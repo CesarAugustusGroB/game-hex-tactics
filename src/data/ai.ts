@@ -55,6 +55,14 @@ export interface CombatConfig {
   repelPerGroup: number;
 }
 
+/** Score-aware posture: when behind on VP, convert front bands into raiders. */
+export interface StrategyConfig {
+  /** Behind by this fraction of pointsToWin (enemyScore − myScore) → start raiding. */
+  raidDeficitFrac: number;
+  /** How many front bands (lowest-numbered) become raiders while losing. */
+  raidGroups: number;
+}
+
 export interface AiConfig {
   /** CP a group may spend amassing before it marches (referenced by the `cpSpentAmassingLt`
    *  condition in the default ruleset). */
@@ -63,6 +71,7 @@ export interface AiConfig {
   rules: AiRule[];
   counter: CounterConfig;
   combat: CombatConfig;
+  strategy: StrategyConfig;
   doctrines: Record<Doctrine, DoctrineConfig>;
   difficulties: Record<Difficulty, DifficultyConfig>;
 }

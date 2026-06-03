@@ -107,6 +107,15 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     const homelandThreat = inMyHalf.length >= combat.homelandRepelThreshold;
     const myHalfThreatHex = inMyHalf.length > 0 ? centroidOf(inMyHalf) : null;
 
+    // Score-aware posture: when behind on VP by raidDeficitFrac of the win target, the lowest-
+    // numbered front bands become RAIDERS that push through the centre to the enemy line (a second
+    // scoring axis). Leading/level keeps the default contest-the-centre + defend posture.
+    const strat = AI.strategy;
+    const losing = enemyScore - myScore >= winTarget * strat.raidDeficitFrac;
+    const raiderSet: ReadonlySet<GroupId> = losing
+      ? new Set(GROUP_IDS.slice(0, Math.min(doc.front.length, strat.raidGroups)))
+      : new Set<GroupId>();
+
     if (targetUnits < 0) {
       // Half the zone is the hard-difficulty ceiling; forceScale shrinks it so easier AIs field a
       // smaller standing army. bandShare spreads the cap WIDE across the four bands, not deep.
@@ -237,7 +246,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         groupType: typeOfGroup(grp.g),
         enemyInChargeRange: enemyDist <= combat.chargeReach,
         enemyInPlay: enemyDist <= combat.engageRange,
-        holdsCentre, homelandThreat: repelSet.has(grp.g),
+        holdsCentre, homelandThreat: repelSet.has(grp.g), raider: raiderSet.has(grp.g),
       });
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;
@@ -268,6 +277,21 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         if (order?.mode === 'march' && order.heading === heading) continue;
         if (cpSpent + CP_COSTS.march > budget) continue;
         if (state.issueOrder(grp.g, { mode: 'march', heading, attackTarget: { ...tgt }, looseFormation: true }, 'march')) {
+          cpSpent += CP_COSTS.march;
+          lastDecisionTick.set(grp.g, state.tick);
+        }
+        continue;
+      }
+
+      if (action === 'raid') {
+        if (grp.groupUnits.length === 0) continue;
+        // Push forward THROUGH the centre to the enemy back line. March follows heading, so the deep
+        // forward target is just front-to-back ranking; the heading carries the band across to raid.
+        const fwd = HexUtils.directions[forwardHeading(state.team)];
+        const tgt = { q: CAPTURE_CENTER.q + fwd.q * 20, r: CAPTURE_CENTER.r + fwd.r * 20 };
+        if (order?.mode === 'march' && order.attackTarget?.q === tgt.q && order.attackTarget?.r === tgt.r) continue;
+        if (cpSpent + CP_COSTS.march > budget) continue;
+        if (state.issueOrder(grp.g, { mode: 'march', heading: forwardHeading(state.team), attackTarget: tgt, looseFormation: true }, 'march')) {
           cpSpent += CP_COSTS.march;
           lastDecisionTick.set(grp.g, state.tick);
         }

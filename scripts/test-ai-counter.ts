@@ -57,10 +57,13 @@ const isCentreMarch = (o?: GroupOrder) =>
   check('safe: partial front band HOLDS (no launch)', o === undefined, `order=${JSON.stringify(o)}`);
 }
 
-// --- Losing on VP: danger lowers the bar → the same partial band launches ---
+// --- Losing on VP → the partial band LAUNCHES rather than holding in the zone. (When this far
+// behind it raids FORWARD past the centre — Tier 5 — which is still a launch; the centre-bound
+// launchShare path is covered by the pressure cases below, which carry no VP deficit.) ---
 {
-  const o = launchOrder({ myScore: 0, enemyScore: 180 });   // enemy near 200
-  check('VP danger: partial band COUNTERATTACKS to centre', isCentreMarch(o), `order=${JSON.stringify(o)}`);
+  const o = launchOrder({ myScore: 0, enemyScore: 180 });   // enemy near 200 → losing → raid
+  check('VP danger: partial band LAUNCHES (does not hold in the zone)', o?.mode === 'march',
+    `order=${JSON.stringify(o)}`);
 }
 
 // --- Under raid pressure (no VP gap): breachers in our zone also lower the bar ---
