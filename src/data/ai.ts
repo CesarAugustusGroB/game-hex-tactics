@@ -48,6 +48,8 @@ export interface CombatConfig {
   chargeReach: number;
   /** Enemy within this distance of a group counts as "in play" (skirmisher unleash). */
   engageRange: number;
+  /** This many enemies past the centre into our own half triggers an all-groups repel. */
+  homelandRepelThreshold: number;
 }
 
 export interface AiConfig {

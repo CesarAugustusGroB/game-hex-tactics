@@ -87,5 +87,28 @@ const isCentreMarch = (o?: GroupOrder) =>
   check('infantry off the flower marches to the centre', isCentreMarch(tick(infField, [], 1)));
 }
 
+// --- Homeland repel: a mass past the centre in our half makes EVERY group march to intercept,
+// overriding per-type combat (cavalry repels instead of charging). ---
+{
+  // 6 reds at r=-1 (py<0 → blue's half), q far from 0 so they're not raiders (3 hexes from the
+  // r=-4 zone edge) and don't sit on the centre flower. centroid ≈ (-2,-1).
+  const mass = [-5, -4, -3, -2, -1, 1].map(q => u(`r${q}`, 'red', { q, r: -1 }, 1));
+  const cav = [u('b1', 'blue', { q: 0, r: 3 }, 2, 'cavalry')];   // group 2 = cavalry; a foe is in charge range
+  const o = tick(cav, mass, 2);
+  const expected = { q: -2, r: -1 };
+  const from = { q: 0, r: 3 };
+  const here = HexUtils.distance(from, expected);
+  const stepped = o ? HexUtils.distance(
+    { q: from.q + HexUtils.directions[o.heading].q, r: from.r + HexUtils.directions[o.heading].r }, expected) : here;
+  check('homeland repel: cavalry MARCHES to the mass (does not charge)', o?.mode === 'march',
+    `mode=${o?.mode}`);
+  check('repel targets the mass in our half, not the centre',
+    !!o?.attackTarget && HexUtils.distance(o.attackTarget, expected) <= 1
+    && !(o.attackTarget.q === CAPTURE_CENTER.q && o.attackTarget.r === CAPTURE_CENTER.r),
+    `target=${JSON.stringify(o?.attackTarget)} expected≈${JSON.stringify(expected)}`);
+  check('repel heading points back at the mass (closes distance)', stepped < here,
+    `here=${here} stepped=${stepped}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail > 0 ? 1 : 0);

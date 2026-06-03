@@ -97,6 +97,15 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       + threat.raiders.length * c.raiderWeight
       + (threat.centerControl === 'enemy' ? c.enemyCenterWeight : 0);
     const danger = Math.min(1, Math.max(0, c.vpWeight * Math.min(1, vpDanger) + c.pressureWeight * Math.min(1, pressure)));
+
+    // Enemies that have pushed PAST the centre flag into OUR half (toward our deploy zone). A
+    // losing-size mass here would raid through and cost the battle, so it overrides the per-type
+    // combat rules: every group marches to intercept the mass (crude all-in for now; tactical later).
+    const centreY = HexUtils.hexToPixel(CAPTURE_CENTER).y;
+    const inMyHalf = liveEnemies.filter(e => frontSign * (HexUtils.hexToPixel(e.tacticalHex).y - centreY) < 0);
+    const homelandThreat = inMyHalf.length >= combat.homelandRepelThreshold;
+    const myHalfThreatHex = inMyHalf.length > 0 ? centroidOf(inMyHalf) : null;
+
     if (targetUnits < 0) {
       // Half the zone is the hard-difficulty ceiling; forceScale shrinks it so easier AIs field a
       // smaller standing army. bandShare spreads the cap WIDE across the four bands, not deep.
@@ -214,7 +223,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         groupType: typeOfGroup(grp.g),
         enemyInChargeRange: enemyDist <= combat.chargeReach,
         enemyInPlay: enemyDist <= combat.engageRange,
-        holdsCentre,
+        holdsCentre, homelandThreat,
       });
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;
@@ -231,18 +240,19 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         continue;
       }
 
-      if (action === 'defend') {
-        const tgt = threat.raidThreatHex!;
-        // A cohort placed THIS tick isn't in grp.groupUnits yet (only in grp.size) → no positions to
-        // average; it defends next tick once it's in the snapshot. Guards centroidOf([]) → NaN heading.
+      if (action === 'defend' || action === 'repel') {
+        // defend = the reserve plugs a raid on our deploy zone; repel = EVERY group turns back to
+        // intercept a mass that pushed into our half. Both march to a hex — heading aimed at it
+        // (march follows heading, not attackTarget; attackTarget only ranks units front-to-back so
+        // the rear ranks, nearest the threat, lead). A cohort placed THIS tick isn't in the snapshot
+        // yet (only in grp.size) → no positions to average; it acts next tick. Guards centroidOf([]).
         if (grp.groupUnits.length === 0) continue;
-        // March moves along `heading` (not attackTarget), so aim the heading at the raid behind us.
+        const tgt = action === 'defend' ? threat.raidThreatHex! : myHalfThreatHex!;
         // Re-issue only when the needed heading actually changes — keying the skip on attackTarget
         // proximity would leave a stale heading when a moving threat needs a new direction.
         const heading = headingToward(centroidOf(grp.groupUnits), tgt);
         if (order?.mode === 'march' && order.heading === heading) continue;
         if (cpSpent + CP_COSTS.march > budget) continue;
-        // attackTarget only ranks units front-to-back so the rear ranks (nearest the breach) lead.
         if (state.issueOrder(grp.g, { mode: 'march', heading, attackTarget: { ...tgt }, looseFormation: true }, 'march')) {
           cpSpent += CP_COSTS.march;
           lastDecisionTick.set(grp.g, state.tick);

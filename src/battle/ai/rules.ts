@@ -11,8 +11,9 @@ import type { UnitType } from '../simulate';
  *  - defend:  march back to the threatened spot on our own line (raid interception).
  *  - hold:    stand and anchor with the defensive damage reduction.
  *  - charge:  cavalry lance into a nearby enemy (impact bypasses defence).
- *  - unleash: skirmisher per-unit kite + missile harassment. */
-export type AiAction = 'amass' | 'march' | 'defend' | 'hold' | 'charge' | 'unleash';
+ *  - unleash: skirmisher per-unit kite + missile harassment.
+ *  - repel:   emergency — a mass has pushed into our half; ALL groups march to intercept it. */
+export type AiAction = 'amass' | 'march' | 'defend' | 'hold' | 'charge' | 'unleash' | 'repel';
 
 /** Facts a rule can test. `when` is an AND of the present keys (absent keys are ignored).
  *  The perception fields (`isReserve`/`threatened`/`atDefensePos`) are optional: the deploy
@@ -42,6 +43,8 @@ export interface RuleCtx {
   enemyInPlay?: boolean;
   /** This group has a unit standing on the central capture flower. */
   holdsCentre?: boolean;
+  /** A losing-size enemy mass has pushed past the centre into our own half (team-wide fact). */
+  homelandThreat?: boolean;
 }
 
 export interface RuleCondition {
@@ -55,6 +58,7 @@ export interface RuleCondition {
   enemyInChargeRange?: boolean;
   enemyInPlay?: boolean;
   holdsCentre?: boolean;
+  homelandThreat?: boolean;
   /** Matches when `cpSpentAmassing` is strictly below this value. */
   cpSpentAmassingLt?: number;
 }
@@ -77,6 +81,7 @@ const matches = (when: RuleCondition | undefined, ctx: RuleCtx): boolean => {
   if (when.enemyInChargeRange !== undefined && when.enemyInChargeRange !== ctx.enemyInChargeRange) return false;
   if (when.enemyInPlay !== undefined && when.enemyInPlay !== ctx.enemyInPlay) return false;
   if (when.holdsCentre !== undefined && when.holdsCentre !== ctx.holdsCentre) return false;
+  if (when.homelandThreat !== undefined && when.homelandThreat !== ctx.homelandThreat) return false;
   if (when.cpSpentAmassingLt !== undefined && !(ctx.cpSpentAmassing < when.cpSpentAmassingLt)) return false;
   return true;
 };
