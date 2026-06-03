@@ -90,8 +90,9 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // Blend absolute enemy progress toward the win with how far they're ahead of us, so a lead of
     // our own genuinely lowers the alarm. (max(enemyScore, enemyScore - myScore) collapsed to just
     // enemyScore for any myScore ≥ 0 — the deficit term never counted.)
-    const enemyProgress = enemyScore / POINTS_TO_WIN;
-    const deficit = Math.max(0, enemyScore - myScore) / POINTS_TO_WIN;
+    const winTarget = state.pointsToWin ?? POINTS_TO_WIN;
+    const enemyProgress = enemyScore / winTarget;
+    const deficit = Math.max(0, enemyScore - myScore) / winTarget;
     const vpDanger = 0.5 * enemyProgress + 0.5 * deficit;
     const pressure = threat.breachers.length * c.breacherWeight
       + threat.raiders.length * c.raiderWeight

@@ -12,7 +12,7 @@ import { applyRegen, debit, CP_REGEN_PER_TICK_STEP, type CommandPoints } from '.
 import { spawnMeleeEffects } from './render/meleeFx';
 import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
-  POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
+  POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK,
   COHORT_SIZE, INITIAL_ROSTER,
   captureZoneKeys, deployZoneFor, terrainMapFor, gridKeySetFor,
   type Armies, type GroupOrders, type Rosters,
@@ -50,6 +50,7 @@ export interface BattleTickCtx {
   setCommandPoints: Dispatch<SetStateAction<CommandPoints>>;
   cpRegenRef: MutableRefObject<number>;
   cpMaxRef: MutableRefObject<number>;
+  pointsToWinRef: MutableRefObject<number>;
   // Group-order keys whose firstMarch surcharge is already paid this battle. Pruned here
   // when a group empties so a recycled slot re-pays firstMarch.
   marchedGroupsRef: MutableRefObject<Set<string>>;
@@ -108,6 +109,7 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
             cp: ctx.commandPointsRef.current[team],
             myScore: ctx.scoreRef.current[team],
             enemyScore: ctx.scoreRef.current[team === 'red' ? 'blue' : 'red'],
+            pointsToWin: ctx.pointsToWinRef.current,
             roster: ctx.rostersRef.current.get(team) ?? { ...INITIAL_ROSTER },
             deployZone: deployZones[team],
             placeCohort: (gid, anchor, unitType: UnitType) => {
@@ -251,7 +253,7 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
         centerKeys: CENTER_ZONE_KEYS,
         scoringZone: { red: deployZones.blue, blue: deployZones.red },
         config: {
-          pointsToWin: POINTS_TO_WIN,
+          pointsToWin: ctx.pointsToWinRef.current,
           pointsPerUnitReached: POINTS_PER_UNIT_REACHED,
           centerHoldPointsPerTick: CENTER_HOLD_POINTS_PER_TICK,
         },

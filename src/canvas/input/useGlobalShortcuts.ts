@@ -22,13 +22,14 @@ export interface GlobalShortcutsCtx {
   setIsScanning: Dispatch<SetStateAction<boolean>>;
   setArmies: Dispatch<SetStateAction<Armies>>;
   clearOrder: (team: Team, gid: GroupId) => void;
+  banishGroup: (gid?: GroupId) => void;
 }
 
 export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
   const { viewMode, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
     currentStrategicHexRef, inputModeRef, rostersRef, armiesRef,
     setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
-    setInputMode, setIsScanning, setArmies, clearOrder } = ctx;
+    setInputMode, setIsScanning, setArmies, clearOrder, banishGroup } = ctx;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -42,19 +43,27 @@ export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
         setIsBattleRunning(b => !b);
         return;
       }
-      // SPACE cycles selection to the next EMPTY group (the next one free to deploy into).
       if (e.key === ' ') {
         e.preventDefault();
         const strategic = currentStrategicHexRef.current;
         if (!strategic) return;
         const team = selectedTeamRef.current;
         const units = armiesRef.current.get(HexUtils.key(strategic)) ?? [];
-        const isEmpty = (g: GroupId) =>
-          !units.some(u => u.team === team && u.groupId === g && u.hp > 0);
+        const count = (g: GroupId) =>
+          units.filter(u => u.team === team && u.groupId === g && u.hp > 0).length;
+        if (e.shiftKey) {
+          // Shift+SPACE: banish the smallest non-empty group (refund + recycle) and select its slot.
+          const live = GROUP_IDS.filter(g => count(g) > 0).sort((a, b) => count(a) - count(b) || a - b);
+          if (live.length === 0) return;
+          banishGroup(live[0]);
+          setSelectedGroup(live[0]);
+          return;
+        }
+        // SPACE: cycle selection to the next EMPTY group (the next one free to deploy into).
         const start = GROUP_IDS.indexOf(selectedGroupRef.current);
         for (let i = 1; i <= GROUP_IDS.length; i++) {
           const g = GROUP_IDS[(start + i) % GROUP_IDS.length];
-          if (isEmpty(g)) { setSelectedGroup(g); break; }
+          if (count(g) === 0) { setSelectedGroup(g); break; }
         }
         return;
       }
@@ -101,5 +110,5 @@ export function useGlobalShortcuts(ctx: GlobalShortcutsCtx): void {
   }, [viewMode, clearOrder, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
     currentStrategicHexRef, inputModeRef, rostersRef, armiesRef,
     setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
-    setInputMode, setIsScanning, setArmies]);
+    setInputMode, setIsScanning, setArmies, banishGroup]);
 }

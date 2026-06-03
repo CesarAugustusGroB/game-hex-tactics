@@ -5,7 +5,7 @@ import type { OrderMode, Team, GroupId, UnitType, GroupOrder } from '../battle/s
 import { HOLD_REDUCTION_PER_TICK, HOLD_REDUCTION_CAP, cycleConeHeading } from '../battle/simulate';
 import type { InputMode, Armies, GroupOrders, Rosters } from './constants';
 import {
-  POINTS_TO_WIN, COHORT_SIZE, RETREAT_REFUND_FRAC,
+  COHORT_SIZE, RETREAT_REFUND_FRAC,
   TEAM_TINTS, HEADING_ARROWS, groupOrderKey, GROUP_IDS, isGroupEngaged, badgeForOrder,
 } from './constants';
 import type { TerrainDef } from './terrain-defs';
@@ -49,6 +49,8 @@ export interface HUDProps {
   cpRegenN: number;
   setCpMax: (v: number) => void;
   setCpRegenN: (v: number) => void;
+  pointsToWin: number;
+  setPointsToWin: (v: number) => void;
   // computed
   curT: TerrainDef | null;
   // setters
@@ -193,6 +195,8 @@ const HUDInner: React.FC<HUDProps> = ({
   cpRegenN,
   setCpMax,
   setCpRegenN,
+  pointsToWin,
+  setPointsToWin,
   curT,
   setIsScanning,
   setShowGrid,
@@ -279,13 +283,16 @@ const HUDInner: React.FC<HUDProps> = ({
         }}>
           <div style={{
             fontSize: '10px', color: '#facc15', fontWeight: 800, letterSpacing: '2px',
-            marginBottom: '8px', textAlign: 'center',
+            marginBottom: '8px', textAlign: 'center', pointerEvents: 'auto',
           }}>
-            VICTORY POINTS — FIRST TO {POINTS_TO_WIN}
+            VICTORY POINTS — FIRST TO{' '}
+            <input type="number" min={1} max={9999} value={pointsToWin}
+              onChange={e => setPointsToWin(Number(e.target.value))}
+              style={{ ...cpInputStyle, width: '54px' }} />
           </div>
           {(['red', 'blue'] as const).map(team => {
             const v = score[team];
-            const pct = Math.min(100, (v / POINTS_TO_WIN) * 100);
+            const pct = Math.min(100, (v / pointsToWin) * 100);
             const color = team === 'red' ? '#ef4444' : '#3b82f6';
             return (
               <div key={team} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: team === 'red' ? '6px' : 0 }}>
@@ -299,7 +306,7 @@ const HUDInner: React.FC<HUDProps> = ({
                   <div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 0.3s ease' }} />
                 </div>
                 <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 700, width: '40px', textAlign: 'right' }}>
-                  {Math.round(v)}/{POINTS_TO_WIN}
+                  {Math.round(v)}/{pointsToWin}
                 </span>
               </div>
             );

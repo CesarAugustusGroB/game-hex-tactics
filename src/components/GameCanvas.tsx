@@ -12,7 +12,7 @@ import {
   INITIAL_ROSTER, RETREAT_REFUND_FRAC,
   makeInitialRosters,
   groupOrderKey,
-  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged,
+  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged, POINTS_TO_WIN,
 } from '../canvas/constants';
 import {
   type CommandPoints, type CpIntent,
@@ -140,7 +140,7 @@ export const GameCanvas: React.FC = () => {
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
   const [rosters, setRosters] = useState<Rosters>(makeInitialRosters);
   const [isBattleRunning, setIsBattleRunning] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(true);
   const [aiDoctrine, setAiDoctrine] = useState<Doctrine>('balanced');
   const [aiDifficulty, setAiDifficulty] = useState<Difficulty>('normal');
   // Set true once terrain-related textures (currently just grass) finish loading.
@@ -387,6 +387,15 @@ export const GameCanvas: React.FC = () => {
     cpRegenRef.current = clamped;
     setCpRegenNState(clamped);
   }, []);
+  // Runtime-tunable victory-point target (default from scoring.json). Mirrored into a ref so the
+  // tick loop's win check reads the live value; a battle in progress respects an edit immediately.
+  const [pointsToWin, setPointsToWinState] = useState(POINTS_TO_WIN);
+  const pointsToWinRef = useRef(POINTS_TO_WIN);
+  const setPointsToWin = useCallback((v: number) => {
+    const clamped = Math.max(1, Math.min(9999, Math.round(v || 0)));
+    pointsToWinRef.current = clamped;
+    setPointsToWinState(clamped);
+  }, []);
 
   const canAfford = useCallback((team: Team, intent: CpIntent): boolean => {
     return canAffordPure(commandPointsRef.current, team, intent);
@@ -563,6 +572,7 @@ export const GameCanvas: React.FC = () => {
     setCommandPoints,
     cpRegenRef,
     cpMaxRef,
+    pointsToWinRef,
     marchedGroupsRef,
     setMarchedGroups,
     scheduleTimeout,
@@ -806,7 +816,7 @@ export const GameCanvas: React.FC = () => {
     viewMode, selectedTeamRef, selectedGroupRef, selectedUnitTypeRef,
     currentStrategicHexRef, inputModeRef, rostersRef, armiesRef,
     setIsBattleRunning, setSelectedTeam, setSelectedGroup, setSelectedUnitType,
-    setInputMode, setIsScanning, setArmies, clearOrder,
+    setInputMode, setIsScanning, setArmies, clearOrder, banishGroup,
   });
 
   useEffect(() => { drawMap(); }, [gridData, drawMap]);
@@ -896,6 +906,8 @@ export const GameCanvas: React.FC = () => {
       cpRegenN={cpRegenN}
       setCpMax={setCpMax}
       setCpRegenN={setCpRegenN}
+      pointsToWin={pointsToWin}
+      setPointsToWin={setPointsToWin}
       aiEnabled={aiEnabled}
       aiDoctrine={aiDoctrine}
       aiDifficulty={aiDifficulty}

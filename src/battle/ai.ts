@@ -36,6 +36,8 @@ export interface AiTickState {
    *  signal. Drives the counterattack threshold (more deficit → launch with fewer units). */
   myScore?: number;
   enemyScore?: number;
+  /** The live victory-point target (runtime-tunable). Omitted → POINTS_TO_WIN default. */
+  pointsToWin?: number;
   /** Undeployed units left in this team's roster, by type. */
   roster: Readonly<Record<UnitType, number>>;
   /** Hex keys of this team's deploy zone (host-computed via deployZoneFor). */
