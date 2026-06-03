@@ -96,23 +96,12 @@ const MAP_TYPE_LABELS: Record<string, string> = {
   random: 'RANDOM',
 };
 
-const CostChip: React.FC<{ cost: number; affordable: boolean }> = ({ cost, affordable }) => {
-  if (cost === 0) return null;
-  return (
-    <span style={{
-      position: 'absolute',
-      top: '-5px', right: '-5px',
-      background: affordable ? '#facc15' : '#ef4444',
-      color: affordable ? '#0b1220' : 'white',
-      borderRadius: '8px',
-      padding: '1px 5px',
-      fontSize: '8px',
-      fontWeight: 900,
-      border: '1px solid #0b1220',
-      pointerEvents: 'none',
-    }}>{cost}</span>
-  );
-};
+const costLabel = (text: string, cost: number): string =>
+  cost > 0 ? `${text} · ${cost}` : text;
+
+// red tint applied to a button when the team cannot afford the action
+const UNAFFORD_BG = 'rgba(239,68,68,0.12)';
+const UNAFFORD_BORDER = '1px solid rgba(239,68,68,0.55)';
 
 const PANEL_BASE: React.CSSProperties = {
   position: 'absolute', top: 24, color: '#f8fafc', background: 'rgba(15, 23, 42, 0.85)',
@@ -461,8 +450,7 @@ const HUDInner: React.FC<HUDProps> = ({
                   transition: '0.2s',
                 }}
               >
-                {samePlacing ? `STOP ${keyHint}` : `${label} ×${remaining} ${keyHint}`}
-                {!samePlacing && <CostChip cost={CP_COSTS.placeCohort} affordable={canAfford(selectedTeam, 'placeCohort')} />}
+                {samePlacing ? `STOP ${keyHint}` : costLabel(`${label} ×${remaining} ${keyHint}`, CP_COSTS.placeCohort)}
               </button>
             );
           })}
@@ -593,15 +581,17 @@ const HUDInner: React.FC<HUDProps> = ({
                       }}
                       style={{
                         ...btnBase,
-                        position: 'relative',
-                        background: orderActive ? teamColorHex : 'rgba(255,255,255,0.04)',
+                        background: orderActive ? teamColorHex
+                          : (!orderActive && !canAfford(selectedTeam, 'orderDrag')) ? UNAFFORD_BG
+                          : 'rgba(255,255,255,0.04)',
                         color: count === 0 ? '#475569' : orderActive ? 'white' : '#94a3b8',
-                        border: orderActive ? `1px solid ${teamColorHex}` : '1px solid rgba(255,255,255,0.1)',
+                        border: orderActive ? `1px solid ${teamColorHex}`
+                          : (!orderActive && !canAfford(selectedTeam, 'orderDrag')) ? UNAFFORD_BORDER
+                          : '1px solid rgba(255,255,255,0.1)',
                         cursor: count === 0 ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      DEPLOY (Q)
-                      {!orderActive && <CostChip cost={CP_COSTS.orderDrag} affordable={canAfford(selectedTeam, 'orderDrag')} />}
+                      {orderActive ? 'DEPLOY (Q)' : costLabel('DEPLOY (Q)', CP_COSTS.orderDrag)}
                     </button>
                     {/* W — HOLD: stand still + accrue defensive damage reduction up to a cap.
                         When the cap is reached the sim auto-flips the group to IDLE. */}
@@ -616,16 +606,18 @@ const HUDInner: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('hold'); }}
                       style={{
                         ...btnBase,
-                        position: 'relative',
-                        background: holdActive ? '#f59e0b' : 'rgba(255,255,255,0.04)',
+                        background: holdActive ? '#f59e0b'
+                          : (!holdActive && !canAfford(selectedTeam, 'hold')) ? UNAFFORD_BG
+                          : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : holdActive ? 'white' : '#94a3b8',
-                        border: holdActive ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
+                        border: holdActive ? '1px solid #f59e0b'
+                          : (!holdActive && !canAfford(selectedTeam, 'hold')) ? UNAFFORD_BORDER
+                          : '1px solid rgba(255,255,255,0.1)',
                         cursor: !canEdit ? 'not-allowed' : 'pointer',
                         opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      {holdActive ? `HOLD ${holdPct}% (W)` : 'HOLD (W)'}
-                      {!holdActive && <CostChip cost={CP_COSTS.hold} affordable={canAfford(selectedTeam, 'hold')} />}
+                      {holdActive ? `HOLD ${holdPct}% (W)` : costLabel('HOLD (W)', CP_COSTS.hold)}
                     </button>
                     {/* E — CHARGE */}
                     <button
@@ -638,16 +630,18 @@ const HUDInner: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('charge'); }}
                       style={{
                         ...btnBase,
-                        position: 'relative',
-                        background: chargeActive ? '#dc2626' : 'rgba(255,255,255,0.04)',
+                        background: chargeActive ? '#dc2626'
+                          : (!chargeActive && !canAfford(selectedTeam, 'charge')) ? UNAFFORD_BG
+                          : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : chargeActive ? 'white' : '#94a3b8',
-                        border: chargeActive ? '1px solid #dc2626' : '1px solid rgba(255,255,255,0.1)',
+                        border: chargeActive ? '1px solid #dc2626'
+                          : (!chargeActive && !canAfford(selectedTeam, 'charge')) ? UNAFFORD_BORDER
+                          : '1px solid rgba(255,255,255,0.1)',
                         cursor: !canEdit ? 'not-allowed' : 'pointer',
                         opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      {chargeActive && chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : 'CHARGE (E)'}
-                      {!chargeActive && <CostChip cost={CP_COSTS.charge} affordable={canAfford(selectedTeam, 'charge')} />}
+                      {chargeActive && chargeRemaining != null ? `CHG ${chargeRemaining} (E)` : costLabel('CHARGE (E)', CP_COSTS.charge)}
                     </button>
                     {/* R — UNLEASH (one-way commit) */}
                     <button
@@ -660,16 +654,18 @@ const HUDInner: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('unleash'); }}
                       style={{
                         ...btnBase,
-                        position: 'relative',
-                        background: unleashActive ? '#a855f7' : 'rgba(255,255,255,0.04)',
+                        background: unleashActive ? '#a855f7'
+                          : (!unleashActive && !committed && !canAfford(selectedTeam, 'unleash')) ? UNAFFORD_BG
+                          : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : unleashActive ? 'white' : '#94a3b8',
-                        border: unleashActive ? '1px solid #a855f7' : '1px solid rgba(255,255,255,0.1)',
+                        border: unleashActive ? '1px solid #a855f7'
+                          : (!unleashActive && !committed && !canAfford(selectedTeam, 'unleash')) ? UNAFFORD_BORDER
+                          : '1px solid rgba(255,255,255,0.1)',
                         cursor: !canEdit ? 'not-allowed' : 'pointer',
                         opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      {committed ? '🔒 UNLEASH' : 'UNLEASH (R)'}
-                      {!unleashActive && !committed && <CostChip cost={CP_COSTS.unleash} affordable={canAfford(selectedTeam, 'unleash')} />}
+                      {committed ? '🔒 UNLEASH' : costLabel('UNLEASH (R)', CP_COSTS.unleash)}
                     </button>
                   </div>
                   {/* Row 2 ──────── A  S  D  F ──────── */}
@@ -696,16 +692,18 @@ const HUDInner: React.FC<HUDProps> = ({
                           onClick={() => { if (!marchDisabled) marchForward(); }}
                           style={{
                             ...btnBase, fontSize: '12px',
-                            position: 'relative',
-                            background: isMarching ? '#10b981' : 'rgba(255,255,255,0.04)',
+                            background: isMarching ? '#10b981'
+                              : (!canAfford(selectedTeam, marchIntent)) ? UNAFFORD_BG
+                              : 'rgba(255,255,255,0.04)',
                             color: marchDisabled ? '#475569' : isMarching ? 'white' : '#94a3b8',
-                            border: isMarching ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                            border: isMarching ? '1px solid #10b981'
+                              : (!canAfford(selectedTeam, marchIntent)) ? UNAFFORD_BORDER
+                              : '1px solid rgba(255,255,255,0.1)',
                             cursor: marchDisabled ? 'not-allowed' : 'pointer',
                             opacity: marchDisabled ? 0.5 : 1,
                           }}
                         >
-                          {isMarching ? `${HEADING_ARROWS[nextHeading]} (A)` : 'MARCH (A)'}
-                          <CostChip cost={CP_COSTS[marchIntent]} affordable={canAfford(selectedTeam, marchIntent)} />
+                          {isMarching ? `${HEADING_ARROWS[nextHeading]} (A)` : costLabel('MARCH (A)', CP_COSTS[marchIntent])}
                         </button>
                       );
                     })()}
@@ -722,7 +720,6 @@ const HUDInner: React.FC<HUDProps> = ({
                       onClick={() => { if (canEdit) toggleMode('idle'); }}
                       style={{
                         ...btnBase,
-                        position: 'relative',
                         background: idleActive ? '#64748b' : 'rgba(255,255,255,0.04)',
                         color: !canEdit ? '#475569' : idleActive ? 'white' : '#94a3b8',
                         border: idleActive ? '1px solid #64748b' : '1px solid rgba(255,255,255,0.1)',
@@ -730,8 +727,7 @@ const HUDInner: React.FC<HUDProps> = ({
                         opacity: !canEdit ? 0.5 : 1,
                       }}
                     >
-                      IDLE (S)
-                      <CostChip cost={CP_COSTS.idle} affordable={canAfford(selectedTeam, 'idle')} />
+                      {costLabel('IDLE (S)', CP_COSTS.idle)}
                     </button>
                     {/* D — BANISH: vanish the group off the field + refund a fraction of each
                         unit type to roster (costlier). Separate from RETREAT. */}
@@ -746,16 +742,14 @@ const HUDInner: React.FC<HUDProps> = ({
                           onClick={() => { if (!banishDisabled) banishGroup(); }}
                           style={{
                             ...btnBase,
-                            position: 'relative',
-                            background: banishDisabled ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.12)',
+                            background: banishDisabled ? 'rgba(255,255,255,0.04)' : UNAFFORD_BG,
                             color: banishDisabled ? '#475569' : '#ef4444',
-                            border: banishDisabled ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(239,68,68,0.55)',
+                            border: banishDisabled ? '1px solid rgba(255,255,255,0.1)' : UNAFFORD_BORDER,
                             cursor: banishDisabled ? 'not-allowed' : 'pointer',
                             opacity: banishDisabled ? 0.5 : 1,
                           }}
                         >
-                          ⚔ BANISH (D)
-                          <CostChip cost={CP_COSTS[banishIntent]} affordable={canAfford(selectedTeam, banishIntent)} />
+                          {costLabel('⚔ BANISH (D)', CP_COSTS[banishIntent])}
                         </button>
                       );
                     })()}
@@ -770,16 +764,18 @@ const HUDInner: React.FC<HUDProps> = ({
                           onClick={() => { if (!retreatDisabled) toggleMode('retreat'); }}
                           style={{
                             ...btnBase,
-                            position: 'relative',
-                            background: 'rgba(255,255,255,0.04)',
+                            background: retreatDisabled ? 'rgba(255,255,255,0.04)'
+                              : (!canAfford(selectedTeam, retreatIntent)) ? UNAFFORD_BG
+                              : 'rgba(255,255,255,0.04)',
                             color: retreatDisabled ? '#475569' : '#3b82f6',
-                            border: '1px solid rgba(255,255,255,0.1)',
+                            border: retreatDisabled ? '1px solid rgba(255,255,255,0.1)'
+                              : (!canAfford(selectedTeam, retreatIntent)) ? UNAFFORD_BORDER
+                              : '1px solid rgba(255,255,255,0.1)',
                             cursor: retreatDisabled ? 'not-allowed' : 'pointer',
                             opacity: retreatDisabled ? 0.5 : 1,
                           }}
                         >
-                          RETREAT (F)
-                          <CostChip cost={CP_COSTS[retreatIntent]} affordable={canAfford(selectedTeam, retreatIntent)} />
+                          {costLabel('RETREAT (F)', CP_COSTS[retreatIntent])}
                         </button>
                       );
                     })()}
