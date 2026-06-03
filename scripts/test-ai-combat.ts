@@ -110,5 +110,23 @@ const isCentreMarch = (o?: GroupOrder) =>
     `here=${here} stepped=${stepped}`);
 }
 
+// --- Tactical repel: a moderate mass (→ 1 group needed) diverts only the NEAREST group; a far
+// group keeps its objective (a screen stays on the centre). ---
+{
+  const mass = [-5, -4, -3, -2, -1, 1].map(q => u(`r${q}`, 'red', { q, r: -1 }, 1)); // 6 → need = 1
+  const near = u('b1', 'blue', { q: -2, r: 1 }, 1, 'infantry');                       // 2 hexes from the mass
+  const far = u('b2', 'blue', { q: 5, r: 6 }, 3, 'skirmisher');                       // far from mass & foes
+  const expected = { q: -2, r: -1 };
+
+  const oNear = tick([near, far], mass, 1);
+  check('tactical repel: the NEAREST group marches to the mass',
+    oNear?.mode === 'march' && !!oNear.attackTarget && HexUtils.distance(oNear.attackTarget, expected) <= 1,
+    `target=${JSON.stringify(oNear?.attackTarget)}`);
+
+  const oFar = tick([near, far], mass, 3);
+  check('tactical repel: the FAR group keeps its objective (centre), not the mass',
+    isCentreMarch(oFar), `mode=${oFar?.mode} target=${JSON.stringify(oFar?.attackTarget)}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail > 0 ? 1 : 0);

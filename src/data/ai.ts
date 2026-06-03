@@ -48,8 +48,11 @@ export interface CombatConfig {
   chargeReach: number;
   /** Enemy within this distance of a group counts as "in play" (skirmisher unleash). */
   engageRange: number;
-  /** This many enemies past the centre into our own half triggers an all-groups repel. */
+  /** This many enemies past the centre into our own half triggers a repel. */
   homelandRepelThreshold: number;
+  /** Enemies one diverted group is expected to handle — sets how many of the NEAREST groups peel
+   *  off to repel (the rest keep their objective): repelGroups = ceil(massSize / repelPerGroup). */
+  repelPerGroup: number;
 }
 
 export interface AiConfig {

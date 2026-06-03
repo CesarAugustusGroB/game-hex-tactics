@@ -12,7 +12,7 @@ import type { UnitType } from '../simulate';
  *  - hold:    stand and anchor with the defensive damage reduction.
  *  - charge:  cavalry lance into a nearby enemy (impact bypasses defence).
  *  - unleash: skirmisher per-unit kite + missile harassment.
- *  - repel:   emergency — a mass has pushed into our half; ALL groups march to intercept it. */
+ *  - repel:   a mass has pushed into our half; the nearest group(s) march to intercept it. */
 export type AiAction = 'amass' | 'march' | 'defend' | 'hold' | 'charge' | 'unleash' | 'repel';
 
 /** Facts a rule can test. `when` is an AND of the present keys (absent keys are ignored).

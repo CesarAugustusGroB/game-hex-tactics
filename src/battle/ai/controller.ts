@@ -189,6 +189,19 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       const canGrowMore = grp.size < bandShare && freeZoneCount > 0 && (roster[typeOfGroup(grp.g)] ?? 0) > 0;
       return !canGrowMore;
     });
+    // Tactical repel: don't pull the WHOLE army back at a mass in our half — only the nearest
+    // groups peel off (count scales with the mass), so a screen stays on the objective. The rest
+    // see homelandThreat=false below and keep pushing/fighting.
+    const repelSet = new Set<GroupId>();
+    if (homelandThreat && myHalfThreatHex) {
+      const need = Math.min(GROUP_IDS.length, Math.max(1, Math.ceil(inMyHalf.length / combat.repelPerGroup)));
+      groups
+        .filter(grp => grp.groupUnits.length > 0)
+        .map(grp => ({ g: grp.g, d: HexUtils.distance(centroidOf(grp.groupUnits), myHalfThreatHex!) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, need)
+        .forEach(x => repelSet.add(x.g));
+    }
     const marchOrder = groups.map((_, i) => groups[(marchCursor + i) % groups.length]);
     // Defence is time-critical (raids score on contact), so when our line is threatened let the
     // reserve claim CP before the front spends the budget on centre-march orders. Stable sort keeps
@@ -224,7 +237,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         groupType: typeOfGroup(grp.g),
         enemyInChargeRange: enemyDist <= combat.chargeReach,
         enemyInPlay: enemyDist <= combat.engageRange,
-        holdsCentre, homelandThreat,
+        holdsCentre, homelandThreat: repelSet.has(grp.g),
       });
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;

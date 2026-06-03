@@ -13,7 +13,8 @@
   "combat": {
     "chargeReach": 5,
     "engageRange": 5,
-    "homelandRepelThreshold": 6
+    "homelandRepelThreshold": 6,
+    "repelPerGroup": 6
   },
   "counter": {
     "vpWeight": 0.6,
