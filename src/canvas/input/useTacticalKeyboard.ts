@@ -28,18 +28,15 @@ export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (!'qwerasdfg'.includes(k)) return;
-      if (e.repeat || e.metaKey || e.altKey) return;
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (viewMode !== 'TACTICAL') return;
       const team = selectedTeamRef.current;
 
-      // Ctrl = broadcast the order to ALL of this team's groups instead of just the selected one.
-      // Suppress the browser's Ctrl-shortcut for our keys (Ctrl+R reload, Ctrl+S save, etc.).
-      // Caveat: Ctrl+W / Ctrl+Q are reserved by the browser/OS (close tab/window) and can't be
-      // reliably prevented — so the broadcast for 'w'/'q' may be eaten by the browser.
-      const all = e.ctrlKey;
-      if (all) e.preventDefault();
+      // Shift = broadcast the order to ALL of this team's groups instead of just the selected one.
+      // (Shift+<letter> fires no browser shortcut, unlike Ctrl+W/Ctrl+R — nothing to suppress.)
+      const all = e.shiftKey;
       const run = (fn: (gid: GroupId) => void) => {
         if (all) for (const g of GROUP_IDS) fn(g);
         else fn(selectedGroupRef.current);
