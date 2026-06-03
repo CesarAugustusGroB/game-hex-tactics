@@ -58,6 +58,7 @@ export interface PixiAppCtx {
   unitTextureBlueCavalryRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureRedSkirmisherRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureBlueSkirmisherRef: MutableRefObject<PIXI.Texture | null>;
+  boatTextureRef: MutableRefObject<PIXI.Texture | null>;
   javelinTextureRef: MutableRefObject<PIXI.Texture | null>;
   dustTextureRef: MutableRefObject<PIXI.Texture | null>;
   grassTextureRef: MutableRefObject<PIXI.Texture | null>;
@@ -182,6 +183,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         { path: '/units/normalized/blue-cavalry.png', ref: ctx.unitTextureBlueCavalryRef },
         { path: '/units/normalized/roman_skirmisher.png', ref: ctx.unitTextureRedSkirmisherRef },
         { path: '/units/normalized/blue-skirmisher.png', ref: ctx.unitTextureBlueSkirmisherRef },
+        { path: '/units/boat.png', ref: ctx.boatTextureRef },
         { path: '/units/javelin.png', ref: ctx.javelinTextureRef },
         { path: '/fx/dust-puff.png', ref: ctx.dustTextureRef },
         { path: '/terrain/grass.png', ref: ctx.grassTextureRef, repeat: true },

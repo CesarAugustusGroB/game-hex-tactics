@@ -33,6 +33,9 @@ let fogSig = '\0';
 let fogSet = new Set<string>();
 
 const UNIT_SPRITE_SIZE = 112;
+// Sea units render as one shared galley sprite (no team tint), scaled to this height; width
+// follows the texture's aspect ratio.
+const BOAT_SPRITE_H = 132;
 const UNIT_SHADOW_OFFSET = { x: 8, y: 18 };
 const UNIT_SHADOW_ALPHA = 0.35;
 const UNIT_SHADOW_W = UNIT_SPRITE_SIZE * 0.82;
@@ -65,8 +68,11 @@ interface UnitVisual {
   marker: PIXI.Graphics;
   outline: PIXI.Graphics;
   shadow: PIXI.Sprite;
-  boatHull: PIXI.Graphics;
   sprite: PIXI.Sprite;
+  /** The unit's land (soldier) texture, kept so we can swap back when it leaves the water. */
+  soldierTex: PIXI.Texture;
+  /** Whether the shared boat sprite is currently shown — swap only happens on a state change. */
+  afloat: boolean;
   hpBg: PIXI.Sprite;
   hpFg: PIXI.Sprite;
   star: PIXI.Text;
@@ -127,6 +133,8 @@ export interface UnitsRenderContext {
   armyTexture: PIXI.Texture;
   // Soft shadow baked once at boot (PixiApp). Drawn as a plain Sprite per unit.
   shadowTexture: PIXI.Texture;
+  // Single galley sprite shared by every sea unit (both teams, no tint).
+  boatTexture: PIXI.Texture;
   // data
   armies: Armies;
   groupOrders: GroupOrders;
@@ -180,18 +188,9 @@ function createUnitVisual(
   shadow.visible = !isFar;
   container.addChild(shadow);
 
-  // Placeholder boat hull: shown (and the soldier rides it) only while the unit is afloat.
-  // Persistent + toggled per tick — swap for real art later. Drawn before the sprite so the
-  // unit renders on top of the hull. Own label so the LOD pass (which toggles 'unit-sprite')
-  // doesn't fight its visibility.
-  const boatHull = new PIXI.Graphics();
-  boatHull.ellipse(0, 16, 38, 13).fill({ color: 0x6b4a2a });          // hull
-  boatHull.rect(-2, -20, 3, 34).fill({ color: 0x4a3418 });            // mast
-  boatHull.poly([2, -20, 26, -2, 2, -2]).fill({ color: 0xe6e0cc });   // sail
-  boatHull.label = 'unit-boat';
-  boatHull.visible = false;
-  container.addChild(boatHull);
-
+  // Afloat units swap THIS sprite's texture to the shared galley (see the per-tick update),
+  // so the boat IS the 'unit-sprite' — the LOD pass keeps toggling it correctly and no soldier
+  // rides on top ("just the boat").
   const sprite = new PIXI.Sprite(tex);
   sprite.anchor.set(0.5);
   sprite.width = UNIT_SPRITE_SIZE;
@@ -237,7 +236,7 @@ function createUnitVisual(
   arrow.visible = false;
   container.addChild(arrow);
 
-  return { marker, outline, shadow, boatHull, sprite, hpBg, hpFg, star, arrow, arrowHeading: '→' };
+  return { marker, outline, shadow, sprite, soldierTex: tex, afloat: false, hpBg, hpFg, star, arrow, arrowHeading: '→' };
 }
 
 export function drawUnits(ctx: UnitsRenderContext): void {
@@ -434,10 +433,22 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     const isHidden = ctx.fogOfWar && u.team !== ctx.selectedTeam && !visibleHexes.has(hexKey);
     container.visible = !isHidden;
 
-    // Afloat → ride the placeholder boat hull and drop the ground shadow. Derived from the
-    // hex terrain, so it reverts on land automatically.
+    // Afloat → the unit IS the shared galley (texture-swapped on the 'unit-sprite' so LOD still
+    // owns its visibility), and the ground shadow is dropped. Derived from the hex terrain, so it
+    // reverts to the soldier on land. Swap only on a state change to avoid per-tick churn.
     const afloat = isWaterType(tileType);
-    v.boatHull.visible = afloat && !isFar;
+    if (afloat !== v.afloat) {
+      v.afloat = afloat;
+      if (afloat) {
+        v.sprite.texture = ctx.boatTexture;
+        v.sprite.height = BOAT_SPRITE_H;
+        v.sprite.width = BOAT_SPRITE_H * (ctx.boatTexture.width / ctx.boatTexture.height);
+      } else {
+        v.sprite.texture = v.soldierTex;
+        v.sprite.width = UNIT_SPRITE_SIZE;
+        v.sprite.height = UNIT_SPRITE_SIZE;
+      }
+    }
     v.shadow.visible = !isFar && !afloat;
 
     // Outline depends on same-team neighbours, which change as units move. clear()+redraw

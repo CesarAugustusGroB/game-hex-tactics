@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { MutableRefObject, Dispatch, SetStateAction } from 'react';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import type { Team, GroupId, OrderMode } from '../../battle/simulate';
+import { GROUP_IDS } from '../../battle/groups';
 import type { InputMode, Armies } from '../constants';
 
 export interface TacticalKeyboardCtx {
@@ -12,10 +13,11 @@ export interface TacticalKeyboardCtx {
   armiesRef: MutableRefObject<Armies>;
   setInputMode: Dispatch<SetStateAction<InputMode | null>>;
   setIsScanning: Dispatch<SetStateAction<boolean>>;
-  toggleMode: (mode: Exclude<OrderMode, 'march'>) => void;
-  marchForward: () => void;
-  banishGroup: () => void;
-  toggleFormation: () => void;
+  // gid defaults to the selected group; pass an explicit one to drive a specific group (Ctrl = all).
+  toggleMode: (mode: Exclude<OrderMode, 'march'>, gid?: GroupId) => void;
+  marchForward: (gid?: GroupId) => void;
+  banishGroup: (gid?: GroupId) => void;
+  toggleFormation: (gid?: GroupId) => void;
 }
 
 export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
@@ -26,14 +28,26 @@ export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (!'qwerasdfg'.includes(k)) return;
-      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.repeat || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (viewMode !== 'TACTICAL') return;
-      const gid = selectedGroupRef.current;
       const team = selectedTeamRef.current;
 
+      // Ctrl = broadcast the order to ALL of this team's groups instead of just the selected one.
+      // Suppress the browser's Ctrl-shortcut for our keys (Ctrl+R reload, Ctrl+S save, etc.).
+      // Caveat: Ctrl+W / Ctrl+Q are reserved by the browser/OS (close tab/window) and can't be
+      // reliably prevented — so the broadcast for 'w'/'q' may be eaten by the browser.
+      const all = e.ctrlKey;
+      if (all) e.preventDefault();
+      const run = (fn: (gid: GroupId) => void) => {
+        if (all) for (const g of GROUP_IDS) fn(g);
+        else fn(selectedGroupRef.current);
+      };
+
       if (k === 'q') {
+        // Order-drag is a single-group interactive mode — "all groups" has no meaning here.
+        const gid = selectedGroupRef.current;
         const hex = currentStrategicHexRef.current;
         const units = hex ? armiesRef.current.get(HexUtils.key(hex)) ?? [] : [];
         const count = units.filter(u => u.team === team && u.groupId === gid).length;
@@ -41,21 +55,21 @@ export function useTacticalKeyboard(ctx: TacticalKeyboardCtx): void {
         setInputMode(prev => (prev === 'order' ? null : 'order'));
         setIsScanning(false);
       } else if (k === 'w') {
-        toggleMode('hold');
+        run(g => toggleMode('hold', g));
       } else if (k === 'e') {
-        toggleMode('charge');
+        run(g => toggleMode('charge', g));
       } else if (k === 'r') {
-        toggleMode('unleash');
+        run(g => toggleMode('unleash', g));
       } else if (k === 's') {
-        toggleMode('idle');
+        run(g => toggleMode('idle', g));
       } else if (k === 'a') {
-        marchForward();
+        run(g => marchForward(g));
       } else if (k === 'd') {
-        banishGroup();
+        run(g => banishGroup(g));
       } else if (k === 'f') {
-        toggleMode('retreat');
+        run(g => toggleMode('retreat', g));
       } else if (k === 'g') {
-        toggleFormation();
+        run(g => toggleFormation(g));
       }
     };
     window.addEventListener('keydown', onKey);

@@ -75,6 +75,7 @@ export const GameCanvas: React.FC = () => {
   const unitTextureBlueCavalryRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRedSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueSkirmisherRef = useRef<PIXI.Texture | null>(null);
+  const boatTextureRef = useRef<PIXI.Texture | null>(null);
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
   const dustTextureRef = useRef<PIXI.Texture | null>(null);
   const grassTextureRef = useRef<PIXI.Texture | null>(null);
@@ -237,7 +238,8 @@ export const GameCanvas: React.FC = () => {
     const unitTexBlueCav = unitTextureBlueCavalryRef.current;
     const unitTexRedSkir = unitTextureRedSkirmisherRef.current;
     const unitTexBlueSkir = unitTextureBlueSkirmisherRef.current;
-    if (!armyTex || !shadowTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir) return;
+    const boatTex = boatTextureRef.current;
+    if (!armyTex || !shadowTex || !unitTex || !unitTexBlue || !unitTexRedCav || !unitTexBlueCav || !unitTexRedSkir || !unitTexBlueSkir || !boatTex) return;
     drawUnitsRender({
       unitsGfx: unitsGfx.current,
       movementDustGfx: movementDustGfx.current,
@@ -251,6 +253,7 @@ export const GameCanvas: React.FC = () => {
       unitTextureBlueSkirmisher: unitTexBlueSkir,
       armyTexture: armyTex,
       shadowTexture: shadowTex,
+      boatTexture: boatTex,
       armies,
       groupOrders,
       gridData,
@@ -450,6 +453,7 @@ export const GameCanvas: React.FC = () => {
     unitTextureBlueCavalryRef,
     unitTextureRedSkirmisherRef,
     unitTextureBlueSkirmisherRef,
+    boatTextureRef,
     javelinTextureRef,
     dustTextureRef,
     grassTextureRef,
@@ -574,8 +578,7 @@ export const GameCanvas: React.FC = () => {
   // RETREAT: orderly pull-back — issue sim 'retreat' mode (walks the block backward and
   // auto-clears the order when it lands in the deploy zone). Works mid-melee (the sim ignores
   // 'fighting' to disengage). BANISH (vanish + refund) is a separate action — see banishGroup.
-  const toggleMode = useCallback((mode: Exclude<OrderMode, 'march'>) => {
-    const gid = selectedGroupRef.current;
+  const toggleMode = useCallback((mode: Exclude<OrderMode, 'march'>, gid: GroupId = selectedGroupRef.current) => {
     const team = selectedTeamRef.current;
     const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
     if (mode === 'retreat') {
@@ -626,8 +629,7 @@ export const GameCanvas: React.FC = () => {
   // BANISH: remove the group from the field entirely and refund RETREAT_REFUND_FRAC of each
   // unit type to the roster. Available regardless of engagement — the costlier "pull them out
   // now for a partial refund" option (vs RETREAT, which walks them back to redeploy).
-  const banishGroup = useCallback(() => {
-    const gid = selectedGroupRef.current;
+  const banishGroup = useCallback((gid: GroupId = selectedGroupRef.current) => {
     const team = selectedTeamRef.current;
     const strategic = currentStrategicHexRef.current;
     if (!strategic) return;
@@ -667,8 +669,7 @@ export const GameCanvas: React.FC = () => {
   //     existing heading/attackTarget if the player previously dragged one; otherwise
   //     default to the team's straight-forward direction (red→N, blue→S) with an
   //     attackTarget ~15 hexes ahead of the group's centroid.
-  const marchForward = useCallback(() => {
-    const gid = selectedGroupRef.current;
+  const marchForward = useCallback((gid: GroupId = selectedGroupRef.current) => {
     const team = selectedTeamRef.current;
     const strategic = currentStrategicHexRef.current;
     if (!strategic) return;
@@ -715,8 +716,7 @@ export const GameCanvas: React.FC = () => {
   // Toggle the selected group's march formation between KEEP (rigid block) and LOOSE
   // (per-unit advance). Free — it's a stance, not an order. Committed (unleashed) groups
   // are locked. Persists across mode changes via issueOrder's merge.
-  const toggleFormation = useCallback(() => {
-    const gid = selectedGroupRef.current;
+  const toggleFormation = useCallback((gid: GroupId = selectedGroupRef.current) => {
     const team = selectedTeamRef.current;
     const cur = groupOrdersRef.current.get(groupOrderKey(team, gid));
     if (cur?.committed) return;
