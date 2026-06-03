@@ -124,10 +124,10 @@ const isCentreMarch = (o?: GroupOrder) =>
     `target=${JSON.stringify(oNear?.attackTarget)}`);
 
   const oFar = tick([near, far], mass, 3);
-  // With focus fire (Tier 4) the far group no longer idles on the centre — it converges on the
-  // enemy too; only the NEAREST group got the immediate 'repel' (bypassing the launch gate).
-  check('tactical repel + focus: the FAR group also engages the enemy (marches, not centre)',
-    oFar?.mode === 'march' && !isCentreMarch(oFar), `mode=${oFar?.mode} target=${JSON.stringify(oFar?.attackTarget)}`);
+  // Scores are 0 here → seize-the-centre phase: only the NEAREST group peels off to repel the mass;
+  // the far group keeps the centre objective (the screen). (Past 60 VP it would focus-fire instead.)
+  check('tactical repel: the FAR group keeps the centre (only the nearest repels)',
+    isCentreMarch(oFar), `mode=${oFar?.mode} target=${JSON.stringify(oFar?.attackTarget)}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

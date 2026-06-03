@@ -29,7 +29,8 @@
   },
   "strategy": {
     "raidDeficitFrac": 0.1,
-    "raidGroups": 2
+    "raidGroups": 2,
+    "centerFocusVpFrac": 0.3
   },
   "doctrines": {
     "balanced":   { "front": ["infantry", "cavalry", "skirmisher"], "reserve": "infantry" },

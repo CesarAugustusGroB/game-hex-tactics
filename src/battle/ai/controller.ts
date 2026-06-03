@@ -111,8 +111,12 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // numbered front bands become RAIDERS that push through the centre to the enemy line (a second
     // scoring axis). Leading/level keeps the default contest-the-centre + defend posture.
     const strat = AI.strategy;
+    // Seize-the-centre phase: until we've banked centerFocusVpFrac of the win target, the centre is
+    // THE priority — the army marches to take/hold the flag (below) and raids are suppressed. Once
+    // past it, the centre matters less and focus fire (Tier 4) + raids (Tier 5) take over.
+    const seizeCentre = myScore < winTarget * strat.centerFocusVpFrac;
     const losing = enemyScore - myScore >= winTarget * strat.raidDeficitFrac;
-    const raiderSet: ReadonlySet<GroupId> = losing
+    const raiderSet: ReadonlySet<GroupId> = losing && !seizeCentre
       ? new Set(GROUP_IDS.slice(0, Math.min(doc.front.length, strat.raidGroups)))
       : new Set<GroupId>();
 
@@ -342,8 +346,12 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       // one, else push the abstract centre. (A group that reaches the flower matches hold-centre
       // above instead, so the objective is still held.)
       if (inZone && !frontReady) continue;
-      const marchTarget = focusHex ?? CAPTURE_CENTER;
-      const marchHeading = focusHex ? headingToward(centroidOf(grp.groupUnits), focusHex) : forwardHeading(state.team);
+      // Seize phase → converge on the flag (take/hold/retake it); else focus-fire the weakest
+      // cluster; else just push forward.
+      const marchTarget = seizeCentre ? CAPTURE_CENTER : (focusHex ?? CAPTURE_CENTER);
+      const marchHeading = (seizeCentre || focusHex)
+        ? headingToward(centroidOf(grp.groupUnits), marchTarget)
+        : forwardHeading(state.team);
       if (order?.mode === 'march' && order.heading === marchHeading
         && order.attackTarget?.q === marchTarget.q && order.attackTarget?.r === marchTarget.r) continue;
       if (cpSpent + CP_COSTS.march > budget) continue;

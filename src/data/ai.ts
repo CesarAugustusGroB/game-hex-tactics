@@ -63,6 +63,9 @@ export interface StrategyConfig {
   raidDeficitFrac: number;
   /** How many front bands (lowest-numbered) become raiders while losing. */
   raidGroups: number;
+  /** Until myScore reaches this fraction of pointsToWin, the centre is the priority: the army
+   *  marches to TAKE/HOLD the flag and raids are suppressed (0.3 × 200 = 60 VP at defaults). */
+  centerFocusVpFrac: number;
 }
 
 export interface AiConfig {

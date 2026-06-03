@@ -1,6 +1,6 @@
-// Tier 5 — score-aware posture. When BEHIND on VP, the front bands turn into raiders that push
-// through the centre to the enemy line (instead of holding the flag); when level/ahead they keep
-// the default hold-the-centre posture. Drives makeAiController directly.
+// Tier 5 + seize-the-centre. Until myScore reaches centerFocusVpFrac of the win target (0.3·200 =
+// 60), the centre is THE priority: the army marches to the flag and raids are suppressed. Past 60,
+// the centre matters less → focus fire (Tier 4) and, when behind, raids (Tier 5) take over.
 // Run: npx tsx scripts/test-ai-strategy.ts
 import { makeAiController } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
@@ -23,16 +23,13 @@ const zone = new Set<string>();
 for (let q = -3; q <= 3; q++) for (let r = -9; r <= -4; r++) zone.add(HexUtils.key({ q, r }));
 const emptyRoster: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
 
-function order(opts: { myScore: number; enemyScore: number }): GroupOrder | undefined {
+function tick(blue: Unit[], red: Unit[], myScore: number, enemyScore: number, gid: GroupId = 1): GroupOrder | undefined {
   const fn = makeAiController('blue', 'balanced', 'hard');
   const orders = new Map<string, GroupOrder>();
-  // Group 1 infantry sitting ON the centre flower — would HOLD under Tier 2 if not raiding.
-  const blue = [u('b1', 'blue', { ...CAPTURE_CENTER }, 1, 'infantry')];
   const state: AiTickState = {
     team: 'blue', tick: 300,
-    myUnits: blue, enemyUnits: [], myOrders: [], allOrders: orders,
-    gridData: [], cp: 200, myScore: opts.myScore, enemyScore: opts.enemyScore,
-    roster: emptyRoster, deployZone: zone,
+    myUnits: blue, enemyUnits: red, myOrders: [], allOrders: orders,
+    gridData: [], cp: 200, myScore, enemyScore, roster: emptyRoster, deployZone: zone,
     placeCohort: () => false,
     issueOrder: (g, change) => {
       const k = `blue:${g}`;
@@ -42,28 +39,52 @@ function order(opts: { myScore: number; enemyScore: number }): GroupOrder | unde
     clearOrder: g => { orders.delete(`blue:${g}`); },
   };
   fn(state);
-  return orders.get('blue:1');
+  return orders.get(`blue:${gid}`);
 }
 
-// --- Behind on VP (deficit ≥ 10% of 200 = 20) → raid forward past the centre ---
+const isCentreMarch = (o?: GroupOrder) =>
+  o?.mode === 'march' && o.attackTarget?.q === CAPTURE_CENTER.q && o.attackTarget?.r === CAPTURE_CENTER.r;
+
+const farEnemy = [u('e1', 'red', { q: 8, r: 8 }, 1)];   // a lone weak cluster off on a flank
+
+// --- Seize phase (myScore < 60): march to the CENTRE, ignoring the flank focus ---
 {
-  const o = order({ myScore: 0, enemyScore: 50 });
-  const onCentre = o?.attackTarget?.q === CAPTURE_CENTER.q && o.attackTarget?.r === CAPTURE_CENTER.r;
-  check('losing: front band RAIDS (marches forward past the centre, does not hold)',
-    o?.mode === 'march' && !onCentre && (o.attackTarget?.r ?? 0) > 10,
-    `mode=${o?.mode} target=${JSON.stringify(o?.attackTarget)}`);
+  const g = [u('b1', 'blue', { q: 0, r: 3 }, 1, 'infantry')];   // off the flag
+  const o = tick(g, farEnemy, 0, 0);
+  check('seize phase: group marches to the CENTRE (not the flank focus)', isCentreMarch(o),
+    `target=${JSON.stringify(o?.attackTarget)}`);
 }
 
-// --- Level on VP → keep the default posture: hold the centre flower ---
+// --- Seize phase: a group ON the flag HOLDS it ---
 {
-  const o = order({ myScore: 0, enemyScore: 0 });
-  check('level: front band HOLDS the centre (no raid)', o?.mode === 'hold', `mode=${o?.mode}`);
+  const g = [u('b1', 'blue', { ...CAPTURE_CENTER }, 1, 'infantry')];
+  check('seize phase: group on the flag HOLDS it', tick(g, [], 0, 0)?.mode === 'hold');
 }
 
-// --- Small deficit (below threshold) → still holds, no premature raiding ---
+// --- Past 60 VP: centre de-prioritised → focus fire the weakest cluster (not the centre) ---
 {
-  const o = order({ myScore: 0, enemyScore: 10 });   // 10 < 20 threshold
-  check('small deficit: still holds the centre (no premature raid)', o?.mode === 'hold', `mode=${o?.mode}`);
+  const g = [u('b1', 'blue', { q: 0, r: 3 }, 1, 'infantry')];
+  const o = tick(g, farEnemy, 60, 0);
+  check('past 60 VP: group focus-fires the weakest cluster (not the centre)',
+    o?.mode === 'march' && !isCentreMarch(o) && (o.attackTarget?.q ?? 0) > 3,
+    `target=${JSON.stringify(o?.attackTarget)}`);
+}
+
+// --- Past 60 VP and behind → raid forward past the centre ---
+{
+  const g = [u('b1', 'blue', { q: 0, r: 3 }, 1, 'infantry')];
+  const o = tick(g, [], 60, 120);   // myScore 60 (past seize), 60 behind → raid
+  check('past 60 VP + losing: group RAIDS forward (past the centre)',
+    o?.mode === 'march' && !isCentreMarch(o) && (o.attackTarget?.r ?? 0) > 10,
+    `target=${JSON.stringify(o?.attackTarget)}`);
+}
+
+// --- Below 60 and behind → STILL fights for the centre, no premature raids ---
+{
+  const g = [u('b1', 'blue', { q: 0, r: 3 }, 1, 'infantry')];
+  const o = tick(g, [], 0, 120);   // way behind but myScore < 60 → centre first
+  check('below 60 + losing: still marches to the CENTRE (raids suppressed)', isCentreMarch(o),
+    `target=${JSON.stringify(o?.attackTarget)}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);
