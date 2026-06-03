@@ -116,6 +116,19 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       ? new Set(GROUP_IDS.slice(0, Math.min(doc.front.length, strat.raidGroups)))
       : new Set<GroupId>();
 
+    // Tier 4 focus fire: the army converges on the WEAKEST enemy cluster (finish the kill) instead
+    // of a blind centre push, and charges coordinate on it. Seed = lowest-HP enemy (tiebreak: the
+    // one nearest our mass); focusHex = the centroid of the cluster around that seed.
+    let focusHex: Hex | null = null;
+    if (liveEnemies.length > 0) {
+      const myC = myUnits.length > 0 ? centroidOf(myUnits) : CAPTURE_CENTER;
+      const weakest = liveEnemies.reduce((a, b) =>
+        b.hp !== a.hp ? (b.hp < a.hp ? b : a)
+          : HexUtils.distance(b.tacticalHex, myC) < HexUtils.distance(a.tacticalHex, myC) ? b : a);
+      const cluster = liveEnemies.filter(e => HexUtils.distance(e.tacticalHex, weakest.tacticalHex) <= combat.focusRadius);
+      focusHex = centroidOf(cluster);
+    }
+
     if (targetUnits < 0) {
       // Half the zone is the hard-difficulty ceiling; forceScale shrinks it so easier AIs field a
       // smaller standing army. bandShare spreads the cap WIDE across the four bands, not deep.
@@ -301,8 +314,12 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       if (action === 'charge') {
         if (order?.mode === 'charge' || !nearestEnemy) continue;   // already lancing / no target
         if (cpSpent + CP_COSTS.charge > budget) continue;
-        // charge, like march, advances AND lances along `heading` — aim it at the nearest enemy.
-        const heading = headingToward(centroidOf(grp.groupUnits), nearestEnemy.tacticalHex);
+        // charge advances AND lances along `heading`. Aim it at the team focus cluster when that's
+        // within charge reach (so cavalry pile onto the weakest point together); otherwise the
+        // group's own nearest enemy.
+        const gc = centroidOf(grp.groupUnits);
+        const target = focusHex && HexUtils.distance(gc, focusHex) <= combat.chargeReach ? focusHex : nearestEnemy.tacticalHex;
+        const heading = headingToward(gc, target);
         if (state.issueOrder(grp.g, { mode: 'charge', heading }, 'charge')) {
           cpSpent += CP_COSTS.charge;
           lastDecisionTick.set(grp.g, state.tick);
@@ -321,18 +338,21 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         continue;
       }
 
-      // action 'march' — the fallback rule (or null, unreachable while the ruleset keeps a
-      // condition-less catch-all): push the centre objective.
+      // action 'march' — the fallback rule. Converge on the focus cluster (Tier 4) when there is
+      // one, else push the abstract centre. (A group that reaches the flower matches hold-centre
+      // above instead, so the objective is still held.)
       if (inZone && !frontReady) continue;
-      if (order && order.mode === 'march'
-        && order.attackTarget?.q === CAPTURE_CENTER.q && order.attackTarget?.r === CAPTURE_CENTER.r) continue;
+      const marchTarget = focusHex ?? CAPTURE_CENTER;
+      const marchHeading = focusHex ? headingToward(centroidOf(grp.groupUnits), focusHex) : forwardHeading(state.team);
+      if (order?.mode === 'march' && order.heading === marchHeading
+        && order.attackTarget?.q === marchTarget.q && order.attackTarget?.r === marchTarget.r) continue;
       if (cpSpent + CP_COSTS.march > budget) continue;
       // LOOSE march: the AI fields large, tightly-packed bands that touch at their lateral
       // boundaries. A rigid block is all-or-nothing, so a single boundary unit whose forward hex
       // holds an adjacent band's unit freezes the entire 80+-unit band forever — only the first
       // band (clear path) ever advanced. Per-unit advance lets the band flow forward around the
       // few blocked boundary units, so every flank actually attacks.
-      if (state.issueOrder(grp.g, { mode: 'march', heading: forwardHeading(state.team), attackTarget: { ...CAPTURE_CENTER }, looseFormation: true }, 'march')) {
+      if (state.issueOrder(grp.g, { mode: 'march', heading: marchHeading, attackTarget: { ...marchTarget }, looseFormation: true }, 'march')) {
         cpSpent += CP_COSTS.march;
         lastDecisionTick.set(grp.g, state.tick);
         marchCursor = (marchCursor + 1) % groups.length; // next march starts the scan one band on

@@ -6,7 +6,6 @@ import { makeAiController } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, Team, GroupId, UnitType } from '../src/battle/simulate';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
-import { CAPTURE_CENTER } from '../src/data/game';
 
 let pass = 0, fail = 0;
 const check = (name: string, cond: boolean, extra = '') => {
@@ -48,8 +47,6 @@ function launchOrder(opts: { red?: Unit[]; myScore?: number; enemyScore?: number
   return orders.get('blue:1');
 }
 
-const isCentreMarch = (o?: GroupOrder) =>
-  o?.mode === 'march' && o.attackTarget?.q === CAPTURE_CENTER.q && o.attackTarget?.r === CAPTURE_CENTER.r;
 
 // --- Safe: full bar (bandShare 5) not reached → the partial band holds in the zone ---
 {
@@ -72,7 +69,7 @@ const isCentreMarch = (o?: GroupOrder) =>
     u('e1', 'red', { q: 3, r: -9 }, 1), u('e2', 'red', { q: 3, r: -8 }, 1), u('e3', 'red', { q: 3, r: -7 }, 1),
   ];
   const o = launchOrder({ red: breachers, myScore: 0, enemyScore: 0 });
-  check('breacher pressure: partial band COUNTERATTACKS to centre', isCentreMarch(o), `order=${JSON.stringify(o)}`);
+  check('breacher pressure: partial band LAUNCHES (does not hold in the zone)', o?.mode === 'march', `order=${JSON.stringify(o)}`);
 }
 
 // --- Raiders APPROACHING the zone (outside it, no breachers) also raise danger ---
@@ -80,7 +77,7 @@ const isCentreMarch = (o?: GroupOrder) =>
   // r = -3 is one hex below the zone's r = -4 edge → within raidWatchRadius (2), not inside the zone.
   const raiders = [0, 1, 2, 3].map(i => u(`e${i}`, 'red', { q: i, r: -3 }, 1));
   const o = launchOrder({ red: raiders, myScore: 0, enemyScore: 0 });
-  check('raider pressure: partial band COUNTERATTACKS to centre', isCentreMarch(o), `order=${JSON.stringify(o)}`);
+  check('raider pressure: partial band LAUNCHES (does not hold in the zone)', o?.mode === 'march', `order=${JSON.stringify(o)}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

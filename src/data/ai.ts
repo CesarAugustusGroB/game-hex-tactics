@@ -53,6 +53,8 @@ export interface CombatConfig {
   /** Enemies one diverted group is expected to handle — sets how many of the NEAREST groups peel
    *  off to repel (the rest keep their objective): repelGroups = ceil(massSize / repelPerGroup). */
   repelPerGroup: number;
+  /** Radius (hexes) of the enemy cluster around the weakest foe that the army focuses fire on. */
+  focusRadius: number;
 }
 
 /** Score-aware posture: when behind on VP, convert front bands into raiders. */

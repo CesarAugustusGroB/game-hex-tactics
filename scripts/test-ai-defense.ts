@@ -89,9 +89,8 @@ function tick(blue: Unit[], red: Unit[], gid: GroupId = 4): GroupOrder | undefin
   const front = [u('b1', 'blue', { q: 0, r: -8 }, 1)];   // group 1 = front band, not the reserve
   const raider = [u('r1', 'red', { q: 0, r: -9 }, 1)];   // breaching our zone, adjacent to b1
   const o = tick(front, raider, 1);
-  check('a threatened NON-reserve group pushes the centre, not the breach',
-    o?.mode === 'march' && o.attackTarget?.q === CAPTURE_CENTER.q && o.attackTarget?.r === CAPTURE_CENTER.r,
-    `mode=${o?.mode} target=${JSON.stringify(o?.attackTarget)}`);
+  check('a threatened NON-reserve group engages (marches), not the reserve hold/defend',
+    o?.mode === 'march', `mode=${o?.mode} target=${JSON.stringify(o?.attackTarget)}`);
 }
 
 console.log(`\n${pass}/${pass + fail} passed`);

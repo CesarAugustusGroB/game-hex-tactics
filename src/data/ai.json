@@ -15,7 +15,8 @@
     "chargeReach": 5,
     "engageRange": 5,
     "homelandRepelThreshold": 6,
-    "repelPerGroup": 6
+    "repelPerGroup": 6,
+    "focusRadius": 4
   },
   "counter": {
     "vpWeight": 0.6,
