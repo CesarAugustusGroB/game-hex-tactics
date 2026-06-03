@@ -69,6 +69,16 @@ for (let i = 1; i < ranges.length; i++) if (ranges[i].min <= ranges[i - 1].max) 
 check('front groups deploy in separate lateral bands', separated,
   JSON.stringify(ranges.map(r => ({ g: r.g, min: Math.round(r.min), max: Math.round(r.max) }))));
 
+// Skirmishers are rear SUPPORT: the skirmisher band (G3 in balanced) fills the back rows, behind
+// the melee bands (G1 infantry, G2 cavalry). frontSign +1 → front = higher py.
+const bandY = (g: number) => {
+  const a = hard.filter(p => p.groupId === g);
+  return a.reduce((s, p) => s + HexUtils.hexToPixel(p.anchorHex).y, 0) / (a.length || 1);
+};
+check('skirmisher band (G3) deploys BEHIND the melee bands (G1/G2)',
+  bandY(3) < bandY(1) && bandY(3) < bandY(2),
+  `skir=${Math.round(bandY(3))} inf=${Math.round(bandY(1))} cav=${Math.round(bandY(2))}`);
+
 const agg = AI.doctrines.aggressive; // cavalry-heavy doctrine
 const noCav = planDeployment({ frontTypes: agg.front, reserveType: agg.reserve, forceScale: 1, freeHexes, roster: { infantry: 200, cavalry: 0, skirmisher: 200 }, frontSign, rng });
 check('respects empty cavalry roster', noCav.every(p => p.unitType !== 'cavalry'));

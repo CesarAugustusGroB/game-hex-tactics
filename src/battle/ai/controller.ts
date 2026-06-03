@@ -153,6 +153,28 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     const budget = Math.floor(state.cp * diff.cpBudgetFrac);
     let cpSpent = 0;
 
+    // Defensive deployment: DRAW a blocker where the enemy is about to score. When raiders/breachers
+    // threaten our zone and we don't yet have enough bodies on the breach, place a reserve cohort at
+    // the free deploy-zone hex NEAREST the threat — block the scoring spot directly (one per tick;
+    // the breach fills over a few ticks) instead of marching a far group across the field.
+    if (threat.raidThreatHex && rosterTotal > 0) {
+      const tgt = threat.raidThreatHex;
+      const myNear = myUnits.filter(u => HexUtils.distance(u.tacticalHex, tgt) <= 2).length;
+      if (myNear < threatUnits.length && (roster[doc.reserve] ?? 0) > 0 && cpSpent + 2 <= budget) {
+        const spot = [...state.deployZone]
+          .filter(k => !occupied.has(k))
+          .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, d: HexUtils.distance({ q, r }, tgt) }; })
+          .sort((a, b) => a.d - b.d)[0];
+        if (spot && state.placeCohort(reserveGid, { q: spot.q, r: spot.r }, doc.reserve)) {
+          cpSpent += 2;
+          roster[doc.reserve] = Math.max(0, roster[doc.reserve] - COHORT_SIZE);
+          rosterTotal = Math.max(0, rosterTotal - COHORT_SIZE);
+          freeZoneCount -= COHORT_SIZE;
+          for (const c of [{ q: spot.q, r: spot.r }, ...HexUtils.getNeighbors({ q: spot.q, r: spot.r })]) occupied.add(HexUtils.key(c));
+        }
+      }
+    }
+
     // Per-group facts. A band may amass while unsealed, below its lateral share, and resources
     // remain. The ai.json rule list turns these facts into amass/march per group.
     const groups = GROUP_IDS.map(g => {
@@ -346,12 +368,11 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       // one, else push the abstract centre. (A group that reaches the flower matches hold-centre
       // above instead, so the objective is still held.)
       if (inZone && !frontReady) continue;
-      // Seize phase → converge on the flag (take/hold/retake it); else focus-fire the weakest
-      // cluster; else just push forward.
+      // Advance STRAIGHT forward — no diagonal steering. The marchTarget (centre in the seize phase,
+      // else the weakest cluster) only ranks units front-to-back; lateral positioning is meant to be
+      // done by DEPLOYMENT, not by curving the march diagonally toward a flank.
       const marchTarget = seizeCentre ? CAPTURE_CENTER : (focusHex ?? CAPTURE_CENTER);
-      const marchHeading = (seizeCentre || focusHex)
-        ? headingToward(centroidOf(grp.groupUnits), marchTarget)
-        : forwardHeading(state.team);
+      const marchHeading = forwardHeading(state.team);
       if (order?.mode === 'march' && order.heading === marchHeading
         && order.attackTarget?.q === marchTarget.q && order.attackTarget?.r === marchTarget.r) continue;
       if (cpSpent + CP_COSTS.march > budget) continue;

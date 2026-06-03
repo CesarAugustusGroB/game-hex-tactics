@@ -72,13 +72,15 @@ export function planDeployment(input: DeployInput): Placement[] {
     }
   };
 
-  // FRONT: groups 1..nFront, one lateral band each, front-most rows first.
+  // FRONT: groups 1..nFront, one lateral band each. Melee bands fill front-most rows first;
+  // skirmishers are SUPPORT — they fill the BACK rows of their band (lower fwd) so they sit behind
+  // the line and harass with missiles instead of dying in the front rank.
   frontTypes.forEach((unitType, bandPos) => {
     const lo = minX + (bandPos / nFront) * span;
     const hi = minX + ((bandPos + 1) / nFront) * span;
     const band = pts
       .filter(p => p.lat >= lo && (bandPos === nFront - 1 ? p.lat <= hi : p.lat < hi))
-      .sort((a, b) => b.fwd - a.fwd);
+      .sort((a, b) => unitType === 'skirmisher' ? a.fwd - b.fwd : b.fwd - a.fwd);
     placeFrom(band, GROUP_IDS[bandPos], unitType, COHORT_SIZE);
   });
 

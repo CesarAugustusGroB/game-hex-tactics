@@ -93,5 +93,24 @@ function tick(blue: Unit[], red: Unit[], gid: GroupId = 4): GroupOrder | undefin
     o?.mode === 'march', `mode=${o?.mode} target=${JSON.stringify(o?.attackTarget)}`);
 }
 
+// --- Defensive deployment: DRAW a blocker at the breach when an enemy threatens our zone ---
+{
+  const fn = makeAiController('blue', 'balanced', 'hard');
+  const placed: { gid: GroupId; hex: Hex; type: UnitType }[] = [];
+  const raider = [u('x1', 'red', { q: 2, r: -9 }, 1)];   // sitting in our zone → about to score
+  const orders = new Map<string, GroupOrder>();
+  const state: AiTickState = {
+    team: 'blue', tick: 300, myUnits: [], enemyUnits: raider, myOrders: [], allOrders: orders,
+    gridData: [], cp: 200, roster: { infantry: 100, cavalry: 100, skirmisher: 100 }, deployZone: zone,
+    placeCohort: (gid, anchor, type) => { placed.push({ gid, hex: anchor, type }); return true; },
+    issueOrder: () => true,
+    clearOrder: () => { /* noop */ },
+  };
+  fn(state);
+  // Defensive deploy runs FIRST (before amass), so the very first placement plugs the breach.
+  check('defensive deploy: first cohort lands at the breach', !!placed[0] && HexUtils.distance(placed[0].hex, raider[0].tacticalHex) <= 2,
+    `first=${JSON.stringify(placed[0]?.hex)} breach=${JSON.stringify(raider[0].tacticalHex)}`);
+}
+
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail > 0 ? 1 : 0);
