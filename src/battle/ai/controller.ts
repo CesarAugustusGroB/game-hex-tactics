@@ -53,10 +53,12 @@ const centroidOf = (units: Unit[]): Hex => {
  * (per-group amass spend, per-group last decision tick) persists; the sim stays pure.
  */
 export function makeAiController(
-  team: Team, doctrine: Doctrine, difficulty: Difficulty, capabilities?: AiCapability[],
+  team: Team, doctrine: Doctrine, difficulty: Difficulty,
+  capabilities?: AiCapability[], reactionTicksOverride?: number,
 ): AiTickFn {
   const doc = AI.doctrines[doctrine];
   const diff = AI.difficulties[difficulty];
+  const reactionTicks = reactionTicksOverride ?? diff.reactionTicks;
   // The difficulty axis: which smart behaviours this AI executes. Absent ones downgrade to the
   // always-on baseline (deploy / march-to-centre / hold). NOT force size — a bigger army stalls.
   // `capabilities` overrides the difficulty's set (used by the ablation harness to isolate one).
@@ -312,7 +314,7 @@ export function makeAiController(
         || (action === 'defend' && !can.has('defend'))) action = 'march';
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;
-      if (state.tick - last < diff.reactionTicks) continue;
+      if (state.tick - last < reactionTicks) continue;
       const order = state.myOrders.find(o => o.groupId === grp.g);
 
       if (action === 'hold') {

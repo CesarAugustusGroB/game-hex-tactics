@@ -53,7 +53,7 @@ const mapApi: MapApi = {
   isInDeployZone: (t, h) => (t === 'red' ? redZone : blueZone).has(HexUtils.key(h)),
 };
 
-interface Side { doctrine: Doctrine; difficulty: Difficulty; capabilities?: AiCapability[]; }
+interface Side { doctrine: Doctrine; difficulty: Difficulty; capabilities?: AiCapability[]; reactionTicks?: number; }
 interface Result {
   winner: Team | null; score: Score; ticks: number; peak: Record<Team, number>;
   /** Mean standing force over the match (sum of live units each tick / ticks). */
@@ -64,8 +64,8 @@ interface Result {
 
 function runMatch(red: Side, blue: Side): Result {
   const ctrl: Record<Team, AiTickFn> = {
-    red: makeAiController('red', red.doctrine, red.difficulty, red.capabilities),
-    blue: makeAiController('blue', blue.doctrine, blue.difficulty, blue.capabilities),
+    red: makeAiController('red', red.doctrine, red.difficulty, red.capabilities, red.reactionTicks),
+    blue: makeAiController('blue', blue.doctrine, blue.difficulty, blue.capabilities, blue.reactionTicks),
   };
   const zone: Record<Team, ReadonlySet<string>> = { red: redZone, blue: blueZone };
   let units: Unit[] = [];
@@ -261,7 +261,69 @@ function ablate(reps: number) {
   console.log(`  ${'ALL'.padEnd(12)} ${full.pct.toFixed(0).padStart(4)}%  ${full.draws.toFixed(0).padStart(4)}%   (full repertoire)`);
 }
 
-if (process.argv.includes('--ablate')) {
+function tune(reps: number) {
+  // Tune the `test` personality: pit candidate (base difficulty for react/CP + capability set)
+  // configs against the camp-bot `hard` ([], react 2). Win% > 50 ⇒ beats the camper.
+  const opp: Side = { doctrine: 'balanced', difficulty: 'hard' };   // pure centre-camp
+  const candidates: { label: string; side: Side }[] = [
+    { label: 'hard mirror []',        side: { doctrine: 'balanced', difficulty: 'hard', capabilities: [] } },
+    { label: 'defend',                side: { doctrine: 'balanced', difficulty: 'hard', capabilities: ['defend'] } },
+    { label: 'raid',                  side: { doctrine: 'balanced', difficulty: 'hard', capabilities: ['raid'] } },
+    { label: 'raid+defend (test)',    side: { doctrine: 'balanced', difficulty: 'hard', capabilities: ['raid', 'defend'] } },
+    { label: 'defend+earlyLaunch',    side: { doctrine: 'balanced', difficulty: 'hard', capabilities: ['defend', 'earlyLaunch'] } },
+    { label: 'raid+defend @react6',   side: { doctrine: 'balanced', difficulty: 'normal', capabilities: ['raid', 'defend'] } },
+    { label: 'defend @react6',        side: { doctrine: 'balanced', difficulty: 'normal', capabilities: ['defend'] } },
+  ];
+  const winrate = (side: Side) => {
+    let wins = 0, draws = 0, n = 0;
+    for (let i = 0; i < reps; i++) {
+      const a = runMatch({ ...side }, opp).winner; if (a === 'red') wins++; else if (a == null) draws++; n++;
+      const b = runMatch(opp, { ...side }).winner; if (b === 'blue') wins++; else if (b == null) draws++; n++;
+    }
+    return { pct: 100 * wins / n, draws: 100 * draws / n };
+  };
+  console.log(`\n=== Tune 'test' vs camp-bot hard ([], react 2) — ${reps} reps/side ===`);
+  console.log('win% > 50 ⇒ the candidate beats the pure centre-camper:\n');
+  console.log('  candidate                win%   draw%');
+  for (const c of candidates) {
+    const w = winrate(c.side);
+    console.log(`  ${c.label.padEnd(22)} ${w.pct.toFixed(0).padStart(4)}%  ${w.draws.toFixed(0).padStart(4)}%`);
+  }
+}
+
+function sweep(reps: number) {
+  // Sweep reactionTicks for the centre-fight + flank capability combos, vs camp-bot hard.
+  const opp: Side = { doctrine: 'balanced', difficulty: 'hard' };
+  const combos: { label: string; caps: AiCapability[] }[] = [
+    { label: 'defend', caps: ['defend'] },
+    { label: 'raid', caps: ['raid'] },
+    { label: 'raid+defend', caps: ['raid', 'defend'] },
+  ];
+  const reactions = [2, 4, 6, 8, 10, 14];
+  const winrate = (caps: AiCapability[], rt: number) => {
+    let wins = 0, n = 0;
+    const side: Side = { doctrine: 'balanced', difficulty: 'hard', capabilities: caps, reactionTicks: rt };
+    for (let i = 0; i < reps; i++) {
+      if (runMatch({ ...side }, opp).winner === 'red') wins++; n++;
+      if (runMatch(opp, { ...side }).winner === 'blue') wins++; n++;
+    }
+    return 100 * wins / n;
+  };
+  console.log(`\n=== reactionTicks sweep vs camp-bot hard — ${reps} reps/side (win% > 50 beats the camper) ===`);
+  console.log('  combo          ' + reactions.map(r => `rt${r}`.padStart(6)).join(''));
+  for (const c of combos) {
+    const cells = reactions.map(rt => `${winrate(c.caps, rt).toFixed(0)}%`.padStart(6));
+    console.log(`  ${c.label.padEnd(14)}` + cells.join(''));
+  }
+}
+
+if (process.argv.includes('--sweep')) {
+  const repArg = process.argv.find(a => /^\d+$/.test(a));
+  sweep(repArg ? Number(repArg) : 24);
+} else if (process.argv.includes('--tune')) {
+  const repArg = process.argv.find(a => /^\d+$/.test(a));
+  tune(repArg ? Number(repArg) : 24);
+} else if (process.argv.includes('--ablate')) {
   const repArg = process.argv.find(a => /^\d+$/.test(a));
   ablate(repArg ? Number(repArg) : 20);
 } else if (process.argv.includes('--mech')) {
