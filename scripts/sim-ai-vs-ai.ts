@@ -26,6 +26,7 @@ import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK, CE
 import { CAPTURE_CENTER, INITIAL_ROSTER, COHORT_SIZE } from '../src/data/game';
 import { deployZoneFor } from '../src/canvas/constants';
 import type { Doctrine, Difficulty, AiCapability } from '../src/data/ai';
+import { DIFFICULTIES } from '../src/data/ai';
 
 const RADIUS = 12;
 const MAX_TICKS = 2000;
@@ -177,7 +178,7 @@ const fmt = (r: Result) =>
   `(${r.ticks} ticks, peak red=${r.peak.red} blue=${r.peak.blue})`;
 
 function study(reps: number) {
-  const diffs: Difficulty[] = ['easy', 'normal', 'hard'];
+  const diffs: Difficulty[] = DIFFICULTIES;
   const win = (rd: Difficulty, bd: Difficulty) => {
     let red = 0, blue = 0, draw = 0;
     for (let i = 0; i < reps; i++) {
@@ -194,15 +195,17 @@ function study(reps: number) {
     console.log(`  ${d.padEnd(6)}: red ${(100 * w.red / reps).toFixed(0)}%  blue ${(100 * w.blue / reps).toFixed(0)}%  draw ${(100 * w.draw / reps).toFixed(0)}%`);
   }
 
-  console.log(`\n=== Difficulty effect, side-bias-cancelled (each pair run BOTH ways, ${reps} reps each side) ===`);
-  console.log('"stronger" = higher difficulty. >50% means the stronger difficulty actually wins more:');
-  const pairs: [Difficulty, Difficulty][] = [['hard', 'easy'], ['hard', 'normal'], ['normal', 'easy']];
-  for (const [hi, lo] of pairs) {
-    const a = win(hi, lo);   // hi as red
-    const b = win(lo, hi);   // hi as blue
-    const hiWins = a.red + b.blue;
-    const total = 2 * reps;
-    console.log(`  ${hi} vs ${lo}: ${hi} wins ${(100 * hiWins / total).toFixed(0)}%  (as red ${a.red}/${reps}, as blue ${b.blue}/${reps})`);
+  console.log(`\n=== Win-rate matrix, side-bias-cancelled (each pair run BOTH ways, ${reps} reps each side) ===`);
+  console.log('cell = ROW difficulty\'s win% vs COLUMN difficulty:');
+  console.log('         ' + diffs.map(d => d.padStart(7)).join(''));
+  for (const a of diffs) {
+    const cells = diffs.map(b => {
+      if (a === b) return '   —   ';
+      const ra = win(a, b);   // a as red
+      const rb = win(b, a);   // a as blue
+      return `${(100 * (ra.red + rb.blue) / (2 * reps)).toFixed(0)}%`.padStart(7);
+    });
+    console.log(`  ${a.padEnd(7)}` + cells.join(''));
   }
 }
 

@@ -9,7 +9,7 @@ const check = (name: string, cond: boolean, extra = '') => {
 };
 
 check('3 doctrines', DOCTRINES.length === 3);
-check('3 difficulties', DIFFICULTIES.length === 3);
+check('4 difficulties', DIFFICULTIES.length === 4);
 check('amassCpBudget is a positive number', typeof AI.amassCpBudget === 'number' && AI.amassCpBudget > 0);
 check('has an ordered ruleset with a default fallback', AI.rules.length >= 1 && AI.rules.some(r => r.when === undefined));
 const UNIT_TYPES = ['infantry', 'cavalry', 'skirmisher'];

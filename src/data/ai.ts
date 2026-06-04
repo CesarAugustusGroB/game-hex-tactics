@@ -4,7 +4,7 @@ import type { AiRule } from '../battle/ai/rules';
 import type { UnitType } from '../battle/simulate';
 
 export type Doctrine = 'balanced' | 'aggressive' | 'defensive';
-export type Difficulty = 'easy' | 'normal' | 'hard';
+export type Difficulty = 'easy' | 'normal' | 'hard' | 'test';
 
 export interface DoctrineConfig {
   /** Unit type for each lateral FRONT band, left→right. EXACTLY 3 (a fixed tuple) so the 4th of
