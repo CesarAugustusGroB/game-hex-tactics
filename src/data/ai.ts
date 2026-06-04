@@ -15,13 +15,24 @@ export interface DoctrineConfig {
   reserve: UnitType;
 }
 
+/** Tactical behaviours a difficulty executes ON TOP of the always-on baseline (deploy /
+ *  march-to-centre / hold). Counter-intuitively these are HANDICAPS, not skill: the head-to-head
+ *  ablation (scripts/sim-ai-vs-ai.ts --ablate) showed every one LOSES to the pure centre-rush,
+ *  because the win condition makes camping the flag dominant and each behaviour pulls the army off
+ *  it (focusFire 8%, repel 23%, … raid 45% — none reach 50%). So the difficulty axis is inverted:
+ *  HARD runs the disciplined empty set, EASY carries the full distracting repertoire. */
+export type AiCapability = 'focusFire' | 'charge' | 'unleash' | 'raid' | 'defend' | 'repel' | 'earlyLaunch';
+
 export interface DifficultyConfig {
   /** Ticks between a group's decisions. */
   reactionTicks: number;
   /** Fraction of current CP the AI will spend per tick. */
   cpBudgetFrac: number;
-  /** Scales wave count in the deploy planner. */
+  /** Scales wave count in the deploy planner. Held flat across difficulties (below the stall
+   *  cliff) — difficulty is decided by `capabilities`, not force size. */
   forceScale: number;
+  /** Which smart behaviours this difficulty executes (empty = the dumb-brawler baseline). */
+  capabilities: AiCapability[];
 }
 
 /** Counterattack tuning: how "danger of defeat" is blended and how far it lowers the launch bar. */
@@ -81,7 +92,13 @@ export interface AiConfig {
   difficulties: Record<Difficulty, DifficultyConfig>;
 }
 
-export const AI: AiConfig = raw as AiConfig;
+// JSON infers string literals as `string` (e.g. `capabilities`/`front` widen to `string[]`), which
+// no longer overlaps the narrowed union/tuple fields — assert through `unknown`.
+export const AI: AiConfig = raw as unknown as AiConfig;
 
 export const DOCTRINES = Object.keys(AI.doctrines) as Doctrine[];
 export const DIFFICULTIES = Object.keys(AI.difficulties) as Difficulty[];
+
+/** Every tactical behaviour, for tests/harnesses that exercise a behaviour regardless of which
+ *  difficulty tier currently carries it (the tier→capability mapping is policy, not the behaviour). */
+export const ALL_CAPABILITIES: AiCapability[] = ['focusFire', 'charge', 'unleash', 'raid', 'defend', 'repel', 'earlyLaunch'];

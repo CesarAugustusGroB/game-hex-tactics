@@ -3,6 +3,7 @@
 // push when the line is clear. Drives makeAiController directly with crafted AiTickState snapshots.
 // Run: npx tsx scripts/test-ai-defense.ts
 import { makeAiController } from '../src/battle/ai/controller';
+import { ALL_CAPABILITIES } from '../src/data/ai';
 import type { AiTickState } from '../src/battle/ai';
 import { perceive } from '../src/battle/ai/perception';
 import type { Unit, GroupOrder, Team, GroupId, UnitType } from '../src/battle/simulate';
@@ -28,7 +29,7 @@ const emptyRoster: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmis
 // Run one controller tick over a crafted snapshot; return the order issued for group `gid`
 // (default the reserve, group 4).
 function tick(blue: Unit[], red: Unit[], gid: GroupId = 4): GroupOrder | undefined {
-  const fn = makeAiController('blue', 'balanced', 'hard');
+  const fn = makeAiController('blue', 'balanced', 'hard', ALL_CAPABILITIES);
   const orders = new Map<string, GroupOrder>();
   const state: AiTickState = {
     team: 'blue', tick: 300,
@@ -95,7 +96,7 @@ function tick(blue: Unit[], red: Unit[], gid: GroupId = 4): GroupOrder | undefin
 
 // --- Defensive deployment: DRAW a blocker at the breach when an enemy threatens our zone ---
 {
-  const fn = makeAiController('blue', 'balanced', 'hard');
+  const fn = makeAiController('blue', 'balanced', 'hard', ALL_CAPABILITIES);
   const placed: { gid: GroupId; hex: Hex; type: UnitType }[] = [];
   const raider = [u('x1', 'red', { q: 2, r: -9 }, 1)];   // sitting in our zone → about to score
   const orders = new Map<string, GroupOrder>();

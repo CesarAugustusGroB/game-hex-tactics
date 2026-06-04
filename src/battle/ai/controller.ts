@@ -1,6 +1,6 @@
 import type { AiTickFn, AiTickState } from '../ai';
 import type { GroupId, Team, UnitType } from '../simulate';
-import type { Doctrine, Difficulty } from '../../data/ai';
+import type { Doctrine, Difficulty, AiCapability } from '../../data/ai';
 import { AI } from '../../data/ai';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { CP_COSTS } from '../command-points';
@@ -52,9 +52,15 @@ const centroidOf = (units: Unit[]): Hex => {
  * (amass vs. march); the controller only decides which bands are still eligible. Closure state
  * (per-group amass spend, per-group last decision tick) persists; the sim stays pure.
  */
-export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Difficulty): AiTickFn {
+export function makeAiController(
+  team: Team, doctrine: Doctrine, difficulty: Difficulty, capabilities?: AiCapability[],
+): AiTickFn {
   const doc = AI.doctrines[doctrine];
   const diff = AI.difficulties[difficulty];
+  // The difficulty axis: which smart behaviours this AI executes. Absent ones downgrade to the
+  // always-on baseline (deploy / march-to-centre / hold). NOT force size — a bigger army stalls.
+  // `capabilities` overrides the difficulty's set (used by the ablation harness to isolate one).
+  const can = new Set(capabilities ?? diff.capabilities);
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
   const frontSign = team === 'red' ? -1 : 1;
@@ -126,7 +132,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // past it, the centre matters less and focus fire (Tier 4) + raids (Tier 5) take over.
     const seizeCentre = myScore < winTarget * strat.centerFocusVpFrac;
     const losing = enemyScore - myScore >= winTarget * strat.raidDeficitFrac;
-    const raiderSet: ReadonlySet<GroupId> = losing && !seizeCentre
+    const raiderSet: ReadonlySet<GroupId> = can.has('raid') && losing && !seizeCentre
       ? new Set(GROUP_IDS.slice(0, Math.min(doc.front.length, strat.raidGroups)))
       : new Set<GroupId>();
 
@@ -134,7 +140,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // of a blind centre push, and charges coordinate on it. Seed = lowest-HP enemy (tiebreak: the
     // one nearest our mass); focusHex = the centroid of the cluster around that seed.
     let focusHex: Hex | null = null;
-    if (liveEnemies.length > 0) {
+    if (can.has('focusFire') && liveEnemies.length > 0) {
       const myC = myUnits.length > 0 ? centroidOf(myUnits) : CAPTURE_CENTER;
       const weakest = liveEnemies.reduce((a, b) =>
         b.hp !== a.hp ? (b.hp < a.hp ? b : a)
@@ -167,7 +173,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // threaten our zone and we don't yet have enough bodies on the breach, place a reserve cohort at
     // the free deploy-zone hex NEAREST the threat — block the scoring spot directly (one per tick;
     // the breach fills over a few ticks) instead of marching a far group across the field.
-    if (threat.raidThreatHex && rosterTotal > 0) {
+    if (can.has('defend') && threat.raidThreatHex && rosterTotal > 0) {
       const tgt = threat.raidThreatHex;
       const myNear = myUnits.filter(u => HexUtils.distance(u.tacticalHex, tgt) <= 2).length;
       if (myNear < threatUnits.length && (roster[doc.reserve] ?? 0) > 0 && cpSpent + 2 <= budget) {
@@ -240,7 +246,8 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // Counterattack: at danger 0 the launch bar is the full bandShare (unchanged behaviour); as
     // danger rises it drops toward COHORT_SIZE, so a half-built front launches early rather than
     // waiting. A band is "ready" once it reaches the (lowered) launchShare OR genuinely can't grow.
-    const launchShare = Math.max(COHORT_SIZE, Math.ceil(bandShare * (1 - c.maxLaunchReduction * danger)));
+    const launchDanger = can.has('earlyLaunch') ? danger : 0;
+    const launchShare = Math.max(COHORT_SIZE, Math.ceil(bandShare * (1 - c.maxLaunchReduction * launchDanger)));
     const frontReady = groups.every(grp => {
       if (grp.size === 0 || grp.sealed) return true;
       if (grp.size >= launchShare) return true;
@@ -251,7 +258,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
     // groups peel off (count scales with the mass), so a screen stays on the objective. The rest
     // see homelandThreat=false below and keep pushing/fighting.
     const repelSet = new Set<GroupId>();
-    if (homelandThreat && myHalfThreatHex) {
+    if (can.has('repel') && homelandThreat && myHalfThreatHex) {
       const need = Math.min(GROUP_IDS.length, Math.max(1, Math.ceil(inMyHalf.length / combat.repelPerGroup)));
       groups
         .filter(grp => grp.groupUnits.length > 0)
@@ -288,7 +295,7 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
       }
       const holdsCentre = grp.groupUnits.some(gu => CENTER_KEYS.has(HexUtils.key(gu.tacticalHex)));
 
-      const action = evaluateRules(AI.rules, {
+      let action = evaluateRules(AI.rules, {
         size: grp.size, massed: grp.size >= bandShare, inZone,
         cpSpentAmassing: cpSpentAmassing.get(grp.g) ?? 0, canAmass: false,
         isReserve, threatened, atDefensePos,
@@ -297,6 +304,12 @@ export function makeAiController(team: Team, doctrine: Doctrine, difficulty: Dif
         enemyInPlay: enemyDist <= combat.engageRange,
         holdsCentre, homelandThreat: repelSet.has(grp.g), raider: raiderSet.has(grp.g),
       });
+      // Difficulty gate: a smart combat action this difficulty hasn't unlocked downgrades to the
+      // baseline march. (raid/repel can't arise here — their group-sets are already capability-gated
+      // empty above, so the `raider`/`homelandThreat` facts are false.)
+      if ((action === 'charge' && !can.has('charge'))
+        || (action === 'unleash' && !can.has('unleash'))
+        || (action === 'defend' && !can.has('defend'))) action = 'march';
 
       const last = lastDecisionTick.get(grp.g) ?? -Infinity;
       if (state.tick - last < diff.reactionTicks) continue;

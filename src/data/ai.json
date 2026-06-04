@@ -38,8 +38,8 @@
     "defensive":  { "front": ["skirmisher", "cavalry", "infantry"], "reserve": "skirmisher" }
   },
   "difficulties": {
-    "easy":   { "reactionTicks": 12, "cpBudgetFrac": 0.5, "forceScale": 0.6  },
-    "normal": { "reactionTicks": 6,  "cpBudgetFrac": 0.8, "forceScale": 0.85 },
-    "hard":   { "reactionTicks": 2,  "cpBudgetFrac": 1.0, "forceScale": 1.0  }
+    "easy":   { "reactionTicks": 12, "cpBudgetFrac": 0.5, "forceScale": 0.7, "capabilities": ["focusFire", "charge", "unleash", "raid", "defend", "repel", "earlyLaunch"] },
+    "normal": { "reactionTicks": 6,  "cpBudgetFrac": 0.8, "forceScale": 0.7, "capabilities": ["charge"] },
+    "hard":   { "reactionTicks": 2,  "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": [] }
   }
 }

@@ -3,6 +3,7 @@
 // raid pressure. Drives makeAiController directly with crafted snapshots.
 // Run: npx tsx scripts/test-ai-counter.ts
 import { makeAiController } from '../src/battle/ai/controller';
+import { ALL_CAPABILITIES } from '../src/data/ai';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, Team, GroupId, UnitType } from '../src/battle/simulate';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
@@ -18,15 +19,16 @@ const u = (id: string, team: Team, hex: Hex, gid: GroupId): Unit => ({
   groupId: gid, hp: 100, state: 'idle', nextMoveTick: 0, visionRadius: 1,
 });
 
-// Zone of 42 hexes → bandShare = 5 (so a band of 4 is below the full bar but at the danger-lowered
-// bar of 4). Front group 1 (balanced doctrine → infantry) is pre-placed with one cohort (4) inside.
+// Zone of 63 hexes → targetUnits=22, bandShare=5 (forceScale 0.7): a band of 4 is below the full
+// bar but at the danger-lowered floor of COHORT_SIZE=4. Front group 1 (balanced → infantry) is
+// pre-placed with one cohort (4) inside.
 const zone = new Set<string>();
 const zoneHexes: Hex[] = [];
-for (let q = -3; q <= 3; q++) for (let r = -9; r <= -4; r++) { zone.add(HexUtils.key({ q, r })); zoneHexes.push({ q, r }); }
+for (let q = -4; q <= 4; q++) for (let r = -10; r <= -4; r++) { zone.add(HexUtils.key({ q, r })); zoneHexes.push({ q, r }); }
 const fullRoster: Record<UnitType, number> = { infantry: 100, cavalry: 0, skirmisher: 0 };
 
 function launchOrder(opts: { red?: Unit[]; myScore?: number; enemyScore?: number }): GroupOrder | undefined {
-  const fn = makeAiController('blue', 'balanced', 'hard');
+  const fn = makeAiController('blue', 'balanced', 'hard', ALL_CAPABILITIES);
   const orders = new Map<string, GroupOrder>();
   // One cohort (4 infantry) for group 1, on the first 4 zone hexes.
   const blue = zoneHexes.slice(0, 4).map((h, i) => u(`b${i}`, 'blue', h, 1));

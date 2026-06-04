@@ -7,6 +7,7 @@ import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, UnitType } from '../src/battle/simulate';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
 import { COHORT_SIZE } from '../src/data/game';
+import { AI } from '../src/data/ai';
 
 let pass = 0, fail = 0;
 const check = (name: string, cond: boolean, extra = '') => {
@@ -18,8 +19,9 @@ const strip: Hex[] = [];
 for (let q = -16; q <= 16; q++) for (let r = -3; r <= 0; r++) strip.push({ q, r });
 const deployZone = new Set(strip.map(HexUtils.key));
 
-// Mirror the controller's sizing to know the target bandShare.
-const forceScale = 0.85; // normal
+// Mirror the controller's sizing to know the target bandShare (read the live config so a
+// difficulty re-tune can't silently drift this denominator out of sync).
+const forceScale = AI.difficulties.normal.forceScale;
 const targetUnits = Math.max(4 * COHORT_SIZE, Math.floor(deployZone.size * 0.5 * forceScale));
 const bandShare = Math.max(COHORT_SIZE, Math.floor(targetUnits / 4));
 

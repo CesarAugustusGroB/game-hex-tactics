@@ -4,6 +4,7 @@
 // and any group with no enemy / not on the flower falls back to the centre march.
 // Run: npx tsx scripts/test-ai-combat.ts
 import { makeAiController } from '../src/battle/ai/controller';
+import { ALL_CAPABILITIES } from '../src/data/ai';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, Team, GroupId, UnitType } from '../src/battle/simulate';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
@@ -27,7 +28,7 @@ for (let q = -3; q <= 3; q++) for (let r = -9; r <= -4; r++) zone.add(HexUtils.k
 const emptyRoster: Record<UnitType, number> = { infantry: 0, cavalry: 0, skirmisher: 0 };
 
 function tick(blue: Unit[], red: Unit[], gid: GroupId): GroupOrder | undefined {
-  const fn = makeAiController('blue', 'balanced', 'hard');
+  const fn = makeAiController('blue', 'balanced', 'hard', ALL_CAPABILITIES);
   const orders = new Map<string, GroupOrder>();
   const state: AiTickState = {
     team: 'blue', tick: 300,

@@ -38,17 +38,32 @@ Deterministic capability tiers (no RNG). AI-layer only — no sim/movement chang
 
 ## Design
 
+### EMPIRICAL CORRECTION (post-ablation) — the axis is INVERTED
+
+The original plan below assumed more capabilities = stronger. The head-to-head ablation
+(`scripts/sim-ai-vs-ai.ts --ablate`) disproved it: against the pure centre-rush baseline,
+**every** capability LOSES (focusFire 8%, repel 23%, unleash 25%, charge 28%, earlyLaunch
+33%, defend 40%, raid 45% — none ≥ 50%; the full set wins 0%). The win condition makes
+camping the flag dominant, and each behaviour pulls the army off it. So capabilities are
+**handicaps**, and the tiers are inverted: hard runs the disciplined empty set, easy carries
+the full distracting repertoire.
+
 ### Data — `src/data/ai.json` + `src/data/ai.ts`
 
-- `forceScale` → **0.7** for all three difficulties (removes the stall variable; isolates skill).
-- Keep `reactionTicks` (12 / 6 / 2) and `cpBudgetFrac` (0.5 / 0.8 / 1.0) — mild
-  sharpness/decisiveness signals, harmless once force is flat.
-- Add `capabilities` to each difficulty:
-  - **easy:** `[]`
-  - **normal:** `["focusFire", "charge", "unleash"]`
-  - **hard:** `["focusFire", "charge", "unleash", "raid", "defend", "repel", "earlyLaunch"]`
-- `ai.ts`: add `export type AiCapability = 'focusFire' | 'charge' | 'unleash' | 'raid' | 'defend' | 'repel' | 'earlyLaunch'`
-  and `capabilities: AiCapability[]` on `DifficultyConfig`.
+- `forceScale` → **0.7** for all three difficulties (removes the stall variable; isolates the
+  behaviour axis).
+- Keep `reactionTicks` (12 / 6 / 2) and `cpBudgetFrac` (0.5 / 0.8 / 1.0) — slower/stingier on
+  easy compounds the handicap in the right direction.
+- `capabilities` per difficulty (INVERTED — fewer = stronger):
+  - **hard:** `[]` — pure disciplined centre-rush (the baseline that wins every ablation).
+  - **normal:** `["charge"]` — one reliably-negative handicap (raid+defend was tried first but
+    proved net-POSITIVE together: defend plugs the rusher's breaches, so normal beat hard).
+  - **easy:** `["focusFire", "charge", "unleash", "raid", "defend", "repel", "earlyLaunch"]` —
+    maximally distracted (incl. the catastrophic focusFire).
+- `ai.ts`: `export type AiCapability = 'focusFire' | 'charge' | 'unleash' | 'raid' | 'defend' | 'repel' | 'earlyLaunch'`,
+  `capabilities: AiCapability[]` on `DifficultyConfig`, and `ALL_CAPABILITIES` for behaviour
+  tests/harnesses. `makeAiController` gains an optional `capabilities?` override (used by the
+  ablation to isolate one behaviour, and by behaviour tests to enable what they exercise).
 
 ### Always-on baseline (every tier, incl. easy)
 
@@ -83,11 +98,11 @@ group just marches/holds — no new code paths.
    controller at `hard`, so they keep their behavior. Any that use a lower difficulty and
    assert a gated action get bumped to `hard` (the difficulty under which that behavior is
    defined).
-2. Acceptance gate — `scripts/sim-ai-vs-ai.ts`:
-   - `--study`: red win-rate of the stronger difficulty flips to **> 50%** for both
-     `hard vs easy` and `hard vs normal` (monotone: easy < normal < hard).
-   - `--mech`: `avgForce` roughly equal across tiers; `VP/1000t` and `winrate` **increase**
-     with difficulty.
+2. Acceptance gate — `scripts/sim-ai-vs-ai.ts --study` (side-bias-cancelled). ACHIEVED:
+   - `hard vs easy`: hard 80% · `hard vs normal`: hard 68% · `normal vs easy`: normal 85%.
+   - All > 50% → monotone **easy < normal < hard**. Side bias gone for easy/hard; `normal`
+     self-play shows a ~30/70 side asymmetry from `charge` (averaged out by running both sides;
+     a noted non-blocking follow-up).
 
 ## Out of scope
 
