@@ -177,8 +177,9 @@ export function makeAiController(
 
     // Defensive deployment: DRAW a blocker where the enemy is about to score. When raiders/breachers
     // threaten our zone and we don't yet have enough bodies on the breach, place a reserve cohort at
-    // the free deploy-zone hex NEAREST the threat — block the scoring spot directly (one per tick;
-    // the breach fills over a few ticks) instead of marching a far group across the field.
+    // the most-forward free deploy-zone cell in the threat's lateral lane — intercept the raider
+    // before it reaches the scoring line (one per tick; the breach fills over a few ticks). Falls
+    // back to the nearest cell when no lane cell is free.
     if (can.has('defend') && threat.raidThreatHex && rosterTotal > 0) {
       const tgt = threat.raidThreatHex;
       const myNear = myUnits.filter(u => HexUtils.distance(u.tacticalHex, tgt) <= 2).length;
