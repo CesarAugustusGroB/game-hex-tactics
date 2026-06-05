@@ -6,7 +6,7 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { CP_COSTS } from '../command-points';
 import { COHORT_SIZE, CAPTURE_CENTER } from '../../data/game';
 import { POINTS_TO_WIN } from '../../data/scoring';
-import { planDeployment } from './deploy';
+import { planDeployment, planCombinedArmsWave } from './deploy';
 import { GROUP_IDS, isGroupSealed } from '../groups';
 import { evaluateRules, type RuleCtx } from './rules';
 import { perceive, CENTER_KEYS } from './perception';
@@ -66,6 +66,7 @@ export function makeAiController(
   const serial = diff.serialWaves ?? false;
   const fastDeploy = diff.fastDeploy ?? false;
   const horizontal = diff.horizontalFront ?? false;
+  const combinedArms = diff.combinedArms ?? false;
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
   const frontSign = team === 'red' ? -1 : 1;
@@ -221,7 +222,8 @@ export function makeAiController(
     // room (in GROUP_IDS order) — the others wait their turn. Once it fills and launches (sealed),
     // the next band becomes the active fill.
     const activeFillGid = serial
-      ? groups.find(g => !g.sealed && g.size < bandCap(g.g) && (roster[typeOfGroup(g.g)] ?? 0) > 0)?.g
+      ? groups.find(g => !g.sealed && g.size < bandCap(g.g)
+          && (combinedArms ? rosterTotal > 0 : (roster[typeOfGroup(g.g)] ?? 0) > 0))?.g
       : undefined;
     for (const grp of amassOrder) {
       if (serial && grp.g !== activeFillGid) continue;
@@ -238,14 +240,19 @@ export function makeAiController(
       const freeHexes = [...state.deployZone]
         .filter(k => !occupied.has(k))
         .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, key: k }; });
-      const plan = planDeployment({
-        frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster, frontSign,
-        centreFirst: serial && !horizontal,
-        horizontalFront: horizontal,
-        // fastDeploy: emit a whole band of anchors so it brushes down in one tick instead of one
-        // cohort per tick (the default `round(forceScale*2)` ≈ 1 anchor is the slow drip).
-        wavesOverride: fastDeploy ? Math.ceil(bandCap(grp.g) / COHORT_SIZE) + 1 : undefined,
-      }).filter(p => p.groupId === grp.g);
+      const plan = combinedArms
+        ? planCombinedArmsWave({
+            groupId: grp.g, freeHexes, roster, frontSign,
+            waveCohorts: Math.ceil(bandCap(grp.g) / COHORT_SIZE),
+          })
+        : planDeployment({
+            frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster, frontSign,
+            centreFirst: serial && !horizontal,
+            horizontalFront: horizontal,
+            // fastDeploy: emit a whole band of anchors so it brushes down in one tick instead of one
+            // cohort per tick (the default `round(forceScale*2)` ≈ 1 anchor is the slow drip).
+            wavesOverride: fastDeploy ? Math.ceil(bandCap(grp.g) / COHORT_SIZE) + 1 : undefined,
+          }).filter(p => p.groupId === grp.g);
 
       for (const p of plan) {
         if (grp.size >= bandCap(grp.g)) break;     // this band reached its (wave) size cap
@@ -278,7 +285,8 @@ export function makeAiController(
       // (danger-lowered) launchShare.
       const full = serial ? bandCap(grp.g) : launchShare;
       if (grp.size >= full) return true;
-      const canGrowMore = grp.size < bandCap(grp.g) && freeZoneCount > 0 && (roster[typeOfGroup(grp.g)] ?? 0) > 0;
+      const typeLeft = combinedArms ? rosterTotal > 0 : (roster[typeOfGroup(grp.g)] ?? 0) > 0;
+      const canGrowMore = grp.size < bandCap(grp.g) && freeZoneCount > 0 && typeLeft;
       return !canGrowMore;
     };
     // Parallel front waits for EVERY band; serial waves launch each band the moment IT is ready.
