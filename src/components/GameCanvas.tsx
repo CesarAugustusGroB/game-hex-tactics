@@ -35,6 +35,7 @@ import { GRID_RADIUS, DEFAULT_MAP_TYPE, type MapTypeId } from '../data/world-gen
 import { registerAiController } from '../battle/ai';
 import { makeAiController } from '../battle/ai/controller';
 import type { Doctrine, Difficulty } from '../data/ai';
+import { AI } from '../data/ai';
 
 const INITIAL_SEED = Math.floor(Math.random() * 0x100000000);
 
@@ -371,6 +372,8 @@ export const GameCanvas: React.FC = () => {
   const [cpRegenN, setCpRegenNState] = useState(CP_REGEN_N);
   const cpMaxRef = useRef(CP_CAP);
   const cpRegenRef = useRef(CP_REGEN_N);
+  // Teams whose AI deploys for free (fastDeploy) — the host skips the placeCohort CP debit for them.
+  const aiFreeDeployRef = useRef<Set<Team>>(new Set());
   const setCpMax = useCallback((v: number) => {
     const clamped = Math.max(1, Math.min(999, Math.round(v || 0)));
     cpMaxRef.current = clamped;
@@ -572,6 +575,7 @@ export const GameCanvas: React.FC = () => {
     setCommandPoints,
     cpRegenRef,
     cpMaxRef,
+    aiFreeDeployRef,
     pointsToWinRef,
     marchedGroupsRef,
     setMarchedGroups,
@@ -581,9 +585,10 @@ export const GameCanvas: React.FC = () => {
 
   // Install the enemy AI for `blue` when enabled; tear down when off or on config change.
   useEffect(() => {
-    if (!aiEnabled) { registerAiController('blue', null); return; }
+    if (!aiEnabled) { registerAiController('blue', null); aiFreeDeployRef.current = new Set(); return; }
     registerAiController('blue', makeAiController('blue', aiDoctrine, aiDifficulty));
-    return () => registerAiController('blue', null);
+    aiFreeDeployRef.current = AI.difficulties[aiDifficulty].fastDeploy ? new Set<Team>(['blue']) : new Set();
+    return () => { registerAiController('blue', null); aiFreeDeployRef.current = new Set(); };
   }, [aiEnabled, aiDoctrine, aiDifficulty]);
 
   // RETREAT: orderly pull-back — issue sim 'retreat' mode (walks the block backward and

@@ -26,6 +26,15 @@ export interface DeployInput {
   /** Randomness for reserve placement. Defaults to Math.random; inject a seeded RNG to make
    *  reserve positioning deterministic (a later pass will replace random-back with a chosen spot). */
   rng?: () => number;
+  /** Centre-first layout: group 1 takes the CENTRE lateral slice and the rest fan outward to the
+   *  flanks (centre → left → right). Default false → bands fill left→right by group order. */
+  centreFirst?: boolean;
+  /** Override the per-band cohort-anchor count (default `round(forceScale*2)`). Used by fastDeploy
+   *  to emit a whole band of anchors at once so the caller can brush it down in a single tick. */
+  wavesOverride?: number;
+  /** Each band fills a WIDE line across the full map width (front row first), not a lateral column.
+   *  Supersedes `centreFirst`. */
+  horizontalFront?: boolean;
 }
 
 /** Back fraction of the zone (by forward-depth) the reserve deploys into. */
@@ -41,10 +50,10 @@ const RESERVE_BACK_FRAC = 0.3;
  *   injected `rng`); the caller applies each placement via state.placeCohort.
  */
 export function planDeployment(input: DeployInput): Placement[] {
-  const { frontTypes, reserveType, forceScale, freeHexes, roster, frontSign, rng = Math.random } = input;
+  const { frontTypes, reserveType, forceScale, freeHexes, roster, frontSign, rng = Math.random, centreFirst = false, wavesOverride, horizontalFront = false } = input;
   if (freeHexes.length === 0) return [];
 
-  const waves = Math.max(1, Math.round(forceScale * 2));
+  const waves = wavesOverride ?? Math.max(1, Math.round(forceScale * 2));
 
   // Annotate with pixel position: lat = x (across the front), fwd = frontSign*y (higher = the
   // front edge facing the enemy).
@@ -72,15 +81,34 @@ export function planDeployment(input: DeployInput): Placement[] {
     }
   };
 
+  // Physical lat-slice index a band occupies. Default: band b → slice b (left→right). Centre-first:
+  // band 0 → middle slice, then alternate outward (centre → left → right) so group 1 holds the centre.
+  const sliceOf = (b: number): number => {
+    if (!centreFirst) return b;
+    const mid = Math.floor((nFront - 1) / 2);
+    const order: number[] = [mid];
+    for (let d = 1; d < nFront; d++) { if (mid - d >= 0) order.push(mid - d); if (mid + d < nFront) order.push(mid + d); }
+    return order[b];
+  };
+
   // FRONT: groups 1..nFront, one lateral band each. Melee bands fill front-most rows first;
   // skirmishers are SUPPORT — they fill the BACK rows of their band (lower fwd) so they sit behind
   // the line and harass with missiles instead of dying in the front rank.
   frontTypes.forEach((unitType, bandPos) => {
-    const lo = minX + (bandPos / nFront) * span;
-    const hi = minX + ((bandPos + 1) / nFront) * span;
-    const band = pts
-      .filter(p => p.lat >= lo && (bandPos === nFront - 1 ? p.lat <= hi : p.lat < hi))
-      .sort((a, b) => unitType === 'skirmisher' ? a.fwd - b.fwd : b.fwd - a.fwd);
+    let band: typeof pts;
+    if (horizontalFront) {
+      // Full-width battle line: fill the frontmost row right across the map (skirmishers to the
+      // back rows), so each wave is a wide horizontal front rather than a narrow column.
+      band = [...pts].sort((a, b) =>
+        (unitType === 'skirmisher' ? a.fwd - b.fwd : b.fwd - a.fwd) || a.lat - b.lat);
+    } else {
+      const slice = sliceOf(bandPos);
+      const lo = minX + (slice / nFront) * span;
+      const hi = minX + ((slice + 1) / nFront) * span;
+      band = pts
+        .filter(p => p.lat >= lo && (slice === nFront - 1 ? p.lat <= hi : p.lat < hi))
+        .sort((a, b) => unitType === 'skirmisher' ? a.fwd - b.fwd : b.fwd - a.fwd);
+    }
     placeFrom(band, GROUP_IDS[bandPos], unitType, COHORT_SIZE);
   });
 

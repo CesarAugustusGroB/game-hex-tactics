@@ -63,6 +63,9 @@ export function makeAiController(
   // always-on baseline (deploy / march-to-centre / hold). NOT force size — a bigger army stalls.
   // `capabilities` overrides the difficulty's set (used by the ablation harness to isolate one).
   const can = new Set(capabilities ?? diff.capabilities);
+  const serial = diff.serialWaves ?? false;
+  const fastDeploy = diff.fastDeploy ?? false;
+  const horizontal = diff.horizontalFront ?? false;
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
   const frontSign = team === 'red' ? -1 : 1;
@@ -201,14 +204,28 @@ export function makeAiController(
       return { g, groupUnits, size: groupUnits.length, sealed };
     });
 
+    // Serial waves: group 1 holds the CENTRE and is the heavy opening wave (~2.5× a normal band, so
+    // the initial CP pours into one big centre punch); the flank/reserve bands stay normal-sized.
+    // Horizontal fronts want UNIFORM wide lines, so the big-centre wave is disabled there.
+    const BIG_WAVE_MULT = 2.5;
+    const bandCap = (g: GroupId): number =>
+      serial && !horizontal && g === GROUP_IDS[0] ? Math.ceil(bandShare * BIG_WAVE_MULT) : bandShare;
+
     // --- Amass phase: widen every eligible band in parallel, front-row-first. Scan order starts
     // at a round-robin cursor that advances once PER COHORT PLACED (not per tick) so a scarce CP
     // budget is shared fairly across bands. Per-tick rotation resonated with the slow CP regen
     // (a placement every ~N ticks, N a multiple of the band count) and kept feeding the same
     // band — starving cavalry/skirmisher. Per-placement rotation is timing-independent. ---
     const amassOrder = groups.map((_, i) => groups[(amassCursor + i) % groups.length]);
+    // Serial waves: concentrate the whole amass budget on the lowest-numbered band that still has
+    // room (in GROUP_IDS order) — the others wait their turn. Once it fills and launches (sealed),
+    // the next band becomes the active fill.
+    const activeFillGid = serial
+      ? groups.find(g => !g.sealed && g.size < bandCap(g.g) && (roster[typeOfGroup(g.g)] ?? 0) > 0)?.g
+      : undefined;
     for (const grp of amassOrder) {
-      const canAmass = !grp.sealed && grp.size < bandShare && freeZoneCount > 0 && rosterTotal > 0;
+      if (serial && grp.g !== activeFillGid) continue;
+      const canAmass = !grp.sealed && grp.size < bandCap(grp.g) && freeZoneCount > 0 && rosterTotal > 0;
       const ctx: RuleCtx = {
         size: grp.size,
         massed: grp.size >= bandShare,
@@ -223,14 +240,19 @@ export function makeAiController(
         .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, key: k }; });
       const plan = planDeployment({
         frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster, frontSign,
+        centreFirst: serial && !horizontal,
+        horizontalFront: horizontal,
+        // fastDeploy: emit a whole band of anchors so it brushes down in one tick instead of one
+        // cohort per tick (the default `round(forceScale*2)` ≈ 1 anchor is the slow drip).
+        wavesOverride: fastDeploy ? Math.ceil(bandCap(grp.g) / COHORT_SIZE) + 1 : undefined,
       }).filter(p => p.groupId === grp.g);
 
       for (const p of plan) {
-        if (grp.size >= bandShare) break;     // this band reached its width share
-        if (cpSpent + 2 > budget) break;
+        if (grp.size >= bandCap(grp.g)) break;     // this band reached its (wave) size cap
+        if (!fastDeploy && cpSpent + 2 > budget) break;   // fastDeploy: placement is free of the CP budget
         if (!state.placeCohort(p.groupId, p.anchorHex, p.unitType)) continue;
         amassCursor = (amassCursor + 1) % groups.length; // next cohort starts the scan one band on
-        cpSpent += 2;
+        if (!fastDeploy) cpSpent += 2;
         grp.size += COHORT_SIZE;
         freeZoneCount -= COHORT_SIZE;
         roster[p.unitType] = Math.max(0, roster[p.unitType] - COHORT_SIZE);
@@ -250,12 +272,17 @@ export function makeAiController(
     // waiting. A band is "ready" once it reaches the (lowered) launchShare OR genuinely can't grow.
     const launchDanger = can.has('earlyLaunch') ? danger : 0;
     const launchShare = Math.max(COHORT_SIZE, Math.ceil(bandShare * (1 - c.maxLaunchReduction * launchDanger)));
-    const frontReady = groups.every(grp => {
+    const bandReady = (grp: { g: GroupId; size: number; sealed: boolean }): boolean => {
       if (grp.size === 0 || grp.sealed) return true;
-      if (grp.size >= launchShare) return true;
-      const canGrowMore = grp.size < bandShare && freeZoneCount > 0 && (roster[typeOfGroup(grp.g)] ?? 0) > 0;
+      // Serial waves launch a band once it reaches its full wave cap; the parallel front uses the
+      // (danger-lowered) launchShare.
+      const full = serial ? bandCap(grp.g) : launchShare;
+      if (grp.size >= full) return true;
+      const canGrowMore = grp.size < bandCap(grp.g) && freeZoneCount > 0 && (roster[typeOfGroup(grp.g)] ?? 0) > 0;
       return !canGrowMore;
-    });
+    };
+    // Parallel front waits for EVERY band; serial waves launch each band the moment IT is ready.
+    const frontReady = groups.every(bandReady);
     // Tactical repel: don't pull the WHOLE army back at a mass in our half — only the nearest
     // groups peel off (count scales with the mass), so a screen stays on the objective. The rest
     // see homelandThreat=false below and keep pushing/fighting.
@@ -392,7 +419,7 @@ export function makeAiController(
       // action 'march' — the fallback rule. Converge on the focus cluster (Tier 4) when there is
       // one, else push the abstract centre. (A group that reaches the flower matches hold-centre
       // above instead, so the objective is still held.)
-      if (inZone && !frontReady) continue;
+      if (inZone && !(serial ? bandReady(grp) : frontReady)) continue;
       // Advance STRAIGHT forward — no diagonal steering. The marchTarget (centre in the seize phase,
       // else the weakest cluster) only ranks units front-to-back; lateral positioning is meant to be
       // done by DEPLOYMENT, not by curving the march diagonally toward a flank.

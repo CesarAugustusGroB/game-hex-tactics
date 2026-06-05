@@ -50,6 +50,8 @@ export interface BattleTickCtx {
   setCommandPoints: Dispatch<SetStateAction<CommandPoints>>;
   cpRegenRef: MutableRefObject<number>;
   cpMaxRef: MutableRefObject<number>;
+  /** Teams whose AI deploys for free (fastDeploy) — placeCohort skips the CP debit for them. */
+  aiFreeDeployRef: MutableRefObject<Set<Team>>;
   pointsToWinRef: MutableRefObject<number>;
   // Group-order keys whose firstMarch surcharge is already paid this battle. Pruned here
   // when a group empties so a recycled slot re-pays firstMarch.
@@ -138,10 +140,13 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
                 occupied.add(k);
               }
               if (target.length === 0) return false;
-              const debited = debit(ctx.commandPointsRef.current, team, 'placeCohort');
-              if (!debited) return false;
-              ctx.commandPointsRef.current = debited;
-              ctx.setCommandPoints(debited);
+              // fastDeploy AI deploys free (brush, not CP-throttled drip); everyone else pays.
+              if (!ctx.aiFreeDeployRef.current.has(team)) {
+                const debited = debit(ctx.commandPointsRef.current, team, 'placeCohort');
+                if (!debited) return false;
+                ctx.commandPointsRef.current = debited;
+                ctx.setCommandPoints(debited);
+              }
               const newUnits: Unit[] = target.map(h => ({
                 id: crypto.randomUUID(),
                 team,

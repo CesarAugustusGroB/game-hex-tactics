@@ -33,6 +33,17 @@ export interface DifficultyConfig {
   forceScale: number;
   /** Which smart behaviours this difficulty executes (empty = the dumb-brawler baseline). */
   capabilities: AiCapability[];
+  /** Serial-wave attack: amass ONE band to full and launch it, then the next, then the next —
+   *  a rolling stream of waves. Default (false) amasses the whole front in parallel and launches
+   *  it together. */
+  serialWaves?: boolean;
+  /** Fast deploy: the AI's cohort placement costs NO command points, so it lays units down in a
+   *  continuous brush instead of a CP-throttled drip. Reinforcement/order CP is unaffected. */
+  fastDeploy?: boolean;
+  /** Horizontal fronts: each band deploys as a WIDE line spanning the full map width (filling the
+   *  front row across, then back), instead of a narrow lateral column. With serialWaves this sends
+   *  one full battle line at a time. Supersedes the centre-first column layout. */
+  horizontalFront?: boolean;
 }
 
 /** Counterattack tuning: how "danger of defeat" is blended and how far it lowers the launch bar. */
