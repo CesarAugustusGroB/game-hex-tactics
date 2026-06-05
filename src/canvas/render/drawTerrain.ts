@@ -83,7 +83,7 @@ export function drawTerrain(ctx: TerrainRenderContext): void {
   dzGfx.clear();
   czGfx.clear();
 
-  const terrainUvMatrix = new PIXI.Matrix().scale(14, 14);
+  const terrainUvMatrix = new PIXI.Matrix().scale(3.5, 3.5);
   const terrainAt = new Map<string, string>(gridData.map(d => [HexUtils.key(d.hex), d.type]));
   const isTexturedBiome = (t: string): boolean =>
     t === 'DEEP_SEA' || t === 'SEA' || t === 'RIVER' || t === 'GRASSLAND' || t === 'FOREST' || t === 'HILL' || t === 'MOUNTAIN' || t === 'SNOW';
