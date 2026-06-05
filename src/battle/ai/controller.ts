@@ -183,10 +183,18 @@ export function makeAiController(
       const tgt = threat.raidThreatHex;
       const myNear = myUnits.filter(u => HexUtils.distance(u.tacticalHex, tgt) <= 2).length;
       if (myNear < threatUnits.length && (roster[doc.reserve] ?? 0) > 0 && cpSpent + 2 <= budget) {
-        const spot = [...state.deployZone]
+        const tgtLat = HexUtils.hexToPixel(tgt).x;
+        const free = [...state.deployZone]
           .filter(k => !occupied.has(k))
-          .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, d: HexUtils.distance({ q, r }, tgt) }; })
-          .sort((a, b) => a.d - b.d)[0];
+          .map(k => {
+            const { q, r } = HexUtils.fromKey(k);
+            const p = HexUtils.hexToPixel({ q, r });
+            return { q, r, lat: p.x, fwd: frontSign * p.y, d: HexUtils.distance({ q, r }, tgt) };
+          });
+        // Cells roughly in the threat's lane (within ~2 hexes laterally); among them, the most
+        // forward (highest fwd toward the enemy). Empty lane → nearest cell to the threat.
+        const lane = free.filter(c => Math.abs(c.lat - tgtLat) <= 2 * HexUtils.size);
+        const spot = (lane.length ? lane.sort((a, b) => b.fwd - a.fwd) : free.sort((a, b) => a.d - b.d))[0];
         if (spot && state.placeCohort(reserveGid, { q: spot.q, r: spot.r }, doc.reserve)) {
           cpSpent += 2;
           roster[doc.reserve] = Math.max(0, roster[doc.reserve] - COHORT_SIZE);
