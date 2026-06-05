@@ -24,7 +24,9 @@ for (const f of DIFFICULTIES) {
   check(`${f} reactionTicks >= 1`, c.reactionTicks >= 1);
   check(`${f} forceScale in (0,1]`, c.forceScale > 0 && c.forceScale <= 1);
 }
-check('hard reacts faster than easy', AI.difficulties.hard.reactionTicks < AI.difficulties.easy.reactionTicks);
+// Reaction speed is NO LONGER monotone with difficulty: the harness (sim-ai-vs-ai.ts --sweep)
+// showed fast reaction makes a tactical AI thrash, so the strongest tier reacts SLOWLY. We only
+// assert reaction is a sane positive everywhere (covered in the loop above) — not that hard is fastest.
 check('hard spends more CP than easy', AI.difficulties.hard.cpBudgetFrac > AI.difficulties.easy.cpBudgetFrac);
 
 console.log(`\n${pass}/${pass + fail} passed`);
