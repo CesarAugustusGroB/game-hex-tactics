@@ -249,10 +249,10 @@ export function makeAiController(
 
       for (const p of plan) {
         if (grp.size >= bandCap(grp.g)) break;     // this band reached its (wave) size cap
-        if (!fastDeploy && cpSpent + 2 > budget) break;   // fastDeploy: placement is free of the CP budget
+        if (cpSpent + 2 > budget) break;           // placement spends CP up to the per-tick budget
         if (!state.placeCohort(p.groupId, p.anchorHex, p.unitType)) continue;
         amassCursor = (amassCursor + 1) % groups.length; // next cohort starts the scan one band on
-        if (!fastDeploy) cpSpent += 2;
+        cpSpent += 2;
         grp.size += COHORT_SIZE;
         freeZoneCount -= COHORT_SIZE;
         roster[p.unitType] = Math.max(0, roster[p.unitType] - COHORT_SIZE);

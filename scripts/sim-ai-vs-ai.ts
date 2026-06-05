@@ -26,7 +26,7 @@ import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK, CE
 import { CAPTURE_CENTER, INITIAL_ROSTER, COHORT_SIZE } from '../src/data/game';
 import { deployZoneFor } from '../src/canvas/constants';
 import type { Doctrine, Difficulty, AiCapability } from '../src/data/ai';
-import { DIFFICULTIES, AI } from '../src/data/ai';
+import { DIFFICULTIES } from '../src/data/ai';
 
 const RADIUS = 12;
 const MAX_TICKS = 2000;
@@ -68,10 +68,6 @@ function runMatch(red: Side, blue: Side): Result {
     blue: makeAiController('blue', blue.doctrine, blue.difficulty, blue.capabilities, blue.reactionTicks),
   };
   const zone: Record<Team, ReadonlySet<string>> = { red: redZone, blue: blueZone };
-  // fastDeploy teams place cohorts for free (mirror of the live host) — see ai.json.
-  const free: Record<Team, boolean> = {
-    red: !!AI.difficulties[red.difficulty].fastDeploy, blue: !!AI.difficulties[blue.difficulty].fastDeploy,
-  };
   let units: Unit[] = [];
   let cp: CommandPoints = { red: CP_INITIAL, blue: CP_INITIAL };
   const roster: Record<Team, Record<UnitType, number>> = {
@@ -107,13 +103,13 @@ function runMatch(red: Side, blue: Side): Result {
         myScore: score[team], enemyScore: score[team === 'red' ? 'blue' : 'red'],
         roster: roster[team], deployZone: zone[team],
         placeCohort: (gid, anchor, unitType) => {
-          if (roster[team][unitType] <= 0 || (!free[team] && cp[team] < CP_COSTS.placeCohort)) return false;
+          if (roster[team][unitType] <= 0 || cp[team] < CP_COSTS.placeCohort) return false;
           const occupied = new Set(units.map(u => HexUtils.key(u.tacticalHex)));
           const spots = [anchor, ...HexUtils.getNeighbors(anchor)]
             .filter(h => zone[team].has(HexUtils.key(h)) && !occupied.has(HexUtils.key(h)))
             .slice(0, COHORT_SIZE);
           if (spots.length === 0) return false;
-          if (!free[team]) cp[team] -= CP_COSTS.placeCohort;
+          cp[team] -= CP_COSTS.placeCohort;
           for (const h of spots) {
             if (roster[team][unitType] <= 0) break;
             units.push({ id: `${team[0]}${units.length}`, team, unitType, tacticalHex: h, homeHex: h,

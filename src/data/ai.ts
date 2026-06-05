@@ -37,8 +37,10 @@ export interface DifficultyConfig {
    *  a rolling stream of waves. Default (false) amasses the whole front in parallel and launches
    *  it together. */
   serialWaves?: boolean;
-  /** Fast deploy: the AI's cohort placement costs NO command points, so it lays units down in a
-   *  continuous brush instead of a CP-throttled drip. Reinforcement/order CP is unaffected. */
+  /** Fast deploy: emit a whole band of placement anchors per tick so the AI brushes units down as
+   *  fast as its CP budget allows (like a human click-spamming), instead of the default ~1 cohort
+   *  per tick. Placement still SPENDS command points normally — this only lifts the artificial
+   *  per-tick anchor cap, not the cost. */
   fastDeploy?: boolean;
   /** Horizontal fronts: each band deploys as a WIDE line spanning the full map width (filling the
    *  front row across, then back), instead of a narrow lateral column. With serialWaves this sends
