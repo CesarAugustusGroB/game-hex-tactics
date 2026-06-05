@@ -46,6 +46,10 @@ export interface DifficultyConfig {
    *  front row across, then back), instead of a narrow lateral column. With serialWaves this sends
    *  one full battle line at a time. Supersedes the centre-first column layout. */
   horizontalFront?: boolean;
+  /** Combined-arms waves: each serial wave is ONE group laid out as a battle line — infantry front
+   *  (centre-thick), skirmishers in the rear, cavalry on the flanks — via planCombinedArmsWave,
+   *  instead of one unit type per band. Implies a horizontal front. */
+  combinedArms?: boolean;
 }
 
 /** Counterattack tuning: how "danger of defeat" is blended and how far it lowers the launch bar. */
