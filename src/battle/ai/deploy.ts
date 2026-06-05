@@ -201,7 +201,7 @@ export function planCombinedArmsWave(input: CombinedArmsInput): Placement[] {
   // mass at the centre columns so the middle is thicker.
   const centre = pts.filter(p => p.lat >= leftEdge && p.lat <= rightEdge);
   const frontLine = [...centre].sort((a, b) => b.fwd - a.fwd || Math.abs(a.lat - midX) - Math.abs(b.lat - midX));
-  const deepCentre = [...centre].sort((a, b) => Math.abs(a.lat - midX) - Math.abs(b.lat - midX) || b.fwd - a.fwd);
+  const deepCentre = [...centre].sort((a, b) => Math.abs(a.lat - midX) - Math.abs(b.lat - midX) || a.fwd - b.fwd);
   const infDeep = Math.round(infTotal * CENTRE_DEPTH_FRAC);
   place(frontLine, 'infantry', infTotal - infDeep);
   place(deepCentre, 'infantry', infDeep);
