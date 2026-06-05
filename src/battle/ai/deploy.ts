@@ -197,11 +197,13 @@ export function planCombinedArmsWave(input: CombinedArmsInput): Placement[] {
   place(leftFlank, 'cavalry', Math.ceil(cavTotal / 2));
   place(rightFlank, 'cavalry', Math.floor(cavTotal / 2));
 
-  // INFANTRY: wide front line across the centre span (front row first, centre-out), then a deeper
-  // mass at the centre columns so the middle is thicker.
+  // INFANTRY: wide front line across the centre span (front row first, centre-out), then a second
+  // mass packed into the centre columns so the middle is thicker. The deep pass takes centre-most
+  // columns, front-of-remaining first (the front rank is already `used`, so this fills the ranks
+  // just behind it) — leaving the rear rows free for the skirmishers below.
   const centre = pts.filter(p => p.lat >= leftEdge && p.lat <= rightEdge);
   const frontLine = [...centre].sort((a, b) => b.fwd - a.fwd || Math.abs(a.lat - midX) - Math.abs(b.lat - midX));
-  const deepCentre = [...centre].sort((a, b) => Math.abs(a.lat - midX) - Math.abs(b.lat - midX) || a.fwd - b.fwd);
+  const deepCentre = [...centre].sort((a, b) => Math.abs(a.lat - midX) - Math.abs(b.lat - midX) || b.fwd - a.fwd);
   const infDeep = Math.round(infTotal * CENTRE_DEPTH_FRAC);
   place(frontLine, 'infantry', infTotal - infDeep);
   place(deepCentre, 'infantry', infDeep);

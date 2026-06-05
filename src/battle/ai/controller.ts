@@ -345,6 +345,9 @@ export function makeAiController(
         size: grp.size, massed: grp.size >= bandShare, inZone,
         cpSpentAmassing: cpSpentAmassing.get(grp.g) ?? 0, canAmass: false,
         isReserve, threatened, atDefensePos,
+        // For combinedArms (mixed-type) groups this is the doctrine SLOT type, not the group's
+        // actual mix — fine while test lacks charge/unleash (those downgrade to march anyway). If a
+        // combinedArms tier ever gains them, derive groupType from the group's dominant unit type.
         groupType: typeOfGroup(grp.g),
         enemyInChargeRange: enemyDist <= combat.chargeReach,
         enemyInPlay: enemyDist <= combat.engageRange,
