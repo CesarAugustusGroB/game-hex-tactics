@@ -41,6 +41,6 @@
     "easy":   { "reactionTicks": 6,  "cpBudgetFrac": 0.8, "forceScale": 0.7, "capabilities": ["charge"] },
     "normal": { "reactionTicks": 2,  "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": [] },
     "hard":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["raid", "defend"] },
-    "test":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["defend"], "frontLines": true, "fastDeploy": true }
+    "test":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["defend"], "frontLines": true }
   }
 }
