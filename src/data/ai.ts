@@ -46,10 +46,6 @@ export interface DifficultyConfig {
    *  front row across, then back), instead of a narrow lateral column. With serialWaves this sends
    *  one full battle line at a time. Supersedes the centre-first column layout. */
   horizontalFront?: boolean;
-  /** Combined-arms waves: each serial wave is ONE group laid out as a battle line — infantry front
-   *  (centre-thick), skirmishers in the rear, cavalry on the flanks — via planCombinedArmsWave,
-   *  instead of one unit type per band. Implies a horizontal front. */
-  combinedArms?: boolean;
   /** Rolling front-lines doctrine: ONE attack group is built as successive horizontal lines, each
    *  filled centre→flanks, one unit type per line cycling [infantry, skirmisher, cavalry], and
    *  marched forward as a continuous rolling front. The other front groups stay dormant; the reserve

@@ -187,8 +187,7 @@ function bisect(reps: number) {
     '+serial':    { serialWaves: true },
     '+fast':      { fastDeploy: true },
     '+horiz':     { horizontalFront: true },
-    '+combined':  { combinedArms: true },
-    '+horiz+comb':{ horizontalFront: true, combinedArms: true },
+    '+frontlines': { frontLines: true },
     '+ser+horiz': { serialWaves: true, horizontalFront: true },
   };
   for (const [name, flags] of Object.entries(variants)) {
