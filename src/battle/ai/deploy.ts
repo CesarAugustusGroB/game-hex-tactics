@@ -273,7 +273,8 @@ export function planFrontLines(input: FrontLinesInput): Placement[] {
   const pickType = (lineIdx: number): UnitType | null => {
     const want = lineTypes[lineIdx % lineTypes.length];
     if (remaining[want] > 0) return want;
-    return (['infantry', 'cavalry', 'skirmisher'] as UnitType[]).find(t => remaining[t] > 0) ?? null;
+    return lineTypes.find(t => remaining[t] > 0)
+      ?? (['infantry', 'cavalry', 'skirmisher'] as UnitType[]).find(t => remaining[t] > 0) ?? null;
   };
 
   let lineIdx = 0;

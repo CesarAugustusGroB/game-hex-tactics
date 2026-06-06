@@ -10,10 +10,13 @@ const check = (name: string, cond: boolean, extra = '') => {
   if (cond) pass++; else fail++;
 };
 
-// Wide, deep deploy strip (blue side → frontSign +1, front = high y).
+// Wide horizontal rows (blue side → frontSign +1, front = high y). Cells with q=2i, r=-i-d share
+// the same pixel-y, so each depth d is one WIDE line of 13 cells — exercises the centre-out fill.
 const freeHexes: { q: number; r: number; key: string }[] = [];
-for (let q = -12; q <= 12; q++) for (let r = -6; r <= 0; r++)
+for (let d = 0; d <= 8; d++) for (let i = -6; i <= 6; i++) {
+  const q = 2 * i, r = -i - d;
   freeHexes.push({ q, r, key: HexUtils.key({ q, r }) });
+}
 
 const gid = 1 as GroupId;
 const roster: Record<UnitType, number> = { infantry: 200, cavalry: 200, skirmisher: 200 };
