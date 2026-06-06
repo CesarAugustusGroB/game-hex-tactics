@@ -21,7 +21,7 @@ import {
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
 import { type WaterFilterHandle } from '../canvas/water-filter';
-import { HUD } from '../canvas/HUD';
+import { HUD, type AiTeamConfig } from '../canvas/HUD';
 import { generateWorldData as generateWorldDataPure, resolveMapType, type GenSettings, type MapTypeChoice } from '../canvas/world-gen';
 import { drawTerrain, drawGrid } from '../canvas/render/drawTerrain';
 import { drawDetails as drawDetailsRender } from '../canvas/render/drawDetails';
@@ -34,7 +34,6 @@ import { useBattleTick, type BattleTickCtx } from '../canvas/useBattleTick';
 import { GRID_RADIUS, DEFAULT_MAP_TYPE, type MapTypeId } from '../data/world-gen';
 import { registerAiController } from '../battle/ai';
 import { makeAiController } from '../battle/ai/controller';
-import type { Doctrine, Difficulty } from '../data/ai';
 
 const INITIAL_SEED = Math.floor(Math.random() * 0x100000000);
 
@@ -140,9 +139,14 @@ export const GameCanvas: React.FC = () => {
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
   const [rosters, setRosters] = useState<Rosters>(makeInitialRosters);
   const [isBattleRunning, setIsBattleRunning] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(true);
-  const [aiDoctrine, setAiDoctrine] = useState<Doctrine>('balanced');
-  const [aiDifficulty, setAiDifficulty] = useState<Difficulty>('normal');
+  // Per-team AI: either side can be bot-driven (both on → AI-vs-AI spectate). Blue defaults on
+  // (the classic enemy), red off (the human's side).
+  const [aiConfig, setAiConfig] = useState<Record<Team, AiTeamConfig>>({
+    red:  { enabled: false, doctrine: 'balanced', difficulty: 'normal' },
+    blue: { enabled: true,  doctrine: 'balanced', difficulty: 'normal' },
+  });
+  const setTeamAi = (team: Team, patch: Partial<AiTeamConfig>) =>
+    setAiConfig(prev => ({ ...prev, [team]: { ...prev[team], ...patch } }));
   // Set true once terrain-related textures (currently just grass) finish loading.
   // drawMap reads it via deps so the map redraws once textures are ready.
   const [terrainTexturesLoaded, setTerrainTexturesLoaded] = useState(false);
@@ -579,12 +583,14 @@ export const GameCanvas: React.FC = () => {
   };
   useBattleTick(battleCtx, isBattleRunning);
 
-  // Install the enemy AI for `blue` when enabled; tear down when off or on config change.
+  // Install/tear down an AI controller per team from its config. Either side (or both) can be a bot.
   useEffect(() => {
-    if (!aiEnabled) { registerAiController('blue', null); return; }
-    registerAiController('blue', makeAiController('blue', aiDoctrine, aiDifficulty));
-    return () => registerAiController('blue', null);
-  }, [aiEnabled, aiDoctrine, aiDifficulty]);
+    for (const team of ['red', 'blue'] as const) {
+      const c = aiConfig[team];
+      registerAiController(team, c.enabled ? makeAiController(team, c.doctrine, c.difficulty) : null);
+    }
+    return () => { registerAiController('red', null); registerAiController('blue', null); };
+  }, [aiConfig]);
 
   // RETREAT: orderly pull-back — issue sim 'retreat' mode (walks the block backward and
   // auto-clears the order when it lands in the deploy zone). Works mid-melee (the sim ignores
@@ -908,12 +914,8 @@ export const GameCanvas: React.FC = () => {
       setCpRegenN={setCpRegenN}
       pointsToWin={pointsToWin}
       setPointsToWin={setPointsToWin}
-      aiEnabled={aiEnabled}
-      aiDoctrine={aiDoctrine}
-      aiDifficulty={aiDifficulty}
-      setAiEnabled={setAiEnabled}
-      setAiDoctrine={setAiDoctrine}
-      setAiDifficulty={setAiDifficulty}
+      aiConfig={aiConfig}
+      setTeamAi={setTeamAi}
     />
   );
 };
