@@ -6,7 +6,7 @@ import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { CP_COSTS } from '../command-points';
 import { COHORT_SIZE, CAPTURE_CENTER } from '../../data/game';
 import { POINTS_TO_WIN } from '../../data/scoring';
-import { planDeployment, planCombinedArmsWave } from './deploy';
+import { planDeployment, planFrontLines } from './deploy';
 import { GROUP_IDS, isGroupSealed } from '../groups';
 import { evaluateRules, type RuleCtx } from './rules';
 import { perceive, CENTER_KEYS } from './perception';
@@ -66,7 +66,7 @@ export function makeAiController(
   const serial = diff.serialWaves ?? false;
   const fastDeploy = diff.fastDeploy ?? false;
   const horizontal = diff.horizontalFront ?? false;
-  const combinedArms = diff.combinedArms ?? false;
+  const frontLines = diff.frontLines ?? false;
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
   const frontSign = team === 'red' ? -1 : 1;
@@ -218,8 +218,12 @@ export function makeAiController(
     // the initial CP pours into one big centre punch); the flank/reserve bands stay normal-sized.
     // Horizontal fronts want UNIFORM wide lines, so the big-centre wave is disabled there.
     const BIG_WAVE_MULT = 2.5;
-    const bandCap = (g: GroupId): number =>
-      serial && !horizontal && g === GROUP_IDS[0] ? Math.ceil(bandShare * BIG_WAVE_MULT) : bandShare;
+    // frontLines routes the WHOLE standing force into ONE attack group (the rolling front); the other
+    // groups stay dormant (cap 0) and the reserve is filled only reactively by the defend block above.
+    const bandCap = (g: GroupId): number => {
+      if (frontLines) return g === GROUP_IDS[0] ? targetUnits : 0;
+      return serial && !horizontal && g === GROUP_IDS[0] ? Math.ceil(bandShare * BIG_WAVE_MULT) : bandShare;
+    };
 
     // --- Amass phase: widen every eligible band in parallel, front-row-first. Scan order starts
     // at a round-robin cursor that advances once PER COHORT PLACED (not per tick) so a scarce CP
@@ -232,7 +236,7 @@ export function makeAiController(
     // the next band becomes the active fill.
     const activeFillGid = serial
       ? groups.find(g => !g.sealed && g.size < bandCap(g.g)
-          && (combinedArms ? rosterTotal > 0 : (roster[typeOfGroup(g.g)] ?? 0) > 0))?.g
+          && (frontLines ? rosterTotal > 0 : (roster[typeOfGroup(g.g)] ?? 0) > 0))?.g
       : undefined;
     for (const grp of amassOrder) {
       if (serial && grp.g !== activeFillGid) continue;
@@ -249,8 +253,8 @@ export function makeAiController(
       const freeHexes = [...state.deployZone]
         .filter(k => !occupied.has(k))
         .map(k => { const { q, r } = HexUtils.fromKey(k); return { q, r, key: k }; });
-      const plan = combinedArms
-        ? planCombinedArmsWave({
+      const plan = frontLines
+        ? planFrontLines({
             groupId: grp.g, freeHexes, roster, frontSign,
             waveCohorts: Math.ceil(bandCap(grp.g) / COHORT_SIZE),
           })
@@ -294,7 +298,7 @@ export function makeAiController(
       // (danger-lowered) launchShare.
       const full = serial ? bandCap(grp.g) : launchShare;
       if (grp.size >= full) return true;
-      const typeLeft = combinedArms ? rosterTotal > 0 : (roster[typeOfGroup(grp.g)] ?? 0) > 0;
+      const typeLeft = frontLines ? rosterTotal > 0 : (roster[typeOfGroup(grp.g)] ?? 0) > 0;
       const canGrowMore = grp.size < bandCap(grp.g) && freeZoneCount > 0 && typeLeft;
       return !canGrowMore;
     };
