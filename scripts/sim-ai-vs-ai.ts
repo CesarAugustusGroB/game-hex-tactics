@@ -26,10 +26,11 @@ import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK, CE
 import { CAPTURE_CENTER, INITIAL_ROSTER, COHORT_SIZE } from '../src/data/game';
 import { deployZoneFor } from '../src/canvas/constants';
 import type { Doctrine, Difficulty, AiCapability } from '../src/data/ai';
-import { DIFFICULTIES } from '../src/data/ai';
+import { DIFFICULTIES, AI } from '../src/data/ai';
 
 const RADIUS = 12;
 const MAX_TICKS = 2000;
+const REVERSE_TICK_ORDER = process.argv.includes('--rev');
 
 // Radius-RADIUS all-GRASSLAND axial disk (the open battlefield), mirroring world-gen's disk shape.
 const grid: { hex: Hex; type: string }[] = [];
@@ -91,7 +92,8 @@ function runMatch(red: Side, blue: Side): Result {
     const bonusTeam: Team | null = redFlag && !blueFlag ? 'red' : blueFlag && !redFlag ? 'blue' : null;
     cp = applyRegenLocal(cp, CP_REGEN_PER_TICK_STEP, bonusTeam);
 
-    for (const team of ['red', 'blue'] as const) {
+    const tickOrder: Team[] = REVERSE_TICK_ORDER ? ['blue', 'red'] : ['red', 'blue'];
+    for (const team of tickOrder) {
       const state: AiTickState = {
         team, tick,
         myUnits: units.filter(u => u.team === team),
@@ -176,6 +178,147 @@ function applyRegenLocal(cp: CommandPoints, perTick: number, bonusTeam: Team | n
 const fmt = (r: Result) =>
   `${r.winner ?? 'DRAW'} wins  red ${r.score.red.toFixed(0)} : ${r.score.blue.toFixed(0)} blue  ` +
   `(${r.ticks} ticks, peak red=${r.peak.red} blue=${r.peak.blue})`;
+
+function bisect(reps: number) {
+  // Inject flag-variant difficulties (base = hard: rt10, raid+defend, which is 50/50) and measure
+  // PURE SIDE BIAS for each, to isolate which test flag flips red→0%.
+  const base = AI.difficulties.hard;
+  const variants: Record<string, object> = {
+    '+serial':    { serialWaves: true },
+    '+fast':      { fastDeploy: true },
+    '+horiz':     { horizontalFront: true },
+    '+combined':  { combinedArms: true },
+    '+horiz+comb':{ horizontalFront: true, combinedArms: true },
+    '+ser+horiz': { serialWaves: true, horizontalFront: true },
+  };
+  for (const [name, flags] of Object.entries(variants)) {
+    (AI.difficulties as Record<string, object>)[name] = { ...base, capabilities: [...base.capabilities], ...flags };
+  }
+  console.log(`\n=== Flag bisection: pure side bias (${reps} reps), base=hard (50/50) ===`);
+  for (const name of ['hard', ...Object.keys(variants), 'test']) {
+    let red = 0, blue = 0;
+    for (let i = 0; i < reps; i++) {
+      const w = runMatch({ doctrine: 'balanced', difficulty: name as Difficulty }, { doctrine: 'balanced', difficulty: name as Difficulty }).winner;
+      if (w === 'red') red++; else if (w === 'blue') blue++;
+    }
+    console.log(`  ${name.padEnd(12)}: red ${(100 * red / reps).toFixed(0).padStart(3)}%  blue ${(100 * blue / reps).toFixed(0).padStart(3)}%`);
+  }
+}
+
+function trace() {
+  // One test-vs-test match, instrumented. Replicates runMatch's loop but dumps periodic state so we
+  // can see WHY red (0%) and blue (100%) diverge: deployment composition/position, launch timing,
+  // who crosses the centre, scores.
+  const red: Side = { doctrine: 'balanced', difficulty: 'test' };
+  const blue: Side = { doctrine: 'balanced', difficulty: 'test' };
+  const ctrl: Record<Team, AiTickFn> = {
+    red: makeAiController('red', red.doctrine, red.difficulty),
+    blue: makeAiController('blue', blue.doctrine, blue.difficulty),
+  };
+  const zone: Record<Team, ReadonlySet<string>> = { red: redZone, blue: blueZone };
+  let units: Unit[] = [];
+  let cp: CommandPoints = { red: CP_INITIAL, blue: CP_INITIAL };
+  const roster: Record<Team, Record<UnitType, number>> = { red: { ...INITIAL_ROSTER }, blue: { ...INITIAL_ROSTER } };
+  const orders = new Map<string, GroupOrder>();
+  let score: Score = { red: 0, blue: 0 };
+  const marched = new Set<string>();
+  const centreY = HexUtils.hexToPixel(CAPTURE_CENTER).y;
+  const sideDepth = (t: Team, u: Unit) => (t === 'red' ? -1 : 1) * (HexUtils.hexToPixel(u.tacticalHex).y - centreY);
+  console.log(`centreY=${centreY.toFixed(1)}  redZone=${redZone.size}  blueZone=${blueZone.size}`);
+
+  for (let i = 0; i < MAX_TICKS; i++) {
+    const tick = i + 1;
+    const onFlag = (t: Team) => units.some(u => u.team === t && u.hp > 0 && centerKeys.has(HexUtils.key(u.tacticalHex)));
+    const redFlag = onFlag('red'), blueFlag = onFlag('blue');
+    const bonusTeam: Team | null = redFlag && !blueFlag ? 'red' : blueFlag && !redFlag ? 'blue' : null;
+    cp = applyRegenLocal(cp, CP_REGEN_PER_TICK_STEP, bonusTeam);
+    for (const team of (REVERSE_TICK_ORDER ? ['blue', 'red'] : ['red', 'blue']) as Team[]) {
+      const state: AiTickState = {
+        team, tick,
+        myUnits: units.filter(u => u.team === team),
+        enemyUnits: units.filter(u => u.team !== team),
+        myOrders: [...orders.values()].filter(o => o.team === team),
+        allOrders: orders, gridData: grid, cp: cp[team],
+        myScore: score[team], enemyScore: score[team === 'red' ? 'blue' : 'red'],
+        roster: roster[team], deployZone: zone[team],
+        placeCohort: (gid, anchor, unitType) => {
+          if (roster[team][unitType] <= 0 || cp[team] < CP_COSTS.placeCohort) return false;
+          const occupied = new Set(units.map(u => HexUtils.key(u.tacticalHex)));
+          const spots = [anchor, ...HexUtils.getNeighbors(anchor)]
+            .filter(h => zone[team].has(HexUtils.key(h)) && !occupied.has(HexUtils.key(h))).slice(0, COHORT_SIZE);
+          if (spots.length === 0) return false;
+          cp[team] -= CP_COSTS.placeCohort;
+          for (const h of spots) {
+            if (roster[team][unitType] <= 0) break;
+            units.push({ id: `${team[0]}${units.length}`, team, unitType, tacticalHex: h, homeHex: h,
+              groupId: gid, hp: MAX_HP_BY_TYPE[unitType], state: 'idle', nextMoveTick: 0, visionRadius: 4 });
+            roster[team][unitType]--;
+          }
+          return true;
+        },
+        issueOrder: (gid, change, intent) => {
+          const k = `${team}:${gid}`;
+          let cost = CP_COSTS[intent];
+          if (intent === 'march' && !marched.has(k)) cost = CP_COSTS.firstMarch;
+          if (cp[team] < cost) return false;
+          cp[team] -= cost;
+          if (intent === 'march') marched.add(k);
+          orders.set(k, { team, groupId: gid, attackTarget: null, heading: 5, ...orders.get(k), ...change });
+          return true;
+        },
+        clearOrder: (gid) => { orders.delete(`${team}:${gid}`); },
+      };
+      ctrl[team](state);
+    }
+    const res = simulateTick(units, orders, { damagePerTick: 10, mapApi, currentTick: tick, captureZone: centerHexes });
+    units = res.units;
+    const sc = scoreTick({ units, score, centerKeys,
+      scoringZone: { red: blueZone, blue: redZone },
+      config: { pointsToWin: POINTS_TO_WIN, pointsPerUnitReached: POINTS_PER_UNIT_REACHED, centerHoldPointsPerTick: CENTER_HOLD_POINTS_PER_TICK } });
+    score = sc.score;
+    if (sc.reachedUnitIds.size > 0)
+      for (const team of ['red', 'blue'] as const)
+        for (const ut of ['infantry', 'cavalry', 'skirmisher'] as const) roster[team][ut] += sc.rosterDelta[team][ut];
+    units = units.filter(u => !sc.reachedUnitIds.has(u.id) && u.hp > 0);
+    for (const k of [...marched]) {
+      const [t, g] = k.split(':');
+      if (!units.some(u => u.team === t && u.groupId === Number(g))) { marched.delete(k); orders.delete(k); }
+    }
+
+    if (tick <= 80 && tick % 8 === 0) {
+      const line = (team: Team) => {
+        const us = units.filter(u => u.team === team && u.hp > 0);
+        const d = us.map(u => sideDepth(team, u));
+        const ord = [1, 2, 3, 4].map(g => orders.get(`${team}:${g}`)?.mode?.[0] ?? '·').join('');
+        const maxFwd = d.length ? Math.max(...d).toFixed(0) : '—';
+        return `n=${us.length.toString().padStart(3)} frontDepth=${maxFwd.padStart(5)} ord=${ord}`;
+      };
+      console.log(`t${tick.toString().padStart(3)}: red[${line('red')}] blue[${line('blue')}]`);
+    }
+    if (tick === 25 || tick === 60) {
+      console.log(`\n--- tick ${tick}: deployment snapshot ---`);
+      for (const team of ['red', 'blue'] as const) {
+        const us = units.filter(u => u.team === team && u.hp > 0);
+        const byType = (t: UnitType) => us.filter(u => u.unitType === t).length;
+        const byGroup = [1, 2, 3, 4].map(g => us.filter(u => u.groupId === g).length);
+        const depths = us.map(u => sideDepth(team, u));
+        const lats = us.map(u => HexUtils.hexToPixel(u.tacticalHex).x);
+        const avg = (a: number[]) => a.length ? (a.reduce((s, x) => s + x, 0) / a.length).toFixed(0) : '—';
+        const ord = [1, 2, 3, 4].map(g => orders.get(`${team}:${g}`)?.mode?.[0] ?? '·').join('');
+        console.log(`  ${team}: n=${us.length} inf=${byType('infantry')} cav=${byType('cavalry')} skr=${byType('skirmisher')}  groups=[${byGroup}]  avgDepth=${avg(depths)} latSpread=${lats.length ? (Math.max(...lats) - Math.min(...lats)).toFixed(0) : '—'}  orders=${ord} cp=${cp[team].toFixed(0)}`);
+      }
+    }
+    if (tick % 200 === 0 || sc.winner) {
+      const stat = (team: Team) => {
+        const us = units.filter(u => u.team === team && u.hp > 0);
+        const past = us.filter(u => sideDepth(team, u) > 0).length;
+        return `n=${us.length} pastCentre=${past}`;
+      };
+      console.log(`t${tick}: score ${score.red.toFixed(0)}:${score.blue.toFixed(0)}  red[${stat('red')}] blue[${stat('blue')}]  cp ${cp.red.toFixed(0)}:${cp.blue.toFixed(0)}`);
+    }
+    if (sc.winner) { console.log(`\nWINNER: ${sc.winner} at tick ${tick}`); break; }
+  }
+}
 
 function study(reps: number) {
   const diffs: Difficulty[] = DIFFICULTIES;
@@ -317,7 +460,12 @@ function sweep(reps: number) {
   }
 }
 
-if (process.argv.includes('--sweep')) {
+if (process.argv.includes('--bisect')) {
+  const repArg = process.argv.find(a => /^\d+$/.test(a));
+  bisect(repArg ? Number(repArg) : 20);
+} else if (process.argv.includes('--trace')) {
+  trace();
+} else if (process.argv.includes('--sweep')) {
   const repArg = process.argv.find(a => /^\d+$/.test(a));
   sweep(repArg ? Number(repArg) : 24);
 } else if (process.argv.includes('--tune')) {
