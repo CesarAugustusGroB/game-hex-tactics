@@ -214,3 +214,84 @@ export function planCombinedArmsWave(input: CombinedArmsInput): Placement[] {
 
   return placements;
 }
+
+export interface FrontLinesInput {
+  /** The single attack group this rolling front is built into. */
+  groupId: GroupId;
+  /** Free deploy-zone hexes (unoccupied), any order. */
+  freeHexes: { q: number; r: number; key: string }[];
+  /** Undeployed roster by type. */
+  roster: Readonly<Record<UnitType, number>>;
+  /** +1 if the enemy is on the larger-py side (blue), -1 otherwise (red). */
+  frontSign: number;
+  /** Max cohorts to place this plan. */
+  waveCohorts: number;
+  /** Unit type cycle, one type per successive line. Default [infantry, skirmisher, cavalry]. */
+  lineTypes?: UnitType[];
+}
+
+const DEFAULT_LINE_TYPES: UnitType[] = ['infantry', 'skirmisher', 'cavalry'];
+
+/**
+ * Build ONE group as a symmetric rolling front of horizontal lines:
+ * - Cells are bucketed into rows by forward-depth (cells sharing a pixel-y are one line) and filled
+ *   front (highest fwd) → back.
+ * - Each row is filled CENTRE-OUT (closest to the lateral midpoint first), claiming each cohort's
+ *   footprint so lines stay spaced and never overlap.
+ * - One unit type per line, cycling `lineTypes` (line 1 infantry = front wall, line 2 skirmishers,
+ *   line 3 cavalry, line 4 infantry…). If a line's type is out of stock, fall back to any remaining
+ *   type so the build never stalls. Pure.
+ */
+export function planFrontLines(input: FrontLinesInput): Placement[] {
+  const { groupId, freeHexes, roster, frontSign, waveCohorts, lineTypes = DEFAULT_LINE_TYPES } = input;
+  if (freeHexes.length === 0 || waveCohorts <= 0) return [];
+
+  const pts = freeHexes.map(h => {
+    const p = HexUtils.hexToPixel(h);
+    return { q: h.q, r: h.r, lat: p.x, fwd: frontSign * p.y };
+  });
+  const xs = pts.map(p => p.lat);
+  const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+
+  // Bucket cells into rows by forward-depth (rounded — distinct rows are ~35px apart, never collide),
+  // ordered front → back.
+  const rows = new Map<number, typeof pts>();
+  for (const p of pts) {
+    const k = Math.round(p.fwd);
+    const arr = rows.get(k);
+    if (arr) arr.push(p); else rows.set(k, [p]);
+  }
+  const rowKeys = [...rows.keys()].sort((a, b) => b - a);
+
+  const remaining: Record<UnitType, number> = { ...roster };
+  const used = new Set<string>();
+  const placements: Placement[] = [];
+  const claim = (q: number, r: number) => {
+    used.add(HexUtils.key({ q, r }));
+    for (const n of HexUtils.getNeighbors({ q, r })) used.add(HexUtils.key(n));
+  };
+  const pickType = (lineIdx: number): UnitType | null => {
+    const want = lineTypes[lineIdx % lineTypes.length];
+    if (remaining[want] > 0) return want;
+    return (['infantry', 'cavalry', 'skirmisher'] as UnitType[]).find(t => remaining[t] > 0) ?? null;
+  };
+
+  let lineIdx = 0;
+  for (const rk of rowKeys) {
+    if (placements.length >= waveCohorts) break;
+    const type = pickType(lineIdx);
+    if (type == null) break;                       // roster fully exhausted
+    const row = rows.get(rk)!.slice().sort((a, b) => Math.abs(a.lat - midX) - Math.abs(b.lat - midX));
+    let placedThisRow = 0;
+    for (const c of row) {
+      if (placements.length >= waveCohorts || remaining[type] <= 0) break;
+      if (used.has(HexUtils.key({ q: c.q, r: c.r }))) continue;
+      placements.push({ groupId, anchorHex: { q: c.q, r: c.r }, unitType: type });
+      claim(c.q, c.r);
+      remaining[type] -= Math.min(COHORT_SIZE, remaining[type]);
+      placedThisRow++;
+    }
+    if (placedThisRow > 0) lineIdx++;              // a line was laid → next line cycles type
+  }
+  return placements;
+}
