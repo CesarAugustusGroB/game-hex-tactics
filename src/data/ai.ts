@@ -50,6 +50,11 @@ export interface DifficultyConfig {
    *  (centre-thick), skirmishers in the rear, cavalry on the flanks — via planCombinedArmsWave,
    *  instead of one unit type per band. Implies a horizontal front. */
   combinedArms?: boolean;
+  /** Rolling front-lines doctrine: ONE attack group is built as successive horizontal lines, each
+   *  filled centre→flanks, one unit type per line cycling [infantry, skirmisher, cavalry], and
+   *  marched forward as a continuous rolling front. The other front groups stay dormant; the reserve
+   *  group defends the back line reactively. Replaces the combined-arms chunk layout for `test`. */
+  frontLines?: boolean;
 }
 
 /** Counterattack tuning: how "danger of defeat" is blended and how far it lowers the launch bar. */
