@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Team, UnitType } from '../battle/simulate';
 import type { TeamAiProfile } from '../data/ai-profile';
-import { loadAiProfiles, saveAiProfiles } from '../data/ai-profile';
+import { loadAiProfiles, saveAiProfiles, resolveProfile } from '../data/ai-profile';
 import { DOCTRINES, DIFFICULTIES, ALL_CAPABILITIES } from '../data/ai';
 import type { Doctrine, Difficulty, AiCapability } from '../data/ai';
 import { PROFILE_NUM_FIELDS, effectiveNum, setNum } from './profileFields';
@@ -18,8 +18,11 @@ const numInput: React.CSSProperties = { width: 64, padding: '3px 6px', backgroun
 
 const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: TeamAiProfile) => void }> = ({ team, profile, onChange }) => {
   const accent = team === 'red' ? '#dc2626' : '#1d4ed8';
-  const caps = new Set(profile.capabilities ?? []);
-  const lt = profile.lineTypes ?? ['infantry', 'skirmisher', 'cavalry'];
+  // Show EFFECTIVE (resolved) state so the difficulty's implied caps/flags/lines are visible; a
+  // toggle then writes an explicit override on top.
+  const r = resolveProfile(profile);
+  const caps = new Set(r.capabilities);
+  const lt = r.lineTypes;
   const groups = [...new Set(PROFILE_NUM_FIELDS.map(f => f.group))];
   return (
     <div style={{ flex: 1, minWidth: 300 }}>
@@ -57,7 +60,7 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
         <div style={label}>Deploy flags</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {FLAGS.map(f => (
-            <button key={f} style={chip(!!profile[f])} onClick={() => onChange({ ...profile, [f]: !profile[f] })}>{f}</button>
+            <button key={f} style={chip(!!r[f])} onClick={() => onChange({ ...profile, [f]: !r[f] })}>{f}</button>
           ))}
         </div>
       </div>
