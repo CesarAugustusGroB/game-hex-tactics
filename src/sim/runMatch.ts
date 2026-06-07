@@ -149,8 +149,7 @@ export function runMatch(red: TeamAiProfile, blue: TeamAiProfile, opts: { revers
   return { winner, score, ticks: tick, peak, avgForce: avg(forceSum), avgStalled: avg(stalledSum) };
 }
 
-// Local regen mirroring command-points.applyRegen (importing the real one would pull CP_CAP defaults; we
-// keep the centre-hold bonus explicit here so the harness matches useBattleTick's wiring).
+// Inlined (not imported from command-points) so the harness keeps the centre-hold bonus explicit.
 export function applyRegenLocal(cp: CommandPoints, perTick: number, bonusTeam: Team | null): CommandPoints {
   const grow = (v: number, t: Team) =>
     Math.min(CP_CAP, Math.round((v + perTick * (t === bonusTeam ? 1 + CENTER_HOLD_REGEN_BONUS : 1)) * 100) / 100);

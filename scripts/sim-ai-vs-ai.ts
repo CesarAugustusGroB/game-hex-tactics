@@ -25,7 +25,7 @@ import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK } f
 import { CAPTURE_CENTER, INITIAL_ROSTER, COHORT_SIZE } from '../src/data/game';
 import type { Doctrine, Difficulty, AiCapability } from '../src/data/ai';
 import { DIFFICULTIES, AI } from '../src/data/ai';
-import { runMatch, runSeries, applyRegenLocal, grid, mapApi, redZone, blueZone, centerHexes, centerKeys, MAX_TICKS, type Result } from '../src/sim/runMatch';
+import { runMatch, applyRegenLocal, grid, mapApi, redZone, blueZone, centerHexes, centerKeys, MAX_TICKS, type Result } from '../src/sim/runMatch';
 import type { TeamAiProfile } from '../src/data/ai-profile';
 
 const REVERSE_TICK_ORDER = process.argv.includes('--rev');
