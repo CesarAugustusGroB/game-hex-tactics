@@ -11,6 +11,35 @@ const UNIT_TYPES: UnitType[] = ['infantry', 'skirmisher', 'cavalry'];
 const FLAGS: Array<'frontLines' | 'serialWaves' | 'horizontalFront' | 'fastDeploy'> =
   ['frontLines', 'serialWaves', 'horizontalFront', 'fastDeploy'];
 
+// Hover tooltips. The numeric fields carry their own `desc` in PROFILE_NUM_FIELDS.
+const DIFF_DESC: Record<string, string> = {
+  easy: 'Base débil: reacciona lento (rt6) y carga charge — el repertorio distractor que la hace perder vs el camp-rush.',
+  normal: 'Base neutra: sin capacidades, reacción rápida (rt2). El empuje-al-centro puro.',
+  hard: 'Base disciplinada: raid + defend, reacción lenta (rt10). El campeador del centro.',
+  test: 'Base más fuerte: doctrina de líneas rodantes (frontLines) + defend, rt10. Domina la escalera.',
+};
+const DOCTRINE_DESC: Record<string, string> = {
+  balanced: 'Frente infantería · caballería · skirmisher; reserva infantería.',
+  aggressive: 'Frente caballería · infantería · skirmisher; reserva caballería.',
+  defensive: 'Frente skirmisher · caballería · infantería; reserva skirmisher.',
+};
+const CAP_DESC: Record<string, string> = {
+  focusFire: 'Converge sobre el clúster enemigo más débil en vez de empujar el centro a ciegas.',
+  charge: 'La caballería lancea cuando hay un enemigo a chargeReach.',
+  unleash: 'Los skirmishers se sueltan a auto-adquirir y kitear a rango de misil.',
+  raid: 'Cuando va perdiendo, las bandas bajas empujan a través del centro a la línea enemiga por puntos.',
+  defend: 'La reserva tapa el carril de un raider detectado en su retaguardia (reactivo).',
+  repel: 'Los grupos más cercanos se devuelven a interceptar una masa que entró en su mitad.',
+  earlyLaunch: 'Lanza un frente a medio formar cuando sube el peligro de derrota.',
+};
+const FLAG_DESC: Record<string, string> = {
+  frontLines: 'Líneas rodantes: UN grupo de ataque, líneas horizontales centro→flancos, un tipo por línea. Reemplaza el layout de chunks.',
+  serialWaves: 'Amasa una banda completa y la lanza, luego la siguiente — olas en serie.',
+  horizontalFront: 'Cada banda despliega como línea ancha a todo el mapa, no como columna lateral.',
+  fastDeploy: 'Coloca una banda entera de anclas por tick (pincela rápido); igual gasta CP.',
+};
+const LINE_TYPES_DESC = 'Solo con frontLines: el tipo de unidad de cada línea sucesiva, del frente hacia atrás (cicla este orden).';
+
 const box: React.CSSProperties = { background: '#111a2e', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, padding: 14, marginBottom: 12 };
 const label: React.CSSProperties = { fontSize: 10, letterSpacing: 1, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 };
 const chip = (on: boolean, accent = '#0ea5e9'): React.CSSProperties => ({ padding: '4px 9px', borderRadius: 8, fontSize: 11, cursor: 'pointer', border: '1px solid rgba(255,255,255,.1)', background: on ? accent : 'rgba(255,255,255,.06)', color: '#e2e8f0' });
@@ -32,22 +61,22 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
         <div style={label}>Difficulty (base)</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
           {DIFFICULTIES.map(d => (
-            <button key={d} style={chip(profile.difficulty === d, '#d97706')} onClick={() => onChange({ ...profile, difficulty: d as Difficulty })}>{d}</button>
+            <button key={d} title={DIFF_DESC[d]} style={chip(profile.difficulty === d, '#d97706')} onClick={() => onChange({ ...profile, difficulty: d as Difficulty })}>{d}</button>
           ))}
         </div>
         <div style={label}>Doctrine</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {DOCTRINES.map(d => (
-            <button key={d} style={chip(profile.doctrine === d)} onClick={() => onChange({ ...profile, doctrine: d as Doctrine })}>{d}</button>
+            <button key={d} title={DOCTRINE_DESC[d]} style={chip(profile.doctrine === d)} onClick={() => onChange({ ...profile, doctrine: d as Doctrine })}>{d}</button>
           ))}
         </div>
       </div>
 
       <div style={box}>
-        <div style={label}>Capabilities</div>
+        <div style={label} title="Comportamientos tácticos que ejecuta esta IA (contraintuitivo: casi todos pierden vs el camp-rush puro).">Capabilities</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {ALL_CAPABILITIES.map(c => (
-            <button key={c} style={chip(caps.has(c))} onClick={() => {
+            <button key={c} title={CAP_DESC[c]} style={chip(caps.has(c))} onClick={() => {
               const next = new Set(caps);
               if (next.has(c)) next.delete(c); else next.add(c);
               onChange({ ...profile, capabilities: [...next] as AiCapability[] });
@@ -57,19 +86,19 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
       </div>
 
       <div style={box}>
-        <div style={label}>Deploy flags</div>
+        <div style={label} title="Cómo dibuja el ejército en la zona de despliegue.">Deploy flags</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {FLAGS.map(f => (
-            <button key={f} style={chip(!!r[f])} onClick={() => onChange({ ...profile, [f]: !r[f] })}>{f}</button>
+            <button key={f} title={FLAG_DESC[f]} style={chip(!!r[f])} onClick={() => onChange({ ...profile, [f]: !r[f] })}>{f}</button>
           ))}
         </div>
       </div>
 
       <div style={box}>
-        <div style={label}>Line types (front → back)</div>
+        <div style={label} title={LINE_TYPES_DESC}>Line types (front → back)</div>
         <div style={{ display: 'flex', gap: 6 }}>
           {[0, 1, 2].map(i => (
-            <select key={i} value={lt[i] ?? 'infantry'} style={numInput}
+            <select key={i} title={LINE_TYPES_DESC} value={lt[i] ?? 'infantry'} style={numInput}
               onChange={e => { const next = [...lt]; next[i] = e.target.value as UnitType; onChange({ ...profile, lineTypes: next }); }}>
               {UNIT_TYPES.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
@@ -83,8 +112,8 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '6px 8px', alignItems: 'center' }}>
             {PROFILE_NUM_FIELDS.filter(f => f.group === g).map(f => (
               <React.Fragment key={f.path}>
-                <span style={{ fontSize: 12, color: '#cbd5e1' }}>{f.label}</span>
-                <input type="number" step={f.step} value={effectiveNum(profile, f.path)} style={numInput}
+                <span style={{ fontSize: 12, color: '#cbd5e1', cursor: 'help' }} title={f.desc}>{f.label}</span>
+                <input type="number" step={f.step} value={effectiveNum(profile, f.path)} style={numInput} title={f.desc}
                   onChange={e => onChange(setNum(profile, f.path, Number(e.target.value)))} />
               </React.Fragment>
             ))}
@@ -117,9 +146,9 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   return (
     <div style={{ minHeight: '100vh', background: '#0b1220', color: '#e2e8f0', padding: 24, fontFamily: '"Inter", sans-serif', overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-        <button onClick={onExit} style={chip(false)}>← BACK TO GAME</button>
+        <button onClick={onExit} title="Volver al juego. Al volver, el juego arranca con los perfiles que hayas guardado con Go." style={chip(false)}>← BACK TO GAME</button>
         <h1 style={{ fontSize: 22, margin: 0 }}>AI LAB</h1>
-        <button onClick={go} style={{ ...chip(true, '#10b981'), marginLeft: 'auto', fontWeight: 800, padding: '8px 16px' }}>GO — save as game defaults</button>
+        <button onClick={go} title="Guarda ambos perfiles (rojo/azul) en localStorage como los defaults que usará el juego al abrir." style={{ ...chip(true, '#10b981'), marginLeft: 'auto', fontWeight: 800, padding: '8px 16px' }}>GO — save as game defaults</button>
         {saved && <span style={{ color: '#10b981', fontSize: 13 }}>✓ saved</span>}
       </div>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', maxWidth: 1100 }}>
@@ -127,12 +156,12 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         <TeamColumn team="blue" profile={profiles.blue} onChange={p => setTeam('blue', p)} />
       </div>
       <div style={{ ...box, maxWidth: 1100, marginTop: 16 }}>
-        <div style={label}>Simulation — RED profile vs BLUE profile</div>
+        <div style={label} title="Enfrenta el perfil de ROJO contra el de AZUL durante N partidas y agrega el resultado.">Simulation — RED profile vs BLUE profile</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <span style={{ fontSize: 12, color: '#cbd5e1' }}>reps</span>
-          <input type="number" min={1} step={1} value={reps} style={numInput}
+          <span style={{ fontSize: 12, color: '#cbd5e1', cursor: 'help' }} title="Cuántas partidas correr. Más reps = resultado menos ruidoso (pero más lento; test arrastra partidas largas).">reps</span>
+          <input type="number" min={1} step={1} value={reps} style={numInput} title="Cuántas partidas correr."
             onChange={e => setReps(Math.max(1, Number(e.target.value)))} />
-          <button onClick={run} disabled={running}
+          <button onClick={run} disabled={running} title="Corre la simulación AI-vs-AI con los perfiles de arriba."
             style={{ ...chip(true, '#0ea5e9'), padding: '8px 16px', fontWeight: 800, opacity: running ? 0.6 : 1 }}>
             {running ? 'Running…' : 'RUN'}
           </button>
