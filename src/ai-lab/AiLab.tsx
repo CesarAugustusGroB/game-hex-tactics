@@ -174,8 +174,10 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   };
 
   return (
-    <div style={{ height: '100vh', background: '#0b1220', color: '#e2e8f0', padding: 24, fontFamily: '"Inter", sans-serif', overflowY: 'scroll' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+    <div style={{ height: '100vh', background: '#0b1220', color: '#e2e8f0', padding: '0 24px 24px', fontFamily: '"Inter", sans-serif', overflowY: 'scroll' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12,
+        position: 'sticky', top: 0, zIndex: 20, background: '#0b1220', padding: '24px 0 14px',
+        borderBottom: '1px solid rgba(255,255,255,.08)' }}>
         <button onClick={onExit} title="Volver al juego. Al volver, el juego arranca con los perfiles que hayas guardado con Go." style={chip(false)}>← BACK TO GAME</button>
         <h1 style={{ fontSize: 22, margin: 0 }}>AI LAB</h1>
         <button onClick={go} title="Guarda ambos perfiles (rojo/azul) en localStorage como los defaults que usará el juego al abrir." style={{ ...chip(true, '#10b981'), marginLeft: 'auto', fontWeight: 800, padding: '8px 16px' }}>GO — save as game defaults</button>
