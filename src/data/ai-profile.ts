@@ -63,3 +63,32 @@ export function resolveProfile(p: TeamAiProfile): ResolvedProfile {
 export function profileFromDifficulty(difficulty: Difficulty, doctrine: Doctrine = 'balanced'): TeamAiProfile {
   return { doctrine, difficulty };
 }
+
+export const AI_PROFILES_KEY = 'hex-tactics:ai-profiles';
+
+export interface AiProfiles { red: TeamAiProfile; blue: TeamAiProfile; }
+
+const defaultProfiles = (): AiProfiles => ({
+  red: profileFromDifficulty('normal'),
+  blue: profileFromDifficulty('normal'),
+});
+
+/** Read saved per-team profiles. Returns defaults when storage is unavailable, empty, or corrupt. */
+export function loadAiProfiles(): AiProfiles {
+  try {
+    if (typeof localStorage === 'undefined') return defaultProfiles();
+    const raw = localStorage.getItem(AI_PROFILES_KEY);
+    if (!raw) return defaultProfiles();
+    const parsed = JSON.parse(raw) as Partial<AiProfiles>;
+    if (!parsed || !parsed.red || !parsed.blue) return defaultProfiles();
+    return { red: parsed.red, blue: parsed.blue };
+  } catch {
+    return defaultProfiles();
+  }
+}
+
+/** Persist per-team profiles. No-op when storage is unavailable (headless). */
+export function saveAiProfiles(p: AiProfiles): void {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(AI_PROFILES_KEY, JSON.stringify(p));
+}
