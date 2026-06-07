@@ -7,6 +7,7 @@ import { CP_COSTS } from '../command-points';
 import { COHORT_SIZE, CAPTURE_CENTER } from '../../data/game';
 import { POINTS_TO_WIN } from '../../data/scoring';
 import { planDeployment, planFrontLines } from './deploy';
+import { resolveProfile, type TeamAiProfile } from '../../data/ai-profile';
 import { GROUP_IDS, isGroupSealed } from '../groups';
 import { evaluateRules, type RuleCtx } from './rules';
 import { perceive, CENTER_KEYS } from './perception';
@@ -56,17 +57,21 @@ export function makeAiController(
   team: Team, doctrine: Doctrine, difficulty: Difficulty,
   capabilities?: AiCapability[], reactionTicksOverride?: number,
 ): AiTickFn {
-  const doc = AI.doctrines[doctrine];
-  const diff = AI.difficulties[difficulty];
-  const reactionTicks = reactionTicksOverride ?? diff.reactionTicks;
+  return makeAiControllerProfile(team, { doctrine, difficulty, capabilities, reactionTicks: reactionTicksOverride });
+}
+
+export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiTickFn {
+  const r = resolveProfile(profile);
+  const doc = AI.doctrines[r.doctrine];
+  const reactionTicks = r.reactionTicks;
   // The difficulty axis: which smart behaviours this AI executes. Absent ones downgrade to the
-  // always-on baseline (deploy / march-to-centre / hold). NOT force size — a bigger army stalls.
-  // `capabilities` overrides the difficulty's set (used by the ablation harness to isolate one).
-  const can = new Set(capabilities ?? diff.capabilities);
-  const serial = diff.serialWaves ?? false;
-  const fastDeploy = diff.fastDeploy ?? false;
-  const horizontal = diff.horizontalFront ?? false;
-  const frontLines = diff.frontLines ?? false;
+  // always-on baseline (deploy / march-to-centre / hold).
+  const can = new Set(r.capabilities);
+  const serial = r.serialWaves;
+  const fastDeploy = r.fastDeploy;
+  const horizontal = r.horizontalFront;
+  const frontLines = r.frontLines;
+  const lineTypes = r.lineTypes;
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
   const frontSign = team === 'red' ? -1 : 1;
@@ -96,7 +101,7 @@ export function makeAiController(
   return (state: AiTickState): void => {
     const myUnits = state.myUnits.filter(u => u.hp > 0);
     // The eyes: enemies in/near our line and who holds the centre. Drives reserve defence below.
-    const threat = perceive(state, { raidWatchRadius: AI.counter.raidWatchRadius });
+    const threat = perceive(state, { raidWatchRadius: r.counter.raidWatchRadius });
     const threatened = threat.raidThreatHex != null;
     const threatUnits = threatened ? [...threat.breachers, ...threat.raiders] : [];
 
@@ -104,8 +109,8 @@ export function makeAiController(
     // deficit) with observable pressure (raiders on our line, enemy holding the centre). It lowers
     // the launch bar below: the more we're losing, the fewer amassed units we wait for before we
     // counterattack — better to commit a partial front than to die fully assembled.
-    const c = AI.counter;
-    const combat = AI.combat;
+    const c = r.counter;
+    const combat = r.combat;
     const liveEnemies = state.enemyUnits.filter(u => u.hp > 0);
     const myScore = state.myScore ?? 0;
     const enemyScore = state.enemyScore ?? 0;
@@ -132,7 +137,7 @@ export function makeAiController(
     // Score-aware posture: when behind on VP by raidDeficitFrac of the win target, the lowest-
     // numbered front bands become RAIDERS that push through the centre to the enemy line (a second
     // scoring axis). Leading/level keeps the default contest-the-centre + defend posture.
-    const strat = AI.strategy;
+    const strat = r.strategy;
     // Seize-the-centre phase: until we've banked centerFocusVpFrac of the win target, the centre is
     // THE priority — the army marches to take/hold the flag (below) and raids are suppressed. Once
     // past it, the centre matters less and focus fire (Tier 4) + raids (Tier 5) take over.
@@ -158,7 +163,7 @@ export function makeAiController(
     if (targetUnits < 0) {
       // Half the zone is the hard-difficulty ceiling; forceScale shrinks it so easier AIs field a
       // smaller standing army. bandShare spreads the cap WIDE across the four bands, not deep.
-      targetUnits = Math.max(GROUP_IDS.length * COHORT_SIZE, Math.floor(state.deployZone.size * 0.5 * diff.forceScale));
+      targetUnits = Math.max(GROUP_IDS.length * COHORT_SIZE, Math.floor(state.deployZone.size * 0.5 * r.forceScale));
       bandShare = Math.max(COHORT_SIZE, Math.floor(targetUnits / GROUP_IDS.length));
     }
 
@@ -172,7 +177,7 @@ export function makeAiController(
     // canAmass / canGrowMore honest within the tick.
     const roster: Record<UnitType, number> = { ...state.roster };
     let rosterTotal = roster.infantry + roster.cavalry + roster.skirmisher;
-    const budget = Math.floor(state.cp * diff.cpBudgetFrac);
+    const budget = Math.floor(state.cp * r.cpBudgetFrac);
     let cpSpent = 0;
 
     // Defensive deployment: DRAW a blocker where the enemy is about to score. When raiders/breachers
@@ -256,10 +261,10 @@ export function makeAiController(
       const plan = frontLines
         ? planFrontLines({
             groupId: grp.g, freeHexes, roster, frontSign,
-            waveCohorts: Math.ceil(bandCap(grp.g) / COHORT_SIZE),
+            waveCohorts: Math.ceil(bandCap(grp.g) / COHORT_SIZE), lineTypes,
           })
         : planDeployment({
-            frontTypes: doc.front, reserveType: doc.reserve, forceScale: diff.forceScale, freeHexes, roster, frontSign,
+            frontTypes: doc.front, reserveType: doc.reserve, forceScale: r.forceScale, freeHexes, roster, frontSign,
             centreFirst: serial && !horizontal,
             horizontalFront: horizontal,
             // fastDeploy: emit a whole band of anchors so it brushes down in one tick instead of one
