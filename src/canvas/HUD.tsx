@@ -17,14 +17,13 @@ import type { TerrainDef } from './terrain-defs';
 import { CP_COSTS, type CpIntent } from '../battle/command-points';
 import { MAP_TYPE_IDS, type MapTypeId } from '../data/world-gen';
 import type { MapTypeChoice } from './world-gen';
-import type { Doctrine, Difficulty } from '../data/ai';
 import { DOCTRINES, DIFFICULTIES } from '../data/ai';
+import type { TeamAiProfile } from '../data/ai-profile';
 
-/** Per-team AI control: whether the team is bot-driven, and with which doctrine/difficulty. */
+/** Per-team AI control: whether the team is bot-driven, plus its full tuning profile. */
 export interface AiTeamConfig {
   enabled: boolean;
-  doctrine: Doctrine;
-  difficulty: Difficulty;
+  profile: TeamAiProfile;
 }
 
 export interface HUDProps {
@@ -92,7 +91,7 @@ export interface HUDProps {
   rerollSeed: () => void;
   // enemy AI
   aiConfig: Record<Team, AiTeamConfig>;
-  setTeamAi: (team: Team, patch: Partial<AiTeamConfig>) => void;
+  setTeamAi: (team: Team, patch: Partial<TeamAiProfile> & { enabled?: boolean }) => void;
 }
 
 const MAP_TYPE_LABELS: Record<string, string> = {
@@ -890,7 +889,7 @@ const HUDInner: React.FC<HUDProps> = ({
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', marginBottom: '6px',
                       background: c.enabled ? accent : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
                       border: '1px solid rgba(255,255,255,0.1)', fontWeight: 700, cursor: 'pointer' }}>
-                    {team.toUpperCase()} AI {c.enabled ? `→ ${c.doctrine} · ${c.difficulty}` : '→ off'}
+                    {team.toUpperCase()} AI {c.enabled ? `→ ${c.profile.doctrine} · ${c.profile.difficulty}` : '→ off'}
                   </button>
                   {c.enabled && (
                     <>
@@ -898,7 +897,7 @@ const HUDInner: React.FC<HUDProps> = ({
                         {DOCTRINES.map(d => (
                           <button key={d} onClick={() => setTeamAi(team, { doctrine: d })}
                             style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
-                              background: c.doctrine === d ? '#0ea5e9' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                              background: c.profile.doctrine === d ? '#0ea5e9' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
                               border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{d}</button>
                         ))}
                       </div>
@@ -906,7 +905,7 @@ const HUDInner: React.FC<HUDProps> = ({
                         {DIFFICULTIES.map(f => (
                           <button key={f} onClick={() => setTeamAi(team, { difficulty: f })}
                             style={{ flex: 1, padding: '6px 4px', borderRadius: '8px', fontSize: '11px',
-                              background: c.difficulty === f ? '#d97706' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
+                              background: c.profile.difficulty === f ? '#d97706' : 'rgba(255,255,255,0.06)', color: '#e2e8f0',
                               border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>{f}</button>
                         ))}
                       </div>

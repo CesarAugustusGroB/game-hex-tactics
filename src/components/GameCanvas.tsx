@@ -33,7 +33,9 @@ import { usePixiApp, type PixiAppCtx } from '../canvas/PixiApp';
 import { useBattleTick, type BattleTickCtx } from '../canvas/useBattleTick';
 import { GRID_RADIUS, DEFAULT_MAP_TYPE, type MapTypeId } from '../data/world-gen';
 import { registerAiController } from '../battle/ai';
-import { makeAiController } from '../battle/ai/controller';
+import { loadAiProfiles } from '../data/ai-profile';
+import type { TeamAiProfile } from '../data/ai-profile';
+import { makeAiControllerProfile } from '../battle/ai/controller';
 
 const INITIAL_SEED = Math.floor(Math.random() * 0x100000000);
 
@@ -139,14 +141,23 @@ export const GameCanvas: React.FC = () => {
   const [groupDepths, setGroupDepths] = useState<GroupDepths>(new Map());
   const [rosters, setRosters] = useState<Rosters>(makeInitialRosters);
   const [isBattleRunning, setIsBattleRunning] = useState(false);
-  // Per-team AI: either side can be bot-driven (both on → AI-vs-AI spectate). Blue defaults on
-  // (the classic enemy), red off (the human's side).
-  const [aiConfig, setAiConfig] = useState<Record<Team, AiTeamConfig>>({
-    red:  { enabled: false, doctrine: 'balanced', difficulty: 'normal' },
-    blue: { enabled: true,  doctrine: 'balanced', difficulty: 'normal' },
+  // Per-team AI, seeded from saved profiles (the AI Lab writes these to localStorage). Blue defaults
+  // on (classic enemy), red off (the human's side).
+  const [aiConfig, setAiConfig] = useState<Record<Team, AiTeamConfig>>(() => {
+    const saved = loadAiProfiles();
+    return { red: { enabled: false, profile: saved.red }, blue: { enabled: true, profile: saved.blue } };
   });
-  const setTeamAi = (team: Team, patch: Partial<AiTeamConfig>) =>
-    setAiConfig(prev => ({ ...prev, [team]: { ...prev[team], ...patch } }));
+  const setTeamAi = (team: Team, patch: Partial<TeamAiProfile> & { enabled?: boolean }) =>
+    setAiConfig(prev => {
+      const { enabled, ...profilePatch } = patch;
+      return {
+        ...prev,
+        [team]: {
+          enabled: enabled ?? prev[team].enabled,
+          profile: { ...prev[team].profile, ...profilePatch },
+        },
+      };
+    });
   // Set true once terrain-related textures (currently just grass) finish loading.
   // drawMap reads it via deps so the map redraws once textures are ready.
   const [terrainTexturesLoaded, setTerrainTexturesLoaded] = useState(false);
@@ -583,11 +594,11 @@ export const GameCanvas: React.FC = () => {
   };
   useBattleTick(battleCtx, isBattleRunning);
 
-  // Install/tear down an AI controller per team from its config. Either side (or both) can be a bot.
+  // Install/tear down an AI controller per team from its profile. Either side (or both) can be a bot.
   useEffect(() => {
     for (const team of ['red', 'blue'] as const) {
       const c = aiConfig[team];
-      registerAiController(team, c.enabled ? makeAiController(team, c.doctrine, c.difficulty) : null);
+      registerAiController(team, c.enabled ? makeAiControllerProfile(team, c.profile) : null);
     }
     return () => { registerAiController('red', null); registerAiController('blue', null); };
   }, [aiConfig]);
