@@ -174,7 +174,7 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0b1220', color: '#e2e8f0', padding: 24, fontFamily: '"Inter", sans-serif', overflowY: 'auto' }}>
+    <div style={{ height: '100vh', background: '#0b1220', color: '#e2e8f0', padding: 24, fontFamily: '"Inter", sans-serif', overflowY: 'scroll' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <button onClick={onExit} title="Volver al juego. Al volver, el juego arranca con los perfiles que hayas guardado con Go." style={chip(false)}>← BACK TO GAME</button>
         <h1 style={{ fontSize: 22, margin: 0 }}>AI LAB</h1>
