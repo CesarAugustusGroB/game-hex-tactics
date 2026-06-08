@@ -99,6 +99,7 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
         <div style={{ display: 'flex', gap: 6 }}>
           {[0, 1, 2].map(i => (
             <select key={i} title={LINE_TYPES_DESC} value={lt[i] ?? 'infantry'} style={numInput}
+              onWheel={e => e.currentTarget.blur()}
               onChange={e => { const next = [...lt]; next[i] = e.target.value as UnitType; onChange({ ...profile, lineTypes: next }); }}>
               {UNIT_TYPES.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
@@ -109,14 +110,16 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
       {groups.map(g => (
         <div key={g} style={box}>
           <div style={label}>{g}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
             {PROFILE_NUM_FIELDS.filter(f => f.group === g).map(f => (
               <label key={f.path} title={f.desc}
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                   background: 'rgba(255,255,255,.03)', borderRadius: 6, padding: '4px 8px', cursor: 'help' }}>
                 <span style={{ fontSize: 12, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.label}</span>
                 <input type="number" step={f.step} value={effectiveNum(profile, f.path)} style={{ ...numInput, width: 56, flex: 'none' }}
-                  onChange={e => onChange(setNum(profile, f.path, Number(e.target.value)))} />
+                  onWheel={e => e.currentTarget.blur()}
+                  onFocus={e => e.currentTarget.select()}
+                  onChange={e => { if (e.target.value === '') return; const v = Number(e.target.value); if (Number.isFinite(v)) onChange(setNum(profile, f.path, Math.max(0, v))); }} />
               </label>
             ))}
           </div>
@@ -140,8 +143,9 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     setResult(null);
     // Defer so the "Running…" label paints before the synchronous sim blocks the thread.
     setTimeout(() => {
-      setResult(runSeries(profiles.red, profiles.blue, reps));
-      setRunning(false);
+      try { setResult(runSeries(profiles.red, profiles.blue, reps)); }
+      catch (err) { console.error('simulation failed', err); }
+      finally { setRunning(false); }
     }, 20);
   };
 
@@ -163,11 +167,17 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     let i = 0;
     const step = () => {
       if (i >= opps.length) { setRunning(false); return; }
-      const opp = opps[i];
-      const res = side === 'red' ? runSeries(me, opp.p, reps) : runSeries(opp.p, me, reps);
-      const wins = side === 'red' ? res.redWins : res.blueWins;
-      setBench(b => b && { ...b, rows: [...b.rows, { label: opp.label, winPct: Math.round(100 * wins / res.reps), wins, reps: res.reps }] });
-      i++;
+      try {
+        const opp = opps[i];
+        const res = side === 'red' ? runSeries(me, opp.p, reps) : runSeries(opp.p, me, reps);
+        const wins = side === 'red' ? res.redWins : res.blueWins;
+        setBench(b => b && { ...b, rows: [...b.rows, { label: opp.label, winPct: Math.round(100 * wins / res.reps), wins, reps: res.reps }] });
+        i++;
+      } catch (err) {
+        console.error('benchmark failed', err);
+        setRunning(false);
+        return;
+      }
       setTimeout(step, 20);
     };
     setTimeout(step, 20);
@@ -191,8 +201,9 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         <div style={label} title="Enfrenta el perfil de ROJO contra el de AZUL durante N partidas y agrega el resultado.">Simulation — RED profile vs BLUE profile</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <span style={{ fontSize: 12, color: '#cbd5e1', cursor: 'help' }} title="Cuántas partidas correr. Más reps = resultado menos ruidoso (pero más lento; test arrastra partidas largas).">reps</span>
-          <input type="number" min={1} step={1} value={reps} style={numInput} title="Cuántas partidas correr."
-            onChange={e => setReps(Math.max(1, Number(e.target.value)))} />
+          <input type="number" min={1} max={100} step={1} value={reps} style={numInput} title="Cuántas partidas correr (entero, máx 100 — protege contra congelar la pestaña)."
+            onWheel={e => e.currentTarget.blur()}
+            onChange={e => { const v = Math.floor(Number(e.target.value)); setReps(Number.isFinite(v) ? Math.min(100, Math.max(1, v)) : 1); }} />
           <button onClick={run} disabled={running} title="Corre la simulación AI-vs-AI con los perfiles de arriba."
             style={{ ...chip(true, '#0ea5e9'), padding: '8px 16px', fontWeight: 800, opacity: running ? 0.6 : 1 }}>
             {running ? 'Running…' : 'RUN'}
@@ -216,7 +227,7 @@ export const AiLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             style={{ ...chip(true, '#dc2626'), padding: '8px 16px', fontWeight: 800, opacity: running ? 0.6 : 1 }}>Benchmark RED</button>
           <button onClick={() => benchmark('blue')} disabled={running} title="Corre el perfil de AZUL (como azul) vs el perfil de rojo, normal, hard y test."
             style={{ ...chip(true, '#1d4ed8'), padding: '8px 16px', fontWeight: 800, opacity: running ? 0.6 : 1 }}>Benchmark BLUE</button>
-          <span style={{ fontSize: 12, color: '#64748b' }}>usa el campo «reps» de arriba ({reps}/oponente)</span>
+          <span style={{ fontSize: 12, color: '#64748b' }}>cada bando juega en su color real · usa «reps» de arriba ({reps}/oponente)</span>
         </div>
         {bench && (
           <div style={{ fontSize: 13 }}>
