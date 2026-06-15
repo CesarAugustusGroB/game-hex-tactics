@@ -38,9 +38,25 @@ los sprites `factions/` no pasaron por `normalize-units.py` y tienen escala visi
 Re-normalizá SOLO los de categoría **infantry / cavalry / skirmisher** a su target por tipo
 (132/144/124), desde su fuente `art-source/tokens-topdown/<cat>/<name>__td.png`. **Dejá intactos
 chariot / elephant / ship / siege** (intencionalmente grandes — no tienen target). Hacelo de a pocos
-sprites por iteración (p.ej. una categoría por vez), registrando cada uno. Verificá: dims 160×160,
-figura centrada, alpha intacto, `npm run build` verde. Cuando esto esté completo, no quedan más
-wins de assets seguros conocidos → registrá "assets: idle" y enfocá bugs.
+sprites por iteración (p.ej. una categoría por vez), registrando cada uno.
+
+**Receta validada (iters 5–7):** `python scripts/chroma-key.py SRC dst.keyed.png` →
+`python scripts/normalize-units.py dst.keyed.png OUT.png --target-size {144|132|124} --canvas-size 160`
+→ Pillow `save(optimize=True, compress_level=9)`. El script rechaza paths fuera del repo (usá un dir
+local tipo `.tmp-norm/`, limpialo al final). **Gate:** compará la silueta alpha **escala-independiente**
+(recortá a bbox, reescalá, IoU) vs el sprite actual — ≥0.80 = misma unidad/orientación, aplicá; <0.80 =
+revisá. NO uses IoU a tamaño fijo (confunde escala con forma, que es justo lo que cambiás).
+
+**Estado:** cavalry ✓ (9/9 @144, iter 6). infantry parcial (8/12 @132, iter 7).
+**PENDIENTE:**
+  - **infantry de lanza/overhead** (4: `ancient__spearman-overhead`, `ancient__spearman-shield`,
+    `generic__shield-spear-overhead`, `generic__spearman-lunge`) → usar **`--body-scale`**
+    (decisión del usuario, iter 7: escala por cuerpo, la lanza puede clippear). Con body-scale el
+    long-side visible puede pasar de 132 (la lanza extiende) — NO hard-assertes long==132 ahí;
+    verificá dims 160×160 + build + que el cuerpo quede ~132.
+  - **skirmisher → 124** (categoría completa, recipe default).
+Cuando ambas estén hechas, factions está completo → registrá "assets: idle" y enfocá bugs de **código**
+(no tests — la suite ya está verde).
 
 **Regla dura** (para cualquier recompresión futura): dimensiones y canal alpha (umbral 8) no
 cambian salvo en la re-normalización aprobada de arriba (que SÍ cambia la escala visible a propósito,
