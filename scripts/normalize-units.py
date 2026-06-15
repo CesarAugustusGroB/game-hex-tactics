@@ -17,9 +17,10 @@ from typing import Iterable
 
 try:
     from PIL import Image
+    import numpy as np
 except ModuleNotFoundError as exc:
     raise SystemExit(
-        "Pillow is required. Install it with: python -m pip install Pillow"
+        "Pillow + numpy are required. Install with: python -m pip install Pillow numpy"
     ) from exc
 
 
@@ -41,10 +42,21 @@ class UnitJob:
     rotate: float = 0
     target_size: int = DEFAULT_TARGET_SIZE
     canvas_size: int = DEFAULT_CANVAS_SIZE
+    # Scale by the dense body, not the full bbox, so thin protrusions (spears/sarissas)
+    # don't shrink the figure. The body is also what gets centred — the weapon may clip.
+    body_scale: bool = False
 
 
-DEFAULT_UNIT_DIR = Path("public/units")
-DEFAULT_OUTPUT_DIR = DEFAULT_UNIT_DIR / "normalized"
+# A row/column counts toward the "body" if its opaque-pixel mass is at least this
+# fraction of the densest row/column. A lone sarissa lights up few pixels per row, so
+# its rows fall below the cut and don't define the size — the torso+shield mass does.
+CORE_MASS_FRAC = 0.22
+
+
+# Raw originals live outside the shipped bundle (art-source/), so the ~13 MB of
+# pre-normalization art is not deployed in public/. Output still lands in public/units/normalized/.
+DEFAULT_SOURCE_DIR = Path("art-source/originals")
+DEFAULT_OUTPUT_DIR = Path("public/units/normalized")
 SKIP_DEFAULT_NAMES = {"javelin.png"}
 ROTATE_BY_NAME = {
     "red-infantry.png": 180,
@@ -71,6 +83,26 @@ def alpha_bbox(image: Image.Image) -> tuple[int, int, int, int]:
     return bbox
 
 
+def core_box(image: Image.Image) -> tuple[float, float, int]:
+    """Centre (cx, cy) and size of the dense body, ignoring thin protrusions.
+
+    Returns the longer side of the core box so the caller can scale to it.
+    """
+    op = np.asarray(image.getchannel("A")) > ALPHA_THRESHOLD
+    rows = op.sum(axis=1)
+    cols = op.sum(axis=0)
+    if rows.max() == 0:
+        h, w = op.shape
+        return w / 2, h / 2, max(w, h)
+    rmask = rows >= rows.max() * CORE_MASS_FRAC
+    cmask = cols >= cols.max() * CORE_MASS_FRAC
+    r = np.flatnonzero(rmask)
+    c = np.flatnonzero(cmask)
+    r0, r1, c0, c1 = r[0], r[-1], c[0], c[-1]
+    core_h, core_w = r1 - r0 + 1, c1 - c0 + 1
+    return (c0 + c1) / 2, (r0 + r1) / 2, int(max(core_h, core_w))
+
+
 def normalize_unit(job: UnitJob) -> tuple[Path, tuple[int, int], tuple[int, int]]:
     src = (ROOT / job.src).resolve() if not job.src.is_absolute() else job.src
     out = (ROOT / job.out).resolve() if not job.out.is_absolute() else job.out
@@ -81,18 +113,26 @@ def normalize_unit(job: UnitJob) -> tuple[Path, tuple[int, int], tuple[int, int]
 
     image = image.crop(alpha_bbox(image))
     width, height = image.size
-    long_side = max(width, height)
-    if long_side == 0:
+    if max(width, height) == 0:
         raise ValueError(f"{src} has empty dimensions")
 
-    scale = job.target_size / long_side
+    # `measure` is the dimension we scale to target: the body in body_scale mode (so a
+    # sarissa doesn't shrink the torso), else the full bbox. `anchor` is what gets centred.
+    if job.body_scale:
+        core_cx, core_cy, measure = core_box(image)
+    else:
+        measure = max(width, height)
+        core_cx, core_cy = width / 2, height / 2
+
+    scale = job.target_size / measure
     resized_size = (max(1, round(width * scale)), max(1, round(height * scale)))
     image = image.resize(resized_size, Image.Resampling.LANCZOS)
 
     canvas = Image.new("RGBA", (job.canvas_size, job.canvas_size), (0, 0, 0, 0))
-    x = (job.canvas_size - resized_size[0]) // 2
-    y = (job.canvas_size - resized_size[1]) // 2
-    canvas.alpha_composite(image, (x, y))
+    # Centre the body anchor on the canvas; thin protrusions may overflow and clip.
+    x = round(job.canvas_size / 2 - core_cx * scale)
+    y = round(job.canvas_size / 2 - core_cy * scale)
+    canvas.paste(image, (x, y), image)  # paste clips negative/overflow; mask = own alpha
 
     out.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out)
@@ -100,12 +140,12 @@ def normalize_unit(job: UnitJob) -> tuple[Path, tuple[int, int], tuple[int, int]
 
 
 def default_jobs() -> Iterable[UnitJob]:
-    unit_dir = ROOT / DEFAULT_UNIT_DIR
+    unit_dir = ROOT / DEFAULT_SOURCE_DIR
     for src in sorted(unit_dir.glob("*.png")):
         if src.name in SKIP_DEFAULT_NAMES:
             continue
         yield UnitJob(
-            DEFAULT_UNIT_DIR / src.name,
+            DEFAULT_SOURCE_DIR / src.name,
             DEFAULT_OUTPUT_DIR / src.name,
             rotate=ROTATE_BY_NAME.get(src.name, 0),
             target_size=TYPE_TARGET_SIZES[unit_type_for_name(src.name)],
@@ -119,6 +159,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rotate", type=float, default=0, help="Degrees to rotate clockwise before trimming.")
     parser.add_argument("--target-size", type=int, default=DEFAULT_TARGET_SIZE, help="Visible long-side size in pixels.")
     parser.add_argument("--canvas-size", type=int, default=DEFAULT_CANVAS_SIZE, help="Square output canvas size in pixels.")
+    parser.add_argument("--body-scale", action="store_true", help="Scale/centre on the dense body, ignoring thin spears/sarissas (they may clip).")
     return parser.parse_args()
 
 
@@ -128,7 +169,8 @@ def main() -> None:
         raise SystemExit("Provide both input and output, or neither to run the default unit batch.")
 
     jobs = [
-        UnitJob(args.input, args.output, rotate=args.rotate, target_size=args.target_size, canvas_size=args.canvas_size)
+        UnitJob(args.input, args.output, rotate=args.rotate, target_size=args.target_size,
+                canvas_size=args.canvas_size, body_scale=args.body_scale)
     ] if args.input and args.output else list(default_jobs())
 
     for job in jobs:
