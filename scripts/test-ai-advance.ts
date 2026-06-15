@@ -5,7 +5,7 @@
 // zone forever despite holding a march order. The AI now marches LOOSE so each band flows forward.
 // Drives the REAL controller + simulateTick over the real deploy zone. Run: npx tsx scripts/test-ai-advance.ts
 import { simulateTick, MAX_HP_BY_TYPE } from '../src/battle/simulate';
-import { makeAiController } from '../src/battle/ai/controller';
+import { makeAiControllerProfile } from '../src/battle/ai/controller';
 import type { Unit, GroupOrder, SimulationConfig, MapApi, UnitType } from '../src/battle/simulate';
 import type { AiTickState } from '../src/battle/ai';
 import { getTerrainMods } from '../src/battle/terrain';
@@ -31,7 +31,11 @@ const mapApi: MapApi = {
   getTerrainHeight: () => 12, isInDeployZone: (_t, h) => blueZone.has(HexUtils.key(h)),
 };
 
-const ctrl = makeAiController('blue', 'balanced', 'normal');
+// The loose-march behaviour under test lives in the PARALLEL-front path (4 bands marching at once).
+// The 'normal' difficulty has since flipped to frontLines:true (serial rolling waves, one group at a
+// time) — under which G2..G4 legitimately never co-advance. Pin an explicit parallel-front profile so
+// this regression keeps exercising the 4-band loose march, not the difficulty's drifting deploy flags.
+const ctrl = makeAiControllerProfile('blue', { doctrine: 'balanced', difficulty: 'normal', frontLines: false });
 let units: Unit[] = [];
 let roster: Record<UnitType, number> = { infantry: 200, cavalry: 200, skirmisher: 200 };
 let orders = new Map<string, GroupOrder>();
