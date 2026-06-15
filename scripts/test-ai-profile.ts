@@ -11,12 +11,18 @@ const check = (name: string, cond: boolean, extra = '') => {
 
 const test = resolveProfile(profileFromDifficulty('test'));
 check('test resolves frontLines=true', test.frontLines === true);
-check('test capabilities = [defend]', test.capabilities.length === 1 && test.capabilities[0] === 'defend');
+// Assert against the source rather than a hardcoded value — this verifies resolveProfile surfaces
+// the difficulty's capabilities, without breaking every time the authored difficulty list is retuned.
+check('test capabilities resolve through from ai.json',
+  test.capabilities.join(',') === AI.difficulties.test.capabilities.join(','));
 check('test reactionTicks = 10', test.reactionTicks === 10);
 check('default lineTypes is inf,skir,cav', test.lineTypes.join(',') === DEFAULT_LINE_TYPES.join(','));
 
-const normal = resolveProfile(profileFromDifficulty('normal'));
-check('normal has no deploy flags', !normal.frontLines && !normal.serialWaves && !normal.horizontalFront && !normal.fastDeploy);
+// 'easy' is the difficulty that sets no deploy flags → resolveProfile must default them all to false.
+// (This used to be 'normal', which has since gained frontLines:true.)
+const flagless = resolveProfile(profileFromDifficulty('easy'));
+check('a flag-less difficulty resolves all deploy flags false',
+  !flagless.frontLines && !flagless.serialWaves && !flagless.horizontalFront && !flagless.fastDeploy);
 
 const over = resolveProfile({ doctrine: 'balanced', difficulty: 'test', reactionTicks: 3, forceScale: 1.1 });
 check('reactionTicks override wins', over.reactionTicks === 3);
