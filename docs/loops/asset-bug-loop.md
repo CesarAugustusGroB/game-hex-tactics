@@ -14,34 +14,37 @@ verifica, y commitea. Lanzar con:
 ## PROMPT
 
 Sos un loop autónomo de mejora incremental en la rama `feature/ai-enemy`. Cada iteración
-hacés **exactamente un paso de assets** y **exactamente un paso de bugs**, los verificás, y
-commiteás. Menos es más: cambios chicos, atómicos, verificados. Nunca rompas el build.
+hacés **un paso de bugs (PRIMARIO)** y **un paso de assets (SECUNDARIO, solo si hay win seguro)**,
+los verificás, y commiteás. Menos es más: cambios chicos, atómicos, verificados. Nunca rompas el build.
+
+**Rumbo (decidido por el usuario, iter 3):** el peso de assets ya está optimizado (poda + lossless).
+Los bugs son ahora la prioridad — cada iteración el paso de bugs es el principal. El paso de assets
+solo se hace si aparece un win **seguro** (ver tarea aprobada de `factions/` abajo); si no, registrá
+"assets: idle" y seguí con bugs. No fuerces cambios de assets sin win claro.
 
 ### Estado / anti-repetición
 Mantené el ledger `docs/loops/LEDGER.md`. Al empezar, leelo. Tiene dos tablas:
 `## Assets` (archivo · acción · antes→después · iteración) y `## Bugs` (archivo:línea · síntoma ·
 fix · verificación · iteración). Nunca repitas una fila ya hecha. Si no existe, creálo.
 
-### Paso A — Assets (peso + dimensiones)
-El set **vivo** es solo lo referenciado por `src/canvas/PixiApp.ts` y `src/data/factions.json`
-(carpeta `public/units/normalized/`). Todo lo demás en `public/units/*.png` (raíz) es candidato
-a **asset muerto**. Elegí UNA de estas, la de mayor impacto aún no hecha:
+### Paso A — Assets (SECUNDARIO — solo si hay win seguro)
+Poda de muertos (iter 1) y recompresión lossless (iter 2) ya están hechas. **No hay** ImageMagick
+en esta máquina — `convert` es la utilidad de Windows (FAT→NTFS), NO usar; la única herramienta de
+imagen es Pillow (Python). El set **vivo** es lo referenciado por `src/canvas/PixiApp.ts` y
+`src/data/factions.json` (carpeta `public/units/normalized/`).
 
-1. **Podar muertos**: confirmá que un PNG de `public/units/` (raíz) NO está referenciado en
-   ningún `src/**` ni `*.json` (grepealo, sin falsos positivos por substring). Si está muerto,
-   `git rm` y registralo. Estos ~15 MB son el grueso del peso del repo.
-2. **Dimensiones uniformes**: si algún sprite vivo se salió del canvas/escala que impone
-   `scripts/normalize-units.py` (canvas 160, targets por tipo cavalry144/infantry132/skirmisher124),
-   re-normalizalo corriendo el script y verificá que el resultado sigue centrado y con alpha intacto.
-3. **Peso (sin pérdida visible)**: reducí el peso de un PNG vivo. Orden de preferencia:
-   `oxipng -o4 --strip safe` (instalalo con `cargo install oxipng` o `npm i -g oxipng` si falta y
-   es barato); si no, Pillow `Image.save(optimize=True)` + cuantización a paleta solo si el sprite
-   no pierde gradientes; último recurso `convert -strip -define png:compression-level=9`.
-   **Regla dura**: las dimensiones y el canal alpha (umbral 8) no pueden cambiar; compar=á dimensiones
-   y bounding-box de alpha antes/después. Si difieren → revertí.
+**Tarea aprobada pendiente — re-normalizar `factions/` estándar (decisión del usuario, iter 3):**
+los sprites `factions/` no pasaron por `normalize-units.py` y tienen escala visible inconsistente.
+Re-normalizá SOLO los de categoría **infantry / cavalry / skirmisher** a su target por tipo
+(132/144/124), desde su fuente `art-source/tokens-topdown/<cat>/<name>__td.png`. **Dejá intactos
+chariot / elephant / ship / siege** (intencionalmente grandes — no tienen target). Hacelo de a pocos
+sprites por iteración (p.ej. una categoría por vez), registrando cada uno. Verificá: dims 160×160,
+figura centrada, alpha intacto, `npm run build` verde. Cuando esto esté completo, no quedan más
+wins de assets seguros conocidos → registrá "assets: idle" y enfocá bugs.
 
-Registrá antes→después en KB. Si no queda nada de assets por hacer, escribí "assets: idle" en el
-ledger esa iteración y pasá a bugs.
+**Regla dura** (para cualquier recompresión futura): dimensiones y canal alpha (umbral 8) no
+cambian salvo en la re-normalización aprobada de arriba (que SÍ cambia la escala visible a propósito,
+pero mantiene el canvas 160×160). Fuera de eso, si difieren → revertí.
 
 ### Paso B — Bugs (encontrar y arreglar)
 Elegí UN módulo aún no barrido este ciclo (rotá por: `src/battle/simulate.ts`,
@@ -51,9 +54,19 @@ estilo: off-by-one, comparación de tick equivocada, mutación de estado compart
 ad-hoc en vez de `HexUtils.key`, refs que cierran sobre estado viejo, NaN/clamp faltante en
 caminos que el sim recorre, fugas de filtros/texturas PIXI.
 
-Para cada bug candidato: **probá que es real antes de tocar nada** (construí el caso, citá la
-línea, explicá el síntoma observable). Arreglá solo si estás seguro; los falsos positivos son
-peor que no hacer nada. Un bug por iteración.
+**Atajo de alto ROI (empezá por acá):** corré los regression scripts y buscá ROJOS —
+`npx tsx scripts/sim-formations.ts` y los `scripts/test-ai-*.ts`. **Ojo con el exit code**: NO
+uses `... | tail` para leerlo (capturás el exit de `tail`); leé la línea `N/M passed` del propio
+test. Un test fallando = bug real **ya verificado** — pero distinguí *bug de código* vs *test
+stale* (un test que asume balance/API viejos tras un cambio legítimo). Si es código roto en
+`src/battle/ai/`, NO lo "arregles" tuneando el controller sin medir con `sim-ai-vs-ai` (CLAUDE.md);
+si es test stale, arreglá el test para que refleje el comportamiento correcto actual, sin tocar el
+controller. (iter 3: `test-ai-counter` apuntaba a la dificultad `hard` que ganó `frontLines:true` y
+bypassa el mecanismo bajo test → fix solo de test.)
+
+Para cada bug candidato: **probá que es real antes de tocar nada** (construí el caso con una sonda,
+citá la línea, explicá el síntoma observable). Arreglá solo si estás seguro; los falsos positivos
+son peor que no hacer nada. Un bug por iteración.
 
 ### Verificación (obligatoria antes de commitear)
 - `npm run build` debe pasar (tsc + vite). Si falla, arreglá o revertí — no commitees roto.
