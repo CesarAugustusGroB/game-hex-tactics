@@ -1,7 +1,7 @@
 // The AI builds a WIDE front: it fills multiple lateral bands (groups) in parallel rather than one
 // at a time, holds the line until the front is built, then launches — and never deposits units into
 // a sealed (launched) group. Run: npx tsx scripts/test-ai-groups.ts
-import { makeAiController } from '../src/battle/ai/controller';
+import { makeAiControllerProfile } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, GroupId, UnitType, Team } from '../src/battle/simulate';
 import { HexUtils } from '../src/hex-engine/HexUtils';
@@ -37,7 +37,11 @@ const makeHarness = (seedUnits: Unit[], roster: Record<UnitType, number>, cp = 9
   const h: Harness = {
     units: [...seedUnits], orders: new Map(), placedGids: [], advancedGids: [], runTick: () => {},
   };
-  const ctrl = makeAiController('blue', 'balanced', 'hard');
+  // Parallel wide-front behaviour (fill many bands at once). 'hard' has since gained frontLines +
+  // horizontalFront (serial rolling lines), which routes around it — pin an explicit parallel-front profile.
+  const ctrl = makeAiControllerProfile('blue', {
+    doctrine: 'balanced', difficulty: 'hard', frontLines: false, horizontalFront: false, serialWaves: false,
+  });
   h.runTick = (tick, enemies) => {
     const state: AiTickState = {
       team: 'blue', tick, myUnits: h.units, enemyUnits: enemies,
@@ -97,9 +101,12 @@ const unsealedNonEmpty = (h: Harness, zone: Set<string>): number =>
 
 // 2. Never deposits units into a sealed (already-launched) group.
 {
-  // Seed group 1 as sealed: units in zone + an active advance order.
+  // Seed group 1 as sealed = already LAUNCHED: its units sit OUTSIDE the deploy zone (q5..8, r15).
+  // isGroupSealed is then true by position and stays true. (Seeding them in-zone at q=i,r=0 used to
+  // work, but the capture centre is (0,0) — units there now trigger the hold-centre rule, which
+  // rewrites the order to 'hold' and UNSEALS the group, so the amasser legitimately refills it.)
   const seed: Unit[] = [0, 1, 2, 3].map(i => ({
-    id: `s${i}`, team: 'blue' as Team, unitType: 'infantry' as UnitType, tacticalHex: { q: i, r: 0 }, homeHex: { q: i, r: 0 },
+    id: `s${i}`, team: 'blue' as Team, unitType: 'infantry' as UnitType, tacticalHex: { q: 5 + i, r: 15 }, homeHex: { q: 5 + i, r: 15 },
     groupId: 1 as GroupId, hp: 100, state: 'idle' as const, nextMoveTick: 0, visionRadius: 1,
   }));
   const h = makeHarness(seed, { infantry: 200, cavalry: 200, skirmisher: 200 });
@@ -111,8 +118,10 @@ const unsealedNonEmpty = (h: Harness, zone: Set<string>): number =>
 // 3. Amass-then-launch is gated by CP SPENT, not unit count: a group keeps amassing while it
 //    can spend more of its amass budget, marches once the budget is spent (or it can't amass).
 {
+  // Seed the band AWAY from the capture centre (0,0): on it, the hold-centre rule fires and the
+  // group holds instead of marching, masking the can't-amass→march fall-through under test.
   const mkGroup = (n: number): Unit[] => Array.from({ length: n }, (_, i) => ({
-    id: `g${i}`, team: 'blue' as Team, unitType: 'infantry' as UnitType, tacticalHex: { q: i, r: 0 }, homeHex: { q: i, r: 0 },
+    id: `g${i}`, team: 'blue' as Team, unitType: 'infantry' as UnitType, tacticalHex: { q: 10 + i, r: 5 }, homeHex: { q: 10 + i, r: 5 },
     groupId: 1 as GroupId, hp: 100, state: 'idle' as const, nextMoveTick: 0, visionRadius: 1,
   }));
   const enemy: Unit = { id: 'e', team: 'red', unitType: 'infantry', tacticalHex: { q: 5, r: 30 }, homeHex: { q: 5, r: 30 }, groupId: 1, hp: 100, state: 'idle', nextMoveTick: 0, visionRadius: 1 };

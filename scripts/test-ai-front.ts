@@ -2,7 +2,7 @@
 // RESERVE band (group 4) deployed at a spot further BACK (away from the enemy edge), not in the
 // front line. Drives makeAiController over a wide strip and asserts the front spans most of the
 // width and the reserve sits behind it. Run: npx tsx scripts/test-ai-front.ts
-import { makeAiController } from '../src/battle/ai/controller';
+import { makeAiControllerProfile } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, UnitType } from '../src/battle/simulate';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
@@ -23,7 +23,12 @@ const deployZone = new Set(strip.map(HexUtils.key));
 const zoneXs = strip.map(h => HexUtils.hexToPixel(h).x);
 const zoneW = Math.max(...zoneXs) - Math.min(...zoneXs);
 
-const ctrl = makeAiController('blue', 'balanced', 'hard');
+// The 3-front-bands + reserve-behind layout is the PARALLEL-front doctrine (planDeployment). The
+// 'hard' difficulty has since gained frontLines + horizontalFront (planFrontLines rolling lines, no
+// reserve band), which routes around this layout. Pin an explicit parallel-front profile.
+const ctrl = makeAiControllerProfile('blue', {
+  doctrine: 'balanced', difficulty: 'hard', frontLines: false, horizontalFront: false, serialWaves: false,
+});
 const units: Unit[] = [];
 let roster: Record<UnitType, number> = { infantry: 200, cavalry: 200, skirmisher: 200 };
 const orders = new Map<string, GroupOrder>();

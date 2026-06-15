@@ -2,7 +2,7 @@
 // infantry. Regression for the bug where the fixed [1,2,3,4] amass order let infantry bands (1,2)
 // drain the per-tick CP budget every tick, starving the cavalry (3) and skirmisher (4) bands
 // forever once the initial CP buffer was gone. Run: npx tsx scripts/test-ai-rotation.ts
-import { makeAiController } from '../src/battle/ai/controller';
+import { makeAiControllerProfile } from '../src/battle/ai/controller';
 import type { AiTickState } from '../src/battle/ai';
 import type { Unit, GroupOrder, UnitType } from '../src/battle/simulate';
 import { HexUtils, type Hex } from '../src/hex-engine/HexUtils';
@@ -18,7 +18,13 @@ const strip: Hex[] = [];
 for (let q = -16; q <= 16; q++) for (let r = -3; r <= 0; r++) strip.push({ q, r });
 const deployZone = new Set(strip.map(HexUtils.key));
 
-const ctrl = makeAiController('blue', 'balanced', 'normal');
+// The per-band round-robin amass cursor (what keeps cavalry/skirmisher bands from starving) is a
+// PARALLEL-front mechanism — it rotates across the 4 simultaneous bands. 'normal' has since gained
+// frontLines:true (a single serial rolling group, no parallel bands to rotate), so pin an explicit
+// parallel-front profile.
+const ctrl = makeAiControllerProfile('blue', {
+  doctrine: 'balanced', difficulty: 'normal', frontLines: false, horizontalFront: false, serialWaves: false,
+});
 const units: Unit[] = [];
 let roster: Record<UnitType, number> = { infantry: 200, cavalry: 200, skirmisher: 200 };
 const orders = new Map<string, GroupOrder>();
