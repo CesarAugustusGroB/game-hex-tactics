@@ -22,12 +22,17 @@ for (const d of DOCTRINES) {
 for (const f of DIFFICULTIES) {
   const c = AI.difficulties[f];
   check(`${f} reactionTicks >= 1`, c.reactionTicks >= 1);
-  check(`${f} forceScale in (0,1]`, c.forceScale > 0 && c.forceScale <= 1);
+  // forceScale is a sane positive scale, NOT capped at 1: it's held flat across difficulties and
+  // saturates ~1.2 (full roster deployed) — difficulty is expressed via capabilities, not force.
+  check(`${f} forceScale is a sane positive scale`, c.forceScale > 0 && c.forceScale <= 2);
+  check(`${f} cpBudgetFrac is a fraction in (0,1]`, c.cpBudgetFrac > 0 && c.cpBudgetFrac <= 1);
 }
-// Reaction speed is NO LONGER monotone with difficulty: the harness (sim-ai-vs-ai.ts --sweep)
-// showed fast reaction makes a tactical AI thrash, so the strongest tier reacts SLOWLY. We only
-// assert reaction is a sane positive everywhere (covered in the loop above) — not that hard is fastest.
-check('hard spends more CP than easy', AI.difficulties.hard.cpBudgetFrac > AI.difficulties.easy.cpBudgetFrac);
+// Difficulty is a CAPABILITY ladder, not a force/CP/reaction dial: reaction is non-monotone (the
+// strongest tier reacts SLOWLY — sim-ai-vs-ai.ts --sweep), forceScale is held flat, and cpBudgetFrac
+// is flat too. So we don't assert hard > easy on any scalar knob; we assert the capability sets
+// actually differ across tiers (where the difficulty really lives).
+check('difficulty tiers differ by capabilities',
+  new Set(DIFFICULTIES.map(f => [...AI.difficulties[f].capabilities].sort().join(','))).size > 1);
 
 console.log(`\n${pass}/${pass + fail} passed`);
 process.exit(fail > 0 ? 1 : 0);
