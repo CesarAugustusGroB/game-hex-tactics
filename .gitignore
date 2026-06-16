@@ -34,3 +34,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Loop/scratch + Python caches
+__pycache__/
+*.pyc
+.tmp-norm/
+/scripts/loop-probe.ts
+
+# Raw art source kept on disk only (originals/ stays tracked as the normalization source)
+/art-source/tokens-topdown/
+/art-source/art-eyelevel/
+/art-source/icons/
+/art-source/INDEX.md

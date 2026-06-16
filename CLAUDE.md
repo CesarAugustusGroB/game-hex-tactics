@@ -21,6 +21,8 @@ Periodically (every ~3–5 substantial back-and-forths, or after landing a trick
 - `npm run lint` — ESLint over the repo (config: `eslint.config.js`, flat config).
 - `npm run preview` — serve the production build.
 - `npx tsx scripts/sim-formations.ts` — headless battle harness: runs ~21 scenarios against the pure sim and prints per-scenario results. Run after any change to `src/battle/*.ts` to catch behavior drift.
+- `npx tsx scripts/sim-ai-vs-ai.ts [--study|--tune|--sweep|--ablate|--mech|--trace]` — head-to-head AI harness (both teams bot, via `src/sim/runMatch.ts`). Measures difficulty/doctrine changes by side-bias-cancelled win-rate. Confirm any AI-balance change at ≥30 reps/side (16-rep scans are noisy). `scripts/search-ai-config.ts` hill-climbs `ai.json` difficulty fields headlessly.
+- `scripts/test-ai-*.ts` — per-behaviour AI regression checks (deploy, advance, defense, counter, rules, perception, …). Run the relevant one after touching `src/battle/ai/`.
 
 There is no test runner configured.
 
@@ -49,7 +51,9 @@ Single-canvas PIXI.js application with a thin React HUD. The canvas layer lives 
   - `paintMode.ts` — place/assign paint flow.
 - `src/battle/simulate.ts` — pure battle simulator (no React/PIXI). Exports `simulateTick`, unit/order types, and per-type tunables (`MARCH_HEXES_PER_TICK`, `MAX_HP_BY_TYPE`, etc.).
 - `src/battle/terrain.ts` — pure terrain modifier table (defense/moveCost/attrition/vision) and downhill damage bonus. Sole owner of mechanical terrain values.
-- `src/battle/ai.ts` — per-tick enemy AI hook.
+- `src/battle/ai.ts` — AI controller registry + per-tick `AiTickFn`/`AiTickState` types. The tick loop calls a registered controller per bot team before each `simulateTick`; the controller reads a team snapshot and issues/clears orders. Stays out of the sim and `GameCanvas`.
+- `src/battle/ai/` — the controller implementation: `controller.ts` (`makeAiController` / `makeAiControllerProfile`), `deploy.ts` (`planDeployment` / `planFrontLines` placement planners), `rules.ts` (authored `condition → action` ruleset, sourced from `ai.json`), `perception.ts` (pure per-tick read of enemy positions + geometry → the facts the reactive tiers consume).
+- `src/sim/runMatch.ts` — `runMatch` / `runSeries`: drive two registered controllers head-to-head on an all-GRASSLAND disk with the real CP/scoring loop. The measurement layer behind `scripts/sim-ai-vs-ai.ts`.
 - `src/hex-engine/HexUtils.ts` — pure axial-coordinate hex math (flat-top, `size = 40`).
 - `scripts/sim-formations.ts` — Node harness that drives `simulateTick` against scripted scenarios. Mirrors map state via a fake `MapApi`. Treat as a regression check.
 
@@ -103,6 +107,8 @@ Order modes (`march` / `charge` / `retreat` / `unleash` / `hold` / `idle`). Marc
 
 **Critical invariant:** `tickCounterRef.current` (owned by `GameCanvas.tsx`, passed into `useBattleTick`) is monotonic. Reset it ONLY on regenerate-world and return-to-strategic. **Never** reset it when a battle starts — every unit's `nextMoveTick` is an absolute tick number, so a reset puts the whole army on a multi-hundred-tick cooldown.
 
+**AI difficulty is a fitness landscape, not a dial.** Don't assume "more tactics / more force / faster reaction = harder" — measure it with `scripts/sim-ai-vs-ai.ts`. Empirically: capabilities (`focusFire`/`charge`/`unleash`/`repel`/`defend`/…) are *handicaps* not skill (camping the flag is dominant, so each one pulls the army off the win path); `forceScale` saturates ~1.2 (full roster deployed); `reactionTicks` is non-transitive (rock-paper-scissors, not monotonic). See `LEARNINGS.md`.
+
 ### Terrain mods
 
 Mechanical terrain values (`defenseMult`, `moveCost`, `attritionPerTick`, `visionRadius`) live in `src/data/terrain.json`. The sim layer reads them via `src/data/terrain-mods.ts` (re-exported by `src/battle/terrain.ts` for backwards-compatible imports) — kept React/PIXI-free so the harness can import it. The canvas layer reads visual + mechanical fields together via `src/data/terrain.ts` (re-exported by `src/canvas/terrain-defs.ts` as a thin shim). Do **not** define a parallel mod table anywhere else — `terrain.json` is the single source.
@@ -117,6 +123,7 @@ All balance- and content-tunable values live in `src/data/`. Each `.json` file i
 - `game.json` / `game.ts` — `TICK_MS`, `LOD_THRESHOLD`, `DRAG_THRESHOLD_PX`, deploy zone fraction, retreat refund, initial roster, cohort size, capture `center` (the central flower), team tints, formation cycle/labels, heading arrows.
 - `scoring.json` / `scoring.ts` — victory-points loop: `pointsToWin`, `pointsPerUnitReached` (raid the enemy line), `centerHoldPointsPerSecond` (wrapper derives `CENTER_HOLD_POINTS_PER_TICK` from `TICK_MS`).
 - `command-points.json` / `command-points.ts` — CP economy: `cap`, `initial`, `regenPerNTicks` (gain rate). Re-exported by `src/battle/command-points.ts` (which still owns `CP_COSTS` / `CpIntent`).
+- `ai.json` / `ai.ts` — enemy-AI config: authored `rules`, `combat` / `counter` / `strategy` thresholds, `doctrines`, and per-tier `difficulties` (`reactionTicks`, `cpBudgetFrac`, `forceScale`, `capabilities`, deploy flags `frontLines`/`horizontalFront`/`serialWaves`/`fastDeploy`, optional `doctrine`). Consumed via `src/battle/ai/` and `src/data/ai-profile.ts` (`TeamAiProfile` overrides every knob per team; a difficulty's `doctrine` is the default applied on selection, overridable by the player).
 - `world-gen.json` / `world-gen.ts` — `bucket` thresholds (deepSeaMult, sandOffset, forestMult, hillMult, mountainOffset), falloff (intercept, exponent), `STRATEGIC_RESOLUTION`, `DIVE_ZOOM`, `GRID_RADIUS`, default `GenSettings`.
 - `details.json` / `details.ts` — sprite catalog (categories, counts, asset paths) and per-terrain scatter rules. Pools use compact `{category, weight, firstN?}` form; the wrapper expands to flat per-key entries.
 
@@ -131,8 +138,11 @@ All balance- and content-tunable values live in `src/data/`. Each `.json` file i
 
 **Regression scripts:** `scripts/snapshot-worldgen.ts` dumps `gridData` for a fixed mulberry32 seed (seeds both simplex noise AND `Math.random` so river placements are deterministic too); run before/after any world-gen change and diff to confirm value-preservation. The headless battle harness (`npm run sim` — actually `npx tsx scripts/sim-formations.ts` on Windows where `npm run sim` can't resolve `tsx` from PATH) gates any change to `combat`, `units`, or `terrain` JSON.
 
-## Worktree note
+## Single-worktree note
 
-This is a `git worktree` at `.worktrees/feature-infra` on branch `feature/infra`. The shared repo lives one level up. `.worktrees/` and `.playwright-mcp/` are gitignored.
-
-**This worktree is permanent — never close or remove it.** It is the standing workspace for presentation / architecture / infra work. Do **not** run `ExitWorktree`, `git worktree remove`, or otherwise tear it down when a task finishes (and don't delete the `feature/infra` branch). Integrate completed work by **rebasing/merging the branch while preserving the worktree**, then keep using this same worktree for the next task.
+All development now happens directly in the top-level repo on `master` — the feature worktrees
+(`.worktrees/*`, `.claude/worktrees/*`) and their branches were consolidated into `master` and
+removed. There is no longer a permanent/standing worktree; create a throwaway `git worktree` only
+when a task genuinely needs isolation, and remove it when done. `.worktrees/` and `.playwright-mcp/`
+stay gitignored. Raw art lives on disk under `art-source/` (gitignored except `art-source/originals/`,
+the active normalization source).
