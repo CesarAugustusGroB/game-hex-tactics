@@ -3,8 +3,9 @@ import gsap from 'gsap';
 import { HexUtils, type Hex } from '../../hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../../battle/simulate';
 import { planFollowerLegs, PX_PER_HEX } from './followerPath';
-import type { Unit, Team, GroupId } from '../../battle/simulate';
+import type { Unit, Team, GroupId, UnitType } from '../../battle/simulate';
 import { getTerrainMods, isWaterType } from '../../battle/terrain';
+import { FACTIONS } from '../../data/factions';
 import { TERRAINS } from '../terrain-defs';
 import { TEAM_TINTS, HEADING_ARROWS, LOD_THRESHOLD, TICK_MS, terrainMapFor, badgeForOrder, type Armies, type GroupOrders } from '../constants';
 import { spawnMovementDust } from './movementFx';
@@ -135,6 +136,10 @@ export interface UnitsRenderContext {
   unitTextureBlueCavalry: PIXI.Texture;
   unitTextureRedSkirmisher: PIXI.Texture;
   unitTextureBlueSkirmisher: PIXI.Texture;
+  // Faction sprite cache (stem → Texture) + each team's chosen faction. Selection prefers
+  // the faction texture; the per-team textures above are the fallback when a stem is missing.
+  factionTextures: Map<string, PIXI.Texture>;
+  teamFaction: Record<Team, string>;
   armyTexture: PIXI.Texture;
   // Soft shadow baked once at boot (PixiApp). Drawn as a plain Sprite per unit.
   shadowTexture: PIXI.Texture;
@@ -171,6 +176,7 @@ function createUnitVisual(
   shadowTex: PIXI.Texture,
   teamColor: number,
   isFar: boolean,
+  rotation: number,
 ): UnitVisual {
   // Strategic-view team marker; drawn before the outline so strokes sit on top.
   const marker = new PIXI.Graphics();
@@ -201,6 +207,7 @@ function createUnitVisual(
   sprite.anchor.set(0.5);
   sprite.width = UNIT_SPRITE_SIZE;
   sprite.height = UNIT_SPRITE_SIZE;
+  sprite.rotation = rotation;   // per-team facing: red faction art flips 180° to face north
   sprite.label = 'unit-sprite';
   sprite.visible = !isFar;
   container.addChild(sprite);
@@ -340,6 +347,22 @@ export function drawUnits(ctx: UnitsRenderContext): void {
 
   const isFar = ctx.worldScale < LOD_THRESHOLD;
 
+  // Faction art for a (team, type), or undefined when that faction has no stem for this type.
+  const factionTexOf = (team: Team, unitType: UnitType): PIXI.Texture | undefined => {
+    const stem = FACTIONS[ctx.teamFaction[team]]?.units[unitType];
+    return stem ? ctx.factionTextures.get(stem) : undefined;
+  };
+  // Soldier texture: the team's faction art, else the legacy per-team texture.
+  const soldierTexFor = (team: Team, unitType: UnitType): PIXI.Texture =>
+    factionTexOf(team, unitType) ?? (team === 'red'
+      ? (unitType === 'skirmisher' ? ctx.unitTextureRedSkirmisher : unitType === 'cavalry' ? ctx.unitTextureRedCavalry : ctx.unitTextureRed)
+      : (unitType === 'skirmisher' ? ctx.unitTextureBlueSkirmisher : unitType === 'cavalry' ? ctx.unitTextureBlueCavalry : ctx.unitTextureBlue));
+  // Faction art is authored facing SOUTH (blue advances down). Red advances up/north, so its
+  // faction sprite is rotated 180°. Legacy red textures are PRE-BAKED facing north
+  // (ROTATE_BY_NAME in normalize-units.py), so they stay at 0 — flip only the faction art.
+  const soldierRotFor = (team: Team, unitType: UnitType): number =>
+    team === 'red' && factionTexOf(team, unitType) ? Math.PI : 0;
+
   let visibleHexes = new Set<string>();
   if (ctx.fogOfWar) {
     let sig = ctx.selectedTeam;
@@ -389,10 +412,8 @@ export function drawUnits(ctx: UnitsRenderContext): void {
       container._hexKey = hexKey;
       container._hex = u.tacticalHex;
       container._path = [];
-      const tex = u.team === 'red'
-        ? (unitType === 'skirmisher' ? ctx.unitTextureRedSkirmisher : unitType === 'cavalry' ? ctx.unitTextureRedCavalry : ctx.unitTextureRed)
-        : (unitType === 'skirmisher' ? ctx.unitTextureBlueSkirmisher : unitType === 'cavalry' ? ctx.unitTextureBlueCavalry : ctx.unitTextureBlue);
-      container._visual = createUnitVisual(container, tex, ctx.shadowTexture, teamColor, isFar);
+      const tex = soldierTexFor(u.team, unitType);
+      container._visual = createUnitVisual(container, tex, ctx.shadowTexture, teamColor, isFar, soldierRotFor(u.team, unitType));
       ctx.unitContainers.set(u.id, container);
       c.addChild(container);
     } else if (container._targetKey !== targetKey) {
@@ -441,6 +462,15 @@ export function drawUnits(ctx: UnitsRenderContext): void {
     }
 
     const v = container._visual!;
+
+    // Faction may have been switched after the container was built — re-point the soldier
+    // texture in place (no rebuild). Skip if afloat: the galley owns the sprite until it lands.
+    const wantTex = soldierTexFor(u.team, unitType);
+    if (v.soldierTex !== wantTex) {
+      v.soldierTex = wantTex;
+      if (!v.afloat) v.sprite.texture = wantTex;
+      v.sprite.rotation = soldierRotFor(u.team, unitType);  // faction switch may change the flip
+    }
 
     // Position keeps tweening while hidden so a fog reveal shows the unit at its current
     // location, not the last-seen one.

@@ -12,7 +12,7 @@ import {
   INITIAL_ROSTER, RETREAT_REFUND_FRAC,
   makeInitialRosters,
   groupOrderKey,
-  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged, POINTS_TO_WIN,
+  GROUP_IDS, deployZoneFor, isGroupSealed, isGroupEngaged, activeFillGroup, POINTS_TO_WIN,
 } from '../canvas/constants';
 import {
   type CommandPoints, type CpIntent,
@@ -20,6 +20,7 @@ import {
   CP_CAP, CP_REGEN_N,
 } from '../battle/command-points';
 import { TERRAINS } from '../canvas/terrain-defs';
+import { FACTION_TEAM_DEFAULT } from '../data/factions';
 import { type WaterFilterHandle } from '../canvas/water-filter';
 import { HUD, type AiTeamConfig } from '../canvas/HUD';
 import { generateWorldData as generateWorldDataPure, resolveMapType, type GenSettings, type MapTypeChoice } from '../canvas/world-gen';
@@ -35,6 +36,7 @@ import { GRID_RADIUS, DEFAULT_MAP_TYPE, type MapTypeId } from '../data/world-gen
 import { registerAiController } from '../battle/ai';
 import { loadAiProfiles } from '../data/ai-profile';
 import type { TeamAiProfile } from '../data/ai-profile';
+import { AI } from '../data/ai';
 import { makeAiControllerProfile } from '../battle/ai/controller';
 
 const INITIAL_SEED = Math.floor(Math.random() * 0x100000000);
@@ -76,6 +78,7 @@ export const GameCanvas: React.FC = () => {
   const unitTextureBlueCavalryRef = useRef<PIXI.Texture | null>(null);
   const unitTextureRedSkirmisherRef = useRef<PIXI.Texture | null>(null);
   const unitTextureBlueSkirmisherRef = useRef<PIXI.Texture | null>(null);
+  const factionTexturesRef = useRef<Map<string, PIXI.Texture>>(new Map());
   const boatTextureRef = useRef<PIXI.Texture | null>(null);
   const javelinTextureRef = useRef<PIXI.Texture | null>(null);
   const dustTextureRef = useRef<PIXI.Texture | null>(null);
@@ -132,6 +135,7 @@ export const GameCanvas: React.FC = () => {
   const [inputMode, setInputMode] = useState<InputMode | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<Team>('red');
   const [selectedGroup, setSelectedGroup] = useState<GroupId>(1);
+  const [teamFaction, setTeamFaction] = useState<Record<Team, string>>(() => ({ ...FACTION_TEAM_DEFAULT }));
   const [selectedUnitType, setSelectedUnitType] = useState<UnitType>('infantry');
   const [groupOrders, setGroupOrders] = useState<GroupOrders>(new Map());
   // Group-order keys whose first march of this battle has been paid (at double cost).
@@ -150,6 +154,11 @@ export const GameCanvas: React.FC = () => {
   const setTeamAi = (team: Team, patch: Partial<TeamAiProfile> & { enabled?: boolean }) =>
     setAiConfig(prev => {
       const { enabled, ...profilePatch } = patch;
+      // Selecting a difficulty applies its preferred doctrine (overridable by an explicit doctrine patch).
+      if (profilePatch.difficulty && profilePatch.doctrine === undefined) {
+        const d = AI.difficulties[profilePatch.difficulty].doctrine;
+        if (d) profilePatch.doctrine = d;
+      }
       return {
         ...prev,
         [team]: {
@@ -266,6 +275,8 @@ export const GameCanvas: React.FC = () => {
       unitTextureBlueCavalry: unitTexBlueCav,
       unitTextureRedSkirmisher: unitTexRedSkir,
       unitTextureBlueSkirmisher: unitTexBlueSkir,
+      factionTextures: factionTexturesRef.current,
+      teamFaction,
       armyTexture: armyTex,
       shadowTexture: shadowTex,
       boatTexture: boatTex,
@@ -279,7 +290,7 @@ export const GameCanvas: React.FC = () => {
       fogOfWar,
       worldScale: worldRef.current.scale.x,
     });
-  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam, selectedGroup]);
+  }, [armies, viewMode, gridData, currentStrategicHex, groupOrders, fogOfWar, selectedTeam, selectedGroup, teamFaction]);
 
   // Order mutation helpers declared up here (before the mount useEffect / interval useEffect
   // that capture them) so the closures inside those long-lived handlers can resolve the
@@ -478,6 +489,7 @@ export const GameCanvas: React.FC = () => {
     unitTextureBlueCavalryRef,
     unitTextureRedSkirmisherRef,
     unitTextureBlueSkirmisherRef,
+    factionTexturesRef,
     boatTextureRef,
     javelinTextureRef,
     dustTextureRef,
@@ -557,9 +569,8 @@ export const GameCanvas: React.FC = () => {
     for (const g of GROUP_IDS) {
       if (isGroupSealed(alive, groupOrders, selectedDeployZone, selectedTeam, g)) sealed.add(g);
     }
-    // The fill target is whatever group is selected, as long as it isn't sealed (launched).
-    return { sealedGroups: sealed, activeGroup: sealed.has(selectedGroup) ? null : selectedGroup };
-  }, [armies, groupOrders, currentStrategicHex, selectedTeam, selectedDeployZone, selectedGroup]);
+    return { sealedGroups: sealed, activeGroup: activeFillGroup(alive, groupOrders, selectedDeployZone, selectedTeam) };
+  }, [armies, groupOrders, currentStrategicHex, selectedTeam, selectedDeployZone]);
 
   const battleCtx: BattleTickCtx = {
     currentStrategicHexRef,
@@ -761,6 +772,7 @@ export const GameCanvas: React.FC = () => {
 
   const resetBattle = useCallback(() => {
     clearPendingTimeouts();
+    setBrokeFlash({ red: false, blue: false });
     setArmies(new Map());
     setInputMode(null);
     setIsBattleRunning(false);
@@ -779,6 +791,7 @@ export const GameCanvas: React.FC = () => {
 
   const returnToStrategic = useCallback(() => {
     clearPendingTimeouts();
+    setBrokeFlash({ red: false, blue: false });
     setSettings(s => ({ ...s, noiseOffset: {q:0, r:0}, resolution: STRATEGIC_RESOLUTION }));
     setViewMode('STRATEGIC');
     setCurrentStrategicHex(null);
@@ -799,6 +812,7 @@ export const GameCanvas: React.FC = () => {
 
   const regenerateWith = useCallback((nextSeed: number, choice: MapTypeChoice) => {
     clearPendingTimeouts();
+    setBrokeFlash({ red: false, blue: false });
     const resolved = resolveMapType(choice, nextSeed);
     setResolvedMapType(resolved);
     setSeed(nextSeed);
@@ -893,6 +907,8 @@ export const GameCanvas: React.FC = () => {
       selectedTeam={selectedTeam}
       selectedGroup={selectedGroup}
       selectedUnitType={selectedUnitType}
+      teamFaction={teamFaction}
+      setTeamFaction={setTeamFaction}
       curT={curT}
       setIsScanning={setIsScanning}
       setShowGrid={setShowGrid}

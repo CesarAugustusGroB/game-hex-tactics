@@ -1018,10 +1018,29 @@ export const simulateTick = (
   });
 
   // Build occupancy of living units (dying ones drop out of collision checks immediately).
+  // occupancyCounts tracks the true number of units per hex (deploy snap / AI overlap can
+  // co-locate multiple units). Deletions decrement the count and only remove the key when
+  // it reaches zero, preventing a co-inhabitant from making the hex appear vacated.
   const occupancy = new Map<string, Unit>();
+  const occupancyCounts = new Map<string, number>();
   for (const u of working) {
-    if (u.hp > 0) occupancy.set(HexUtils.key(u.tacticalHex), u);
+    if (u.hp > 0) {
+      const k = HexUtils.key(u.tacticalHex);
+      occupancy.set(k, u);
+      occupancyCounts.set(k, (occupancyCounts.get(k) ?? 0) + 1);
+    }
   }
+  const occupancyRemove = (hex: Hex, _u: Unit): void => {
+    const k = HexUtils.key(hex);
+    const n = (occupancyCounts.get(k) ?? 1) - 1;
+    if (n <= 0) { occupancyCounts.delete(k); occupancy.delete(k); }
+    else occupancyCounts.set(k, n);
+  };
+  const occupancySet = (hex: Hex, u: Unit): void => {
+    const k = HexUtils.key(hex);
+    occupancyCounts.set(k, (occupancyCounts.get(k) ?? 0) + 1);
+    occupancy.set(k, u);
+  };
 
   // Bucket living units by group.
   const groupsByKey = new Map<string, Unit[]>();
@@ -1080,12 +1099,12 @@ export const simulateTick = (
       if (occupant && !groupIds.has(occupant.id)) return false;
       projected.push({ unit: u, next });
     }
-    for (const u of groupUnits) occupancy.delete(HexUtils.key(u.tacticalHex));
+    for (const u of groupUnits) occupancyRemove(u.tacticalHex, u);
     for (const p of projected) {
       p.unit.tacticalHex = p.next;
       p.unit.state = 'moving';
       applyEntryCooldown(p.unit, p.next, false);
-      occupancy.set(HexUtils.key(p.next), p.unit);
+      occupancySet(p.next, p.unit);
     }
     return true;
   };
@@ -1128,11 +1147,11 @@ export const simulateTick = (
             const next: Hex = { q: u.tacticalHex.q + delta.q, r: u.tacticalHex.r + delta.r };
             if (!config.mapApi.isInside(next) || !config.mapApi.isWalkable(next)) break;
             if (occupancy.get(HexUtils.key(next))) break;
-            occupancy.delete(HexUtils.key(u.tacticalHex));
+            occupancyRemove(u.tacticalHex, u);
             u.tacticalHex = next;
             u.state = 'moving';
             applyEntryCooldown(u, next, false);
-            occupancy.set(HexUtils.key(next), u);
+            occupancySet(next, u);
           }
         }
         continue;
@@ -1304,12 +1323,12 @@ export const simulateTick = (
               bestRunD = d;
             }
             if (!bestNext) break;
-            occupancy.delete(HexUtils.key(u.tacticalHex));
+            occupancyRemove(u.tacticalHex, u);
             u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
             u.tacticalHex = bestNext;
             u.state = 'moving';
             applyEntryCooldown(u, bestNext, false);
-            occupancy.set(HexUtils.key(bestNext), u);
+            occupancySet(bestNext, u);
             continue;
           }
 
@@ -1391,12 +1410,12 @@ export const simulateTick = (
             }
           }
           if (!bestNext) break;
-          occupancy.delete(HexUtils.key(u.tacticalHex));
+          occupancyRemove(u.tacticalHex, u);
           u.prevTacticalHex = { q: u.tacticalHex.q, r: u.tacticalHex.r };
           u.tacticalHex = bestNext;
           u.state = 'moving';
           applyEntryCooldown(u, bestNext, false);
-          occupancy.set(HexUtils.key(bestNext), u);
+          occupancySet(bestNext, u);
         }
       }
     } else if (mode === 'charge') {
@@ -1443,13 +1462,13 @@ export const simulateTick = (
           // sub-step). With spatial-order iteration above, the ally-block degenerates
           // into the correct straggler-behind-blocker chain.
           if (occupant) continue;
-          occupancy.delete(HexUtils.key(u.tacticalHex));
+          occupancyRemove(u.tacticalHex, u);
           u.tacticalHex = next;
           u.state = 'moving';
           // Overwrite each substep so the cooldown carried to the next tick reflects the
           // unit's FINAL hex this tick — the terrain it's standing on after the charge.
           applyEntryCooldown(u, next, true);
-          occupancy.set(HexUtils.key(next), u);
+          occupancySet(next, u);
         }
         // Impact damage: each charging unit lances CHARGE_IMPACT_RANGE hexes ahead, but
         // skips any enemy already lanced earlier in this charge.
@@ -1465,7 +1484,7 @@ export const simulateTick = (
             // as hard regardless of who it spears.
             target.hp -= CHARGE_IMPACT_DAMAGE_BY_TYPE[u.unitType ?? 'infantry'];
             damaged.add(target.id);
-            if (target.hp <= 0) occupancy.delete(HexUtils.key(hex));
+            if (target.hp <= 0) occupancyRemove(hex, target);
           }
         }
       }

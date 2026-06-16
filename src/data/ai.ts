@@ -51,6 +51,10 @@ export interface DifficultyConfig {
    *  marched forward as a continuous rolling front. The other front groups stay dormant; the reserve
    *  group defends the back line reactively. Replaces the combined-arms chunk layout for `test`. */
   frontLines?: boolean;
+  /** Preferred doctrine for this difficulty (front-line composition / reserve type). Applied as the
+   *  default doctrine when this difficulty is selected; the player can still override per team.
+   *  Unset = 'balanced'. */
+  doctrine?: Doctrine;
 }
 
 /** Counterattack tuning: how "danger of defeat" is blended and how far it lowers the launch bar. */

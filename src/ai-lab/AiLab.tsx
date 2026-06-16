@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { Team, UnitType } from '../battle/simulate';
 import type { TeamAiProfile } from '../data/ai-profile';
 import { loadAiProfiles, saveAiProfiles, resolveProfile, profileFromDifficulty } from '../data/ai-profile';
-import { DOCTRINES, DIFFICULTIES, ALL_CAPABILITIES } from '../data/ai';
+import { DOCTRINES, DIFFICULTIES, ALL_CAPABILITIES, AI } from '../data/ai';
 import type { Doctrine, Difficulty, AiCapability } from '../data/ai';
 import { PROFILE_NUM_FIELDS, effectiveNum, setNum } from './profileFields';
 import { runSeries, type SimResult } from '../sim/runMatch';
@@ -61,7 +61,10 @@ const TeamColumn: React.FC<{ team: Team; profile: TeamAiProfile; onChange: (p: T
         <div style={label}>Difficulty (base)</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
           {DIFFICULTIES.map(d => (
-            <button key={d} title={DIFF_DESC[d]} style={chip(profile.difficulty === d, '#d97706')} onClick={() => onChange({ ...profile, difficulty: d as Difficulty })}>{d}</button>
+            <button key={d} title={DIFF_DESC[d]} style={chip(profile.difficulty === d, '#d97706')} onClick={() => {
+              const dflt = AI.difficulties[d as Difficulty]?.doctrine;
+              onChange({ ...profile, difficulty: d as Difficulty, ...(dflt && { doctrine: dflt }) });
+            }}>{d}</button>
           ))}
         </div>
         <div style={label}>Doctrine</div>

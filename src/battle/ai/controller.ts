@@ -71,6 +71,12 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
   const fastDeploy = r.fastDeploy;
   const horizontal = r.horizontalFront;
   const frontLines = r.frontLines;
+  // Both fill ONE group at a time, launch it, then move to the next — the difference is the
+  // deploy layout (planFrontLines vs planDeployment). frontLines without this would dump the
+  // whole army into group 1 and, once it sealed, never deploy the reserve — the army froze
+  // after the first push (groups 2-4 were cap 0). Cycling the wave across groups makes the
+  // "rolling lines" actually roll: wave after wave until the roster is spent.
+  const serialFill = serial || frontLines;
   const lineTypes = r.lineTypes;
   // Blue's deploy zone is the top strip (small py) marching down → front = larger py; red is the
   // bottom strip marching up → front = smaller py.
@@ -223,10 +229,11 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
     // the initial CP pours into one big centre punch); the flank/reserve bands stay normal-sized.
     // Horizontal fronts want UNIFORM wide lines, so the big-centre wave is disabled there.
     const BIG_WAVE_MULT = 2.5;
-    // frontLines routes the WHOLE standing force into ONE attack group (the rolling front); the other
-    // groups stay dormant (cap 0) and the reserve is filled only reactively by the defend block above.
+    // frontLines: each wave is a full-width line of `targetUnits`. Only one group fills at a time
+    // (serialFill), launches, then the next group hosts the following wave — so the rolling front
+    // keeps coming and the whole roster eventually deploys, instead of one 50-unit push that froze.
     const bandCap = (g: GroupId): number => {
-      if (frontLines) return g === GROUP_IDS[0] ? targetUnits : 0;
+      if (frontLines) return targetUnits;
       return serial && !horizontal && g === GROUP_IDS[0] ? Math.ceil(bandShare * BIG_WAVE_MULT) : bandShare;
     };
 
@@ -239,12 +246,12 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
     // Serial waves: concentrate the whole amass budget on the lowest-numbered band that still has
     // room (in GROUP_IDS order) — the others wait their turn. Once it fills and launches (sealed),
     // the next band becomes the active fill.
-    const activeFillGid = serial
+    const activeFillGid = serialFill
       ? groups.find(g => !g.sealed && g.size < bandCap(g.g)
           && (frontLines ? rosterTotal > 0 : (roster[typeOfGroup(g.g)] ?? 0) > 0))?.g
       : undefined;
     for (const grp of amassOrder) {
-      if (serial && grp.g !== activeFillGid) continue;
+      if (serialFill && grp.g !== activeFillGid) continue;
       const canAmass = !grp.sealed && grp.size < bandCap(grp.g) && freeZoneCount > 0 && rosterTotal > 0;
       const ctx: RuleCtx = {
         size: grp.size,
@@ -299,15 +306,18 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
     const launchShare = Math.max(COHORT_SIZE, Math.ceil(bandShare * (1 - c.maxLaunchReduction * launchDanger)));
     const bandReady = (grp: { g: GroupId; size: number; sealed: boolean }): boolean => {
       if (grp.size === 0 || grp.sealed) return true;
-      // Serial waves launch a band once it reaches its full wave cap; the parallel front uses the
-      // (danger-lowered) launchShare.
-      const full = serial ? bandCap(grp.g) : launchShare;
+      // Serial waves launch a band once it reaches its full wave cap; the parallel front
+      // (frontLines or 4-band) uses the (danger-lowered) launchShare. frontLines routes the
+      // whole force into one group, so it also gates on the full bandCap — otherwise the group
+      // launches at ~25% and the remaining 75% never deploys (bandCap returns 0 for groups 2-4).
+      const full = serialFill ? bandCap(grp.g) : launchShare;
       if (grp.size >= full) return true;
       const typeLeft = frontLines ? rosterTotal > 0 : (roster[typeOfGroup(grp.g)] ?? 0) > 0;
       const canGrowMore = grp.size < bandCap(grp.g) && freeZoneCount > 0 && typeLeft;
       return !canGrowMore;
     };
-    // Parallel front waits for EVERY band; serial waves launch each band the moment IT is ready.
+    // Parallel front waits for EVERY band; serialFill (serial waves / rolling lines) launches
+    // each band the moment IT is ready.
     const frontReady = groups.every(bandReady);
     // Tactical repel: don't pull the WHOLE army back at a mass in our half — only the nearest
     // groups peel off (count scales with the mass), so a screen stays on the objective. The rest
@@ -427,7 +437,7 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
         const gc = centroidOf(grp.groupUnits);
         const target = focusHex && HexUtils.distance(gc, focusHex) <= combat.chargeReach ? focusHex : nearestEnemy.tacticalHex;
         const heading = headingToward(gc, target);
-        if (state.issueOrder(grp.g, { mode: 'charge', heading }, 'charge')) {
+        if (state.issueOrder(grp.g, { mode: 'charge', heading, attackTarget: { ...target } }, 'charge')) {
           cpSpent += CP_COSTS.charge;
           lastDecisionTick.set(grp.g, state.tick);
         }
@@ -436,9 +446,11 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
 
       if (action === 'unleash') {
         if (order?.mode === 'unleash') continue;                   // already committed to the unleash
+        if (!nearestEnemy) continue;                               // nothing to unleash at
         if (cpSpent + CP_COSTS.unleash > budget) continue;
-        // unleash self-acquires targets and kites at missile range — no heading to aim.
-        if (state.issueOrder(grp.g, { mode: 'unleash' }, 'unleash')) {
+        // unleash self-acquires targets and kites at missile range; attackTarget is unused by
+        // the sim dispatch but must be non-null so simulate.ts:1096 doesn't skip this group.
+        if (state.issueOrder(grp.g, { mode: 'unleash', attackTarget: { ...nearestEnemy.tacticalHex } }, 'unleash')) {
           cpSpent += CP_COSTS.unleash;
           lastDecisionTick.set(grp.g, state.tick);
         }
@@ -448,7 +460,7 @@ export function makeAiControllerProfile(team: Team, profile: TeamAiProfile): AiT
       // action 'march' — the fallback rule. Converge on the focus cluster (Tier 4) when there is
       // one, else push the abstract centre. (A group that reaches the flower matches hold-centre
       // above instead, so the objective is still held.)
-      if (inZone && !(serial ? bandReady(grp) : frontReady)) continue;
+      if (inZone && !(serialFill ? bandReady(grp) : frontReady)) continue;
       // Advance STRAIGHT forward — no diagonal steering. The marchTarget (centre in the seize phase,
       // else the weakest cluster) only ranks units front-to-back; lateral positioning is meant to be
       // done by DEPLOYMENT, not by curving the march diagonally toward a flank.

@@ -14,7 +14,7 @@ import {
   DAMAGE_PER_TICK, TICK_MS, CAPTURE_ZONE_HEXES,
   POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK, CENTER_HOLD_REGEN_BONUS,
   COHORT_SIZE, INITIAL_ROSTER,
-  captureZoneKeys, deployZoneFor, terrainMapFor, gridKeySetFor,
+  captureZoneKeys, deployZoneFor, terrainMapFor, gridKeySetFor, groupOrderKey,
   type Armies, type GroupOrders, type Rosters,
 } from './constants';
 import { scoreTick } from '../battle/scoring';
@@ -165,10 +165,18 @@ export function useBattleTick(ctx: BattleTickCtx, enabled: boolean): void {
               return true;
             },
             issueOrder: (gid, change, intent) => {
-              const next = debit(ctx.commandPointsRef.current, team, intent);
+              const k = groupOrderKey(team, gid);
+              const effectiveIntent = intent === 'march' && !ctx.marchedGroupsRef.current.has(k) ? 'firstMarch' : intent;
+              const next = debit(ctx.commandPointsRef.current, team, effectiveIntent);
               if (next === null) return false;
               ctx.commandPointsRef.current = next;
               ctx.setCommandPoints(next);
+              if (effectiveIntent === 'firstMarch') {
+                const updated = new Set(ctx.marchedGroupsRef.current);
+                updated.add(k);
+                ctx.marchedGroupsRef.current = updated;
+                ctx.setMarchedGroups(updated);
+              }
               ctx.issueOrder(team, gid, change);
               return true;
             },

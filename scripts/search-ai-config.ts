@@ -51,7 +51,7 @@ const round05 = (v: number) => Math.round(v * 20) / 20;
 const pick = <T,>(xs: T[]): T => xs[Math.floor(Math.random() * xs.length)];
 
 const candToProfile = (c: Cand): TeamAiProfile => ({
-  doctrine: 'balanced', difficulty: 'normal', // neutral base; every searched field is set explicitly below
+  doctrine: AI.difficulties.test.doctrine ?? 'balanced', difficulty: 'normal',
   reactionTicks: c.reactionTicks, cpBudgetFrac: c.cpBudgetFrac, forceScale: c.forceScale,
   capabilities: [...c.capabilities],
   frontLines: c.frontLines, serialWaves: c.serialWaves, horizontalFront: c.horizontalFront, fastDeploy: c.fastDeploy,
@@ -88,7 +88,7 @@ const mutate = (c: Cand): Cand => {
 };
 
 const LADDER = ['normal', 'hard', 'test'] as const;
-const ladderProfiles = LADDER.map(d => ({ d, p: { doctrine: 'balanced', difficulty: d } as TeamAiProfile }));
+const ladderProfiles = LADDER.map(d => ({ d, p: { doctrine: AI.difficulties[d].doctrine ?? 'balanced', difficulty: d } as TeamAiProfile }));
 
 /** Side-bias-cancelled win-rate vs one opponent (run as red AND blue). */
 function winRateVs(p: TeamAiProfile, opp: TeamAiProfile, reps: number): number {

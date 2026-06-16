@@ -17,8 +17,9 @@ import { scoreTick, type Score } from '../src/battle/scoring';
 import { makeAiController } from '../src/battle/ai/controller';
 import type { AiTickFn, AiTickState } from '../src/battle/ai';
 import {
-  CP_INITIAL, CP_REGEN_PER_TICK_STEP, CP_COSTS, type CommandPoints,
+  CP_INITIAL, CP_REGEN_N, CP_REGEN_PER_TICK_STEP, CP_COSTS, type CommandPoints,
 } from '../src/battle/command-points';
+import { DAMAGE_PER_TICK } from '../src/data/combat';
 import { HexUtils } from '../src/hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../src/data/units';
 import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK } from '../src/data/scoring';
@@ -78,6 +79,7 @@ function trace() {
   const orders = new Map<string, GroupOrder>();
   let score: Score = { red: 0, blue: 0 };
   const marched = new Set<string>();
+  let unitCounter = 0;
   const centreY = HexUtils.hexToPixel(CAPTURE_CENTER).y;
   const sideDepth = (t: Team, u: Unit) => (t === 'red' ? -1 : 1) * (HexUtils.hexToPixel(u.tacticalHex).y - centreY);
   console.log(`centreY=${centreY.toFixed(1)}  redZone=${redZone.size}  blueZone=${blueZone.size}`);
@@ -87,7 +89,7 @@ function trace() {
     const onFlag = (t: Team) => units.some(u => u.team === t && u.hp > 0 && centerKeys.has(HexUtils.key(u.tacticalHex)));
     const redFlag = onFlag('red'), blueFlag = onFlag('blue');
     const bonusTeam: Team | null = redFlag && !blueFlag ? 'red' : blueFlag && !redFlag ? 'blue' : null;
-    cp = applyRegenLocal(cp, CP_REGEN_PER_TICK_STEP, bonusTeam);
+    cp = applyRegenLocal(cp, CP_REGEN_PER_TICK_STEP * CP_REGEN_N, bonusTeam);
     for (const team of (REVERSE_TICK_ORDER ? ['blue', 'red'] : ['red', 'blue']) as Team[]) {
       const state: AiTickState = {
         team, tick,
@@ -106,7 +108,7 @@ function trace() {
           cp[team] -= CP_COSTS.placeCohort;
           for (const h of spots) {
             if (roster[team][unitType] <= 0) break;
-            units.push({ id: `${team[0]}${units.length}`, team, unitType, tacticalHex: h, homeHex: h,
+            units.push({ id: `${team[0]}${unitCounter++}`, team, unitType, tacticalHex: h, homeHex: h,
               groupId: gid, hp: MAX_HP_BY_TYPE[unitType], state: 'idle', nextMoveTick: 0, visionRadius: 4 });
             roster[team][unitType]--;
           }
@@ -126,7 +128,7 @@ function trace() {
       };
       ctrl[team](state);
     }
-    const res = simulateTick(units, orders, { damagePerTick: 10, mapApi, currentTick: tick, captureZone: centerHexes });
+    const res = simulateTick(units, orders, { damagePerTick: DAMAGE_PER_TICK, mapApi, currentTick: tick, captureZone: centerHexes });
     units = res.units;
     const sc = scoreTick({ units, score, centerKeys,
       scoringZone: { red: blueZone, blue: redZone },

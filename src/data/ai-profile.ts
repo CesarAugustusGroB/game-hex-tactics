@@ -60,8 +60,8 @@ export function resolveProfile(p: TeamAiProfile): ResolvedProfile {
   };
 }
 
-export function profileFromDifficulty(difficulty: Difficulty, doctrine: Doctrine = 'balanced'): TeamAiProfile {
-  return { doctrine, difficulty };
+export function profileFromDifficulty(difficulty: Difficulty, doctrine?: Doctrine): TeamAiProfile {
+  return { doctrine: doctrine ?? AI.difficulties[difficulty].doctrine ?? 'balanced', difficulty };
 }
 
 export const AI_PROFILES_KEY = 'hex-tactics:ai-profiles';

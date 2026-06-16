@@ -1,0 +1,38 @@
+{
+  "assetDir": "/units/normalized/factions/",
+  "teamDefault": { "red": "rome", "blue": "greece" },
+  "factions": {
+    "rome": {
+      "label": "Rome",
+      "units": {
+        "infantry": "infantry__roman__swordsman-shield-a",
+        "cavalry": "cavalry__roman__lancer-shield",
+        "skirmisher": "skirmisher__roman__velite"
+      }
+    },
+    "greece": {
+      "label": "Greece",
+      "units": {
+        "infantry": "infantry__greek__hoplite",
+        "cavalry": "cavalry__generic__shield-rider",
+        "skirmisher": "infantry__ancient__spearman-shield"
+      }
+    },
+    "celt": {
+      "label": "Celt",
+      "units": {
+        "infantry": "infantry__celtic__spearman-shield",
+        "cavalry": "cavalry__celtic__rider",
+        "skirmisher": "infantry__generic__spearman-lunge"
+      }
+    },
+    "east": {
+      "label": "East",
+      "units": {
+        "infantry": "infantry__generic__shield-spear-overhead",
+        "cavalry": "cavalry__eastern__commander",
+        "skirmisher": "cavalry__nomad__horse-archer"
+      }
+    }
+  }
+}

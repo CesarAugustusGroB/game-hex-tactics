@@ -61,7 +61,7 @@ export function beginOrderDrag(e: PIXI.FederatedPointerEvent, world: PIXI.Contai
   if (ctx.groupOrdersRef.current.get(groupOrderKey(team, groupId))?.committed) return;
   const local = world.toLocal(e.global);
   const targetHex = HexUtils.pixelToHex({ x: local.x, y: local.y });
-  const formation = ctx.groupFormationsRef.current.get(groupOrderKey(team, groupId)) ?? 'line';
+  const formation: FormationType = 'line';
   const depth = ctx.groupDepthsRef.current.get(groupOrderKey(team, groupId)) ?? 1;
   ctx.orderDragRef.current = {
     team,

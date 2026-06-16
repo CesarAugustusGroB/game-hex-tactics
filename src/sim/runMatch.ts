@@ -4,7 +4,8 @@ import { getTerrainMods } from '../battle/terrain';
 import { scoreTick, type Score } from '../battle/scoring';
 import { makeAiControllerProfile } from '../battle/ai/controller';
 import type { AiTickFn, AiTickState } from '../battle/ai';
-import { CP_CAP, CP_INITIAL, CP_REGEN_PER_TICK_STEP, CP_COSTS, type CommandPoints } from '../battle/command-points';
+import { CP_CAP, CP_INITIAL, CP_REGEN_N, CP_REGEN_PER_TICK_STEP, CP_COSTS, type CommandPoints } from '../battle/command-points';
+import { DAMAGE_PER_TICK } from '../data/combat';
 import { HexUtils, type Hex } from '../hex-engine/HexUtils';
 import { MAX_HP_BY_TYPE } from '../data/units';
 import { POINTS_TO_WIN, POINTS_PER_UNIT_REACHED, CENTER_HOLD_POINTS_PER_TICK, CENTER_HOLD_REGEN_BONUS } from '../data/scoring';
@@ -65,6 +66,7 @@ export function runMatch(red: TeamAiProfile, blue: TeamAiProfile, opts: { revers
   const marched = new Set<string>();
   const centreY = HexUtils.hexToPixel(CAPTURE_CENTER).y;
 
+  let unitCounter = 0;
   let tick = 0, winner: Team | null = null;
   for (let i = 0; i < MAX_TICKS; i++) {
     tick++;
@@ -72,7 +74,7 @@ export function runMatch(red: TeamAiProfile, blue: TeamAiProfile, opts: { revers
     const onFlag = (t: Team) => units.some(u => u.team === t && u.hp > 0 && centerKeys.has(HexUtils.key(u.tacticalHex)));
     const redFlag = onFlag('red'), blueFlag = onFlag('blue');
     const bonusTeam: Team | null = redFlag && !blueFlag ? 'red' : blueFlag && !redFlag ? 'blue' : null;
-    cp = applyRegenLocal(cp, CP_REGEN_PER_TICK_STEP, bonusTeam);
+    cp = applyRegenLocal(cp, CP_REGEN_PER_TICK_STEP * CP_REGEN_N, bonusTeam);
 
     const tickOrder: Team[] = opts.reverse ? ['blue', 'red'] : ['red', 'blue'];
     for (const team of tickOrder) {
@@ -96,7 +98,7 @@ export function runMatch(red: TeamAiProfile, blue: TeamAiProfile, opts: { revers
           cp[team] -= CP_COSTS.placeCohort;
           for (const h of spots) {
             if (roster[team][unitType] <= 0) break;
-            units.push({ id: `${team[0]}${units.length}`, team, unitType, tacticalHex: h, homeHex: h,
+            units.push({ id: `${team[0]}${unitCounter++}`, team, unitType, tacticalHex: h, homeHex: h,
               groupId: gid, hp: MAX_HP_BY_TYPE[unitType], state: 'idle', nextMoveTick: 0, visionRadius: 4 });
             roster[team][unitType]--;
           }
@@ -118,7 +120,7 @@ export function runMatch(red: TeamAiProfile, blue: TeamAiProfile, opts: { revers
       ctrl[team](state);
     }
 
-    const res = simulateTick(units, orders, { damagePerTick: 10, mapApi, currentTick: tick, captureZone: centerHexes });
+    const res = simulateTick(units, orders, { damagePerTick: DAMAGE_PER_TICK, mapApi, currentTick: tick, captureZone: centerHexes });
     units = res.units;
     for (const team of ['red', 'blue'] as const) {
       const live = units.filter(u => u.team === team && u.hp > 0);

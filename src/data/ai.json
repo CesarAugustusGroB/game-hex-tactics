@@ -38,9 +38,9 @@
     "defensive":  { "front": ["skirmisher", "cavalry", "infantry"], "reserve": "skirmisher" }
   },
   "difficulties": {
-    "easy":   { "reactionTicks": 6,  "cpBudgetFrac": 0.8, "forceScale": 0.7, "capabilities": ["charge"] },
-    "normal": { "reactionTicks": 2,  "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": [] },
-    "hard":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["raid", "defend"] },
-    "test":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["defend"], "frontLines": true }
+    "easy":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["raid", "defend"] },
+    "normal": { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 0.7, "capabilities": ["defend"], "frontLines": true },
+    "hard":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 1.2, "capabilities": ["raid"], "frontLines": true, "horizontalFront": true },
+    "test":   { "reactionTicks": 10, "cpBudgetFrac": 1.0, "forceScale": 1.2, "capabilities": ["raid"], "frontLines": true, "horizontalFront": true, "doctrine": "aggressive" }
   }
 }

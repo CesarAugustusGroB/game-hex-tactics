@@ -18,6 +18,7 @@ import { CP_COSTS, type CpIntent } from '../battle/command-points';
 import { MAP_TYPE_IDS, type MapTypeId } from '../data/world-gen';
 import type { MapTypeChoice } from './world-gen';
 import { DOCTRINES, DIFFICULTIES } from '../data/ai';
+import { FACTIONS, FACTION_IDS } from '../data/factions';
 import type { TeamAiProfile } from '../data/ai-profile';
 
 /** Per-team AI control: whether the team is bot-driven, plus its full tuning profile. */
@@ -53,6 +54,8 @@ export interface HUDProps {
   selectedTeam: Team;
   selectedGroup: GroupId;
   selectedUnitType: UnitType;
+  teamFaction: Record<Team, string>;
+  setTeamFaction: React.Dispatch<React.SetStateAction<Record<Team, string>>>;
   commandPoints: { red: number; blue: number };
   brokeFlash: { red: boolean; blue: boolean };
   canAfford: (team: Team, intent: CpIntent) => boolean;
@@ -192,6 +195,8 @@ const HUDInner: React.FC<HUDProps> = ({
   selectedTeam,
   selectedGroup,
   selectedUnitType,
+  teamFaction,
+  setTeamFaction,
   commandPoints,
   brokeFlash,
   marchedGroups,
@@ -514,6 +519,31 @@ const HUDInner: React.FC<HUDProps> = ({
                 }}
               >
                 {team.toUpperCase()}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 800, letterSpacing: '1px', alignSelf: 'center' }}>
+            {selectedTeam.toUpperCase()} FACTION
+          </span>
+          {FACTION_IDS.map(fid => {
+            const on = teamFaction[selectedTeam] === fid;
+            const bg = selectedTeam === 'red' ? '#ef4444' : '#3b82f6';
+            return (
+              <button
+                key={fid}
+                onClick={() => setTeamFaction(prev => ({ ...prev, [selectedTeam]: fid }))}
+                style={{
+                  padding: '5px 10px',
+                  background: on ? bg : 'rgba(255,255,255,0.04)',
+                  color: on ? 'white' : '#94a3b8',
+                  border: on ? `1px solid ${bg}` : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', transition: '0.2s',
+                }}
+              >
+                {FACTIONS[fid].label}
               </button>
             );
           })}

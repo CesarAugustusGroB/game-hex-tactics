@@ -4,6 +4,7 @@ import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { HexUtils } from '../hex-engine/HexUtils';
 import { ALL_DETAIL_KEYS, detailAssetPath } from './detail-rules';
+import { FACTION_TEXTURE_STEMS, factionTexturePath } from '../data/factions';
 import { type WaterFilterHandle } from './water-filter';
 import {
   CAPTURE_CENTER, DIVE_ZOOM, LOD_THRESHOLD,
@@ -58,6 +59,9 @@ export interface PixiAppCtx {
   unitTextureBlueCavalryRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureRedSkirmisherRef: MutableRefObject<PIXI.Texture | null>;
   unitTextureBlueSkirmisherRef: MutableRefObject<PIXI.Texture | null>;
+  // Faction sprite cache: texture-stem → Texture, preloaded for every faction in factions.json.
+  // drawUnits selects by (team's faction, unitType); falls back to the per-team refs above.
+  factionTexturesRef: MutableRefObject<Map<string, PIXI.Texture>>;
   boatTextureRef: MutableRefObject<PIXI.Texture | null>;
   javelinTextureRef: MutableRefObject<PIXI.Texture | null>;
   dustTextureRef: MutableRefObject<PIXI.Texture | null>;
@@ -230,6 +234,20 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         }
         if (t.repeat) tex.source.addressMode = 'repeat';
         t.ref.current = tex;
+      });
+
+      // Faction unit sprites (factions.json). One flat cache keyed by stem; drawUnits picks
+      // per (team faction, unitType). Cheap (~26 × 160² PNGs) so preload them all up front.
+      const factionTex = await Promise.all(
+        FACTION_TEXTURE_STEMS.map(s => PIXI.Assets.load<PIXI.Texture>(factionTexturePath(s))),
+      );
+      if (!isMounted) return;
+      FACTION_TEXTURE_STEMS.forEach((stem, i) => {
+        const tex = factionTex[i];
+        tex.source.scaleMode = 'linear';
+        tex.source.autoGenerateMipmaps = true;
+        tex.source.updateMipmaps();
+        ctx.factionTexturesRef.current.set(stem, tex);
       });
       // Bake a soft elliptical shadow to a texture once — every unit reuses it as a plain
       // Sprite, so shadows cost zero per-frame filter passes. The 128² frame leaves room
@@ -485,6 +503,7 @@ export function usePixiApp(ctx: PixiAppCtx): void {
         const applyLod = (child: PIXI.Container) => {
           if (child.label === 'unit-sprite' || child.label === 'unit-sprite-shadow') child.visible = !isFar;
           else if (child.label === 'unit-marker') child.visible = isFar;
+          else if (child.label === 'unit-detail') child.visible = !isFar;
         };
         for (const child of ctx.unitsGfx.current.children) {
           if (child.label === 'unit-container') {
