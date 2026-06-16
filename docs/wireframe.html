@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hex-tactics — Wireframe & UI</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* screen mock */
+  .screen { display: grid; grid-template-columns: 1fr 320px; gap: 14px; }
+  @media (max-width: 880px) { .screen { grid-template-columns: 1fr; } }
+  .stage {
+    position: relative; aspect-ratio: 16/10; border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border);
+    background:
+      radial-gradient(120% 90% at 50% 120%, rgba(14,165,233,.10), transparent 60%),
+      repeating-linear-gradient(60deg,  rgba(255,255,255,.035) 0 1px, transparent 1px 26px),
+      repeating-linear-gradient(-60deg, rgba(255,255,255,.035) 0 1px, transparent 1px 26px),
+      linear-gradient(180deg, #16331f, #102617);
+  }
+  .zone { position: absolute; left: 0; right: 0; height: 22%; display: flex; align-items: center; justify-content: center; font: 800 11px/1 var(--mono); letter-spacing: 2px; text-transform: uppercase; }
+  .zone.red { top: 0; background: linear-gradient(180deg, rgba(239,68,68,.22), transparent); color: #fca5a5; }
+  .zone.blue { bottom: 0; background: linear-gradient(0deg, rgba(59,130,246,.22), transparent); color: #93c5fd; }
+  .flag { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); text-align: center; }
+  .flag .f { font-size: 30px; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+  .flag .l { font: 800 10px/1 var(--mono); letter-spacing: 1.5px; color: #fde68a; text-transform: uppercase; margin-top: 4px; }
+  .unit { position: absolute; width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.4); }
+  .badge { position: absolute; left: 12px; top: 12px; font: 800 10px/1 var(--mono); letter-spacing: 1px; color: var(--muted); background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); }
+
+  /* hud mock */
+  .hud { display: flex; flex-direction: column; gap: 10px; }
+  .hpanel { background: rgba(0,0,0,.4); border: 1px solid var(--border); border-radius: 14px; padding: 12px; }
+  .hlabel { font: 800 10px/1 var(--mono); letter-spacing: 1.4px; text-transform: uppercase; color: var(--label); margin-bottom: 8px; }
+  .hbtn { display:block; width:100%; text-align:center; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); color: var(--ink); font-weight: 700; font-size: 12px; }
+  .hbtn.cyan { background: var(--cyan); color: #04222e; }
+  .row { display: flex; gap: 6px; }
+  .row > * { flex: 1; }
+  .seg { padding: 6px 4px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); font-size: 11px; text-align: center; color: var(--ink); }
+  .seg.on-cyan { background: var(--cyan); color: #04222e; font-weight: 800; }
+  .seg.on-amber { background: var(--amber); color: #2a1804; font-weight: 800; }
+  .seg.on-red { background: var(--red); color: #2a0808; font-weight: 800; }
+  .bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 999px; }
+
+  /* keycap maps */
+  .keys { display: grid; grid-template-columns: 64px 1fr; gap: 6px 12px; align-items: center; }
+  .keys .kc { justify-self: start; }
+  .keys .desc { font-size: 13px; color: var(--muted); }
+  .keys .desc b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand"><span class="hx">⬢</span> HEX-TACTICS · DOCS</div>
+  <nav class="nav">
+    <a href="index.html">Overview</a>
+    <a href="wireframe.html" class="active">Wireframe</a>
+    <a href="systems.html">Sistemas</a>
+    <a href="assets.html">Assets</a>
+    <a href="rendering.html">Rendering</a>
+    <a href="textures.html">Texturas</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Wireframe & UI</div>
+    <h1>Un canvas, un <span class="accent">HUD</span> encima</h1>
+    <p class="lede">Todo el juego es un único <code>&lt;canvas&gt;</code> PIXI a pantalla completa con un panel HUD React
+    superpuesto. El campo táctico tiene zona de despliegue roja (arriba) y azul (abajo), y el centro a capturar en
+    <code>(q:0, r:0)</code>.</p>
+  </header>
+
+  <div class="screen">
+    <!-- stage mock -->
+    <div class="stage">
+      <div class="badge">⬢ TACTICAL · tick 0042 · ⏸ PAUSED</div>
+      <div class="zone red">RED DEPLOY ZONE · 28%</div>
+      <div class="zone blue">BLUE DEPLOY ZONE · 28%</div>
+      <div class="flag"><div class="f">🌸</div><div class="l">CAPTURE · 0,0</div></div>
+      <!-- scattered units -->
+      <div class="unit" style="background:#ef4444; left:38%; top:14%"></div>
+      <div class="unit" style="background:#ef4444; left:43%; top:16%"></div>
+      <div class="unit" style="background:#ef4444; left:48%; top:13%"></div>
+      <div class="unit" style="background:#ef4444; left:53%; top:17%"></div>
+      <div class="unit" style="background:#ef4444; left:46%; top:34%"></div>
+      <div class="unit" style="background:#3b82f6; left:40%; top:80%"></div>
+      <div class="unit" style="background:#3b82f6; left:45%; top:83%"></div>
+      <div class="unit" style="background:#3b82f6; left:50%; top:81%"></div>
+      <div class="unit" style="background:#3b82f6; left:55%; top:84%"></div>
+      <div class="unit" style="background:#3b82f6; left:49%; top:64%"></div>
+    </div>
+
+    <!-- hud mock -->
+    <div class="hud">
+      <div class="hpanel">
+        <button class="hbtn cyan">▶ START BATTLE</button>
+      </div>
+      <div class="hpanel">
+        <div class="hlabel">Selección</div>
+        <div class="row" style="margin-bottom:6px">
+          <div class="seg on-red">RED</div><div class="seg">BLUE</div>
+        </div>
+        <div class="row">
+          <div class="seg on-cyan">1</div><div class="seg">2</div><div class="seg">3</div><div class="seg">4</div>
+        </div>
+      </div>
+      <div class="hpanel">
+        <div class="hlabel">Colocar cohorte</div>
+        <div class="row">
+          <div class="seg on-cyan">Z · INF</div><div class="seg">X · CAV</div><div class="seg">C · SKR</div>
+        </div>
+      </div>
+      <div class="hpanel">
+        <div class="hlabel">Captura del centro</div>
+        <div class="bar"><span style="width:62%;background:linear-gradient(90deg,#ef4444,#f87171)"></span></div>
+        <div style="font:700 11px/1 var(--mono);color:var(--muted);margin-top:6px">RED 124 : 76 BLUE · meta 200 VP</div>
+      </div>
+      <div class="hpanel">
+        <div class="hlabel">AI Control</div>
+        <button class="hbtn" style="margin-bottom:6px">BLUE AI → aggressive · test</button>
+        <div class="row" style="margin-bottom:6px">
+          <div class="seg">balanced</div><div class="seg on-cyan">aggressive</div><div class="seg">defensive</div>
+        </div>
+        <div class="row">
+          <div class="seg">easy</div><div class="seg">normal</div><div class="seg">hard</div><div class="seg on-amber">test</div>
+        </div>
+      </div>
+      <div class="hpanel">
+        <div class="hlabel">Banner</div>
+        <div style="text-align:center;padding:8px;border-radius:10px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.4);color:#86efac;font-weight:900;letter-spacing:1px">🏆 RED WINS</div>
+      </div>
+    </div>
+  </div>
+
+  <p style="font-size:13px;margin-top:10px"><span class="chip">Mock representativo</span> — distribución y estados; el render real es PIXI (ver <a href="rendering.html">Rendering</a>).</p>
+
+  <h2 id="tactical">Atajos tácticos <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— grupo seleccionado · <span class="kbd">Shift</span> = a todos los grupos</span></h2>
+  <div class="grid g2">
+    <div class="panel">
+      <div class="keys">
+        <span class="kc"><span class="kbd">Q</span></span><span class="desc"><b>Order-drag</b> — modo de arrastre para trazar la orden</span>
+        <span class="kc"><span class="kbd">A</span></span><span class="desc"><b>March</b> — avanzar hacia el frente</span>
+        <span class="kc"><span class="kbd">E</span></span><span class="desc"><b>Charge</b> — carga (impacto)</span>
+        <span class="kc"><span class="kbd">R</span></span><span class="desc"><b>Unleash</b> — soltar (per-unit, codicioso)</span>
+        <span class="kc"><span class="kbd">W</span></span><span class="desc"><b>Hold</b> — aguantar (reducción de daño defensiva)</span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="keys">
+        <span class="kc"><span class="kbd">F</span></span><span class="desc"><b>Retreat</b> — repliegue ordenado a la zona</span>
+        <span class="kc"><span class="kbd">D</span></span><span class="desc"><b>Banish</b> — sacar del campo (reembolso parcial)</span>
+        <span class="kc"><span class="kbd">S</span></span><span class="desc"><b>Idle</b> — quieto, sin orden</span>
+        <span class="kc"><span class="kbd">G</span></span><span class="desc"><b>Formation</b> — ciclar line → wedge → column → hex</span>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="global">Atajos globales</h2>
+  <div class="grid g2">
+    <div class="panel">
+      <div class="keys">
+        <span class="kc"><span class="kbd">Enter</span> / <span class="kbd">P</span></span><span class="desc"><b>Pausa</b> — alterna la batalla</span>
+        <span class="kc"><span class="kbd">Space</span></span><span class="desc"><b>Siguiente grupo vacío</b> (libre para desplegar)</span>
+        <span class="kc"><span class="kbd">⇧ Space</span></span><span class="desc"><b>Banish</b> al grupo más pequeño (reembolso + reciclar)</span>
+        <span class="kc"><span class="kbd">&lt;</span> / <span class="kbd">,</span></span><span class="desc"><b>Cambiar equipo</b> red ↔ blue</span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="keys">
+        <span class="kc"><span class="kbd">1</span>–<span class="kbd">4</span></span><span class="desc"><b>Seleccionar grupo</b></span>
+        <span class="kc"><span class="kbd">Z</span></span><span class="desc">Colocar <b>infantería</b></span>
+        <span class="kc"><span class="kbd">X</span></span><span class="desc">Colocar <b>caballería</b></span>
+        <span class="kc"><span class="kbd">C</span></span><span class="desc">Colocar <b>skirmisher</b></span>
+        <span class="kc"><span class="kbd">⌫</span></span><span class="desc"><b>Borrar</b> las unidades del grupo en este hex</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>Componentes del HUD</h2>
+  <ul class="tight">
+    <li><b>Start / pausa de batalla</b> — botón principal cian.</li>
+    <li><b>Selección de equipo y grupo</b> — red/blue + grupos 1–4 (el 4º suele ser la reserva).</li>
+    <li><b>Colocar cohorte</b> — tipo de unidad activo (Z/X/C); cada cohorte = <code>4</code> unidades (<code>cohortSize</code>).</li>
+    <li><b>Progreso de captura / VP</b> — marcador y barra hacia <code>200</code> VP.</li>
+    <li><b>AI Control</b> — por equipo: encender, doctrina (balanced/aggressive/defensive) y dificultad (easy/normal/hard/test). Elegir dificultad aplica su doctrina por defecto.</li>
+    <li><b>Banner de victoria</b> — overlay cuando alguien alcanza la meta.</li>
+  </ul>
+
+  <footer>Atajos extraídos de <code>useTacticalKeyboard.ts</code> y <code>useGlobalShortcuts.ts</code>. Layout: <code>HUD.tsx</code> + <code>GameCanvas.tsx</code>.</footer>
+</div>
+</body>
+</html>

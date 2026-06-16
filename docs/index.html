@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hex-tactics — Documentación</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand"><span class="hx">⬢</span> HEX-TACTICS · DOCS</div>
+  <nav class="nav">
+    <a href="index.html" class="active">Overview</a>
+    <a href="wireframe.html">Wireframe</a>
+    <a href="systems.html">Sistemas</a>
+    <a href="assets.html">Assets</a>
+    <a href="rendering.html">Rendering</a>
+    <a href="textures.html">Texturas</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Referencia técnica del juego</div>
+    <h1>Wargame táctico por <span class="accent">hexágonos</span></h1>
+    <p class="lede">Aplicación PIXI.js de un solo canvas con un HUD React delgado. Un mismo generador procedural
+    produce la vista <b>estratégica</b> (isla) y la <b>táctica</b> (campo de batalla) — se "bucea" de una a otra.
+    El simulador de batalla es una función pura; el enemigo es una IA por reglas + percepción.</p>
+  </header>
+
+  <h2>Categorías</h2>
+  <div class="grid g3">
+    <a class="card" href="wireframe.html">
+      <div class="ico">🗺️</div>
+      <h3>Wireframe & UI</h3>
+      <p>Layout del canvas + HUD, paneles, progreso de captura, banner de victoria y los mapas de teclado táctico/global.</p>
+      <span class="more">Ver layout →</span>
+    </a>
+    <a class="card" href="systems.html">
+      <div class="ico">⚙️</div>
+      <h3>Sistemas</h3>
+      <p>Simulador de batalla, tipos de unidad, modos de orden, combate, economía de Command Points, scoring/VP, IA y mods de terreno. Valores reales.</p>
+      <span class="more">Ver sistemas →</span>
+    </a>
+    <a class="card" href="assets.html">
+      <div class="ico">🖼️</div>
+      <h3>Assets</h3>
+      <p>Catálogo de sprites de decoración, texturas de terreno, sprites de unidades y FX — con rutas y conteos reales de <code>public/</code>.</p>
+      <span class="more">Ver assets →</span>
+    </a>
+    <a class="card" href="rendering.html">
+      <div class="ico">🎬</div>
+      <h3>Rendering</h3>
+      <p>Pipeline PIXI: z-order de contenedores, doble pasada de terreno, los dos sistemas de coordenadas, el "dive" y el cacheo de filtros.</p>
+      <span class="more">Ver pipeline →</span>
+    </a>
+    <a class="card" href="textures.html">
+      <div class="ico">🎨</div>
+      <h3>Texturas</h3>
+      <p>Paleta y alturas de biomas, overlays tileados por bioma, filtro de agua (GLSL animado) y las reglas de scatter de decoración.</p>
+      <span class="more">Ver texturas →</span>
+    </a>
+    <a class="card" href="systems.html#loop">
+      <div class="ico">🔁</div>
+      <h3>El loop de juego</h3>
+      <p>Tick de 500 ms: regen de CP → IA emite órdenes → <code>simulateTick</code> → scoring → detección de victoria.</p>
+      <span class="more">Ver el tick →</span>
+    </a>
+  </div>
+
+  <h2>El bucle, en una imagen</h2>
+  <div class="panel">
+    <div style="font-family:var(--mono);font-size:13px;color:var(--muted);overflow-x:auto;white-space:pre">
+<span style="color:var(--cyan)">ESTRATÉGICA</span>  isla procedural (radius 35)  ──click "scan"──▶  <span style="color:var(--amber)">TÁCTICA</span>  campo de batalla
+     │  mismo generador, resolución ×4.5 (dive)                         │
+     │                                                                  ▼
+     │                                          ┌──────────  TICK (cada 500 ms) ──────────┐
+     │                                          │ 1. regen CP (+bonus si tienes el centro)  │
+     │                                          │ 2. IA roja/azul → issue/clear órdenes     │
+     │                                          │ 3. simulateTick(units, orders) → units'   │
+     │                                          │ 4. scoreTick → VP (raid línea + hold)     │
+     │                                          │ 5. ¿alguien llegó a 200 VP? → victoria    │
+     ◀──"return to strategic"──────────────────└───────────────────────────────────────────┘</span>
+    </div>
+  </div>
+
+  <h2>Stack</h2>
+  <div class="grid g4">
+    <div class="panel"><div class="kicker">Render</div><h3 style="margin-top:4px">PIXI.js v8</h3><p style="font-size:13px;margin:0">Un solo <code>Application</code>, contenedores en world-space.</p></div>
+    <div class="panel"><div class="kicker">UI</div><h3 style="margin-top:4px">React</h3><p style="font-size:13px;margin:0">HUD delgado sobre el canvas.</p></div>
+    <div class="panel"><div class="kicker">Sim</div><h3 style="margin-top:4px">TS puro</h3><p style="font-size:13px;margin:0"><code>simulateTick</code> sin I/O — testeable headless.</p></div>
+    <div class="panel"><div class="kicker">Build</div><h3 style="margin-top:4px">Vite + tsc</h3><p style="font-size:13px;margin:0"><code>npm run dev</code> · <code>npm run build</code>.</p></div>
+  </div>
+
+  <footer>
+    Snapshot de los valores en <code>src/data/*.json</code> al momento de generar estas páginas.
+    Documentación generada para hex-tactics · branch <code>feature/ai-enemy</code>.
+  </footer>
+</div>
+</body>
+</html>

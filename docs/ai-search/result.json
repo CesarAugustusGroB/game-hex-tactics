@@ -1,0 +1,49 @@
+{
+  "ranAt": "2026-06-09T09:35:39.702Z",
+  "budgetSec": 900,
+  "reps": 8,
+  "evals": 71,
+  "improvements": 0,
+  "baseline": {
+    "fields": {
+      "reactionTicks": 10,
+      "cpBudgetFrac": 1,
+      "forceScale": 0.6,
+      "capabilities": [
+        "defend"
+      ],
+      "frontLines": true,
+      "serialWaves": false,
+      "horizontalFront": true,
+      "fastDeploy": false
+    },
+    "fitnessPct": 33.3,
+    "breakdown": {
+      "normal": 50,
+      "hard": 50,
+      "test": 0
+    }
+  },
+  "best": {
+    "fields": {
+      "reactionTicks": 10,
+      "cpBudgetFrac": 1,
+      "forceScale": 0.6,
+      "capabilities": [
+        "defend"
+      ],
+      "frontLines": true,
+      "serialWaves": false,
+      "horizontalFront": true,
+      "fastDeploy": false
+    },
+    "fitnessPct": 33.3,
+    "breakdown": {
+      "normal": 50,
+      "hard": 50,
+      "test": 0
+    }
+  },
+  "beatsBaseline": false,
+  "marginPts": 0
+}

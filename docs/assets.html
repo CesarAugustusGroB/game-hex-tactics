@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hex-tactics — Assets</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .thumb { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px; text-align: center; }
+  .thumb .imgbox { height: 84px; display: flex; align-items: center; justify-content: center; border-radius: 8px;
+    background: repeating-conic-gradient(#1b2433 0% 25%, #141b27 0% 50%) 50% / 16px 16px; overflow: hidden; }
+  .thumb img { max-width: 100%; max-height: 80px; image-rendering: auto; }
+  .thumb .nm { font: 700 11px/1.3 var(--mono); color: var(--muted); margin-top: 8px; word-break: break-all; }
+  .thumb.dark .imgbox { background: linear-gradient(135deg,#0d1520,#16202e); }
+  .miss { color: var(--label); font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand"><span class="hx">⬢</span> HEX-TACTICS · DOCS</div>
+  <nav class="nav">
+    <a href="index.html">Overview</a>
+    <a href="wireframe.html">Wireframe</a>
+    <a href="systems.html">Sistemas</a>
+    <a href="assets.html" class="active">Assets</a>
+    <a href="rendering.html">Rendering</a>
+    <a href="textures.html">Texturas</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Assets · <code>public/</code></div>
+    <h1>Sprites, <span class="accent">texturas</span> y FX</h1>
+    <p class="lede">Todo lo gráfico vive en <code>public/</code> (servido en la raíz por Vite). Las decoraciones se catalogan
+    en <code>details.json</code>; las unidades de combate ahora se eligen por <strong>facción</strong>
+    (<code>factions.json</code>) sobre el set top-down de <code>art-source/</code>. Las miniaturas de abajo cargan vía
+    <code>../public/…</code> (ábrelo desde <code>docs/</code>).</p>
+  </header>
+
+  <h2>Inventario</h2>
+  <div class="grid g4">
+    <div class="panel"><div class="kicker">Terreno</div><h3 style="margin:4px 0">28</h3><p style="margin:0;font-size:13px">texturas base + noise/patch</p></div>
+    <div class="panel"><div class="kicker">Decoración</div><h3 style="margin:4px 0">~140</h3><p style="margin:0;font-size:13px">grass · flower · rock · forest · river · sea · mountain</p></div>
+    <div class="panel"><div class="kicker">Unidades · facción</div><h3 style="margin:4px 0">26</h3><p style="margin:0;font-size:13px">tokens top-down (4 facciones) + 6 legacy</p></div>
+    <div class="panel"><div class="kicker">FX / UI</div><h3 style="margin:4px 0">3</h3><p style="margin:0;font-size:13px">dust-puff · win-flag (+preview)</p></div>
+  </div>
+
+  <h2>Unidades <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>public/units/</code></span></h2>
+  <div class="gal">
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/red-infantry.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">red-infantry</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/red-cavalry.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">red-cavalry</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/blue-cavalry.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">blue-cavalry</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/blue-skirmisher.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">blue-skirmisher</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/skirmisher.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">skirmisher</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/hoplite.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">hoplite</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/legionary.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">legionary</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/mounted-knight.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">mounted-knight</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/javelin.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">javelin</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/boat.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">boat</div></div>
+  </div>
+  <p style="font-size:13px"><strong>Legacy</strong> (<code>public/units/</code> + <code>normalized/</code>): los 6 slots originales que la render usa como <em>fallback</em> cuando una facción no tiene token para un tipo. Se tintan por equipo (<code>red #ef4444</code> / <code>blue #3b82f6</code>); <code>army.svg</code> es el icono estratégico.</p>
+
+  <h2>Facciones <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>factions.json</code> → <code>public/units/normalized/factions/</code></span></h2>
+  <p class="lede" style="font-size:14px">Cada equipo elige una <strong>facción</strong>; la render selecciona la textura por <code>(facción, tipo)</code>
+  (<code>drawUnits.ts</code>), con <em>fallback</em> a los slots legacy. Default <code>red=rome</code>, <code>blue=greece</code>;
+  cambiable en vivo desde el HUD. El arte fuente vive en <code>art-source/tokens-topdown/</code> (raw 1254², fondo verde).</p>
+
+  <div class="t-wrap"><table>
+    <thead><tr><th>Facción</th><th>infantry</th><th>cavalry</th><th>skirmisher</th></tr></thead>
+    <tbody>
+      <tr><td><strong>rome</strong></td><td><code>roman·swordsman-shield-a</code></td><td><code>roman·lancer-shield</code></td><td><code>classical·spearman-shield</code></td></tr>
+      <tr><td><strong>greece</strong></td><td><code>greek·hoplite</code></td><td><code>generic·shield-rider</code></td><td><code>ancient·spearman-shield</code></td></tr>
+      <tr><td><strong>celt</strong></td><td><code>celtic·spearman-shield</code></td><td><code>celtic·rider</code></td><td><code>generic·spearman-lunge</code></td></tr>
+      <tr><td><strong>east</strong></td><td><code>generic·shield-spear-overhead</code></td><td><code>eastern·commander</code></td><td><code>nomad·horse-archer</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 style="margin:18px 0 8px">Infantry <span style="color:var(--muted);font-weight:400;font-size:13px">— 12 tokens</span></h3>
+  <div class="gal">
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__ancient__spearman-overhead.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">ancient·spearman-overhead</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__ancient__spearman-shield.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">ancient·spearman-shield</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__celtic__spearman-shield.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">celtic·spearman-shield</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__classical__spearman-shield.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">classical·spearman-shield</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__generic__shield-spear-overhead.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·shield-spear-overhead</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__generic__spearman-lunge.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·spearman-lunge</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__generic__spearman-shield-a.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·spearman-shield-a</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__generic__spearman-shield-b.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·spearman-shield-b</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__greek__hoplite.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">greek·hoplite</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__roman__spearman-shield.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">roman·spearman-shield</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__roman__swordsman-shield-a.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">roman·swordsman-shield-a</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/infantry__roman__swordsman-shield-b.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">roman·swordsman-shield-b</div></div>
+  </div>
+
+  <h3 style="margin:18px 0 8px">Cavalry <span style="color:var(--muted);font-weight:400;font-size:13px">— 9 tokens</span></h3>
+  <div class="gal">
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__celtic__rider.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">celtic·rider</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__desert__camel-rider.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">desert·camel-rider</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__eastern__commander.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">eastern·commander</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__generic__armored-rider.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·armored-rider</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__generic__shield-rider.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·shield-rider</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__medieval__knight.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">medieval·knight</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__medieval__lancer.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">medieval·lancer</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__nomad__horse-archer.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">nomad·horse-archer</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/cavalry__roman__lancer-shield.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">roman·lancer-shield</div></div>
+  </div>
+
+  <h3 style="margin:18px 0 8px">Especiales <span style="color:var(--muted);font-weight:400;font-size:13px">— siege · chariot · elephant · ship (aún sin tipo de unidad en el sim)</span></h3>
+  <div class="gal">
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/siege__generic__ballista.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">siege·ballista</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/siege__generic__onager.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">siege·onager</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/chariot__egyptian__war-chariot.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">egyptian·war-chariot</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/elephant__generic__war-elephant.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">generic·war-elephant</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/units/normalized/factions/ship__roman__galley.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">roman·galley</div></div>
+  </div>
+
+  <h3 style="margin:18px 0 8px">Pipeline de arte</h3>
+  <p style="font-size:13px">El arte se genera por IA (fondo verde, sin alfa) y se cataloga en <code>art-source/</code> con la convención
+  <code>rol__cultura__descriptor__ángulo</code> (<code>__td</code> = top-down real; sólo esos van al mapa). Para hacerlo
+  jugable pasa por dos pasos:</p>
+  <ol style="font-size:13px;line-height:1.7">
+    <li><code>scripts/chroma-key.py</code> — quita el fondo verde por <em>flood</em> conectado al borde (preserva los verdes
+    de vestuario, p.ej. capas celtas) + <em>despill</em>.</li>
+    <li><code>scripts/normalize-units.py --body-scale</code> — recorta por alfa y escala/centra sobre el <strong>cuerpo denso</strong>,
+    ignorando lanzas/sarissas finas (pueden recortarse) para que todas las infanterías tengan el cuerpo del mismo tamaño.</li>
+  </ol>
+  <p style="font-size:13px">Descartado del estilo top-down: vistas ¾/nivel de ojo viven en <code>art-source/art-eyelevel/</code>
+  (retratos para HUD/códex) y las hojas de iconos de facción en <code>art-source/icons/</code>.</p>
+
+  <h2>Terreno <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>public/terrain/</code></span></h2>
+  <div class="gal">
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/grass.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">grass</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/sand.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">sand</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/forest.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">forest</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/hill.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">hill</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/mountain.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">mountain</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/snow.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">snow</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/sea.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">sea</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/river.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">river</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/terrain/deep-sea.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">deep-sea</div></div>
+  </div>
+  <p style="font-size:13px">Además de la base, cada bioma tiene capas de <code>*-macro-noise</code>, <code>*-micro-noise</code> y <code>*-patch-{dry,dense}</code> que se mezclan como decoración tileada (ver <a href="textures.html">Texturas</a>).</p>
+
+  <h2>Catálogo de decoración <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>details.json → spriteCatalog</code></span></h2>
+  <div class="t-wrap"><table>
+    <thead><tr><th>Categoría</th><th class="num">count</th><th>carpeta</th><th>usada por bioma</th></tr></thead>
+    <tbody>
+      <tr><td>grass</td><td class="num">4</td><td><code>/details/grass</code></td><td>GRASSLAND · HILL</td></tr>
+      <tr><td>flower</td><td class="num">4</td><td><code>/details/flower</code></td><td>GRASSLAND · HILL</td></tr>
+      <tr><td>rock</td><td class="num">4</td><td><code>/details/rock</code></td><td>GRASSLAND · HILL</td></tr>
+      <tr><td>tiny_pine_cluster</td><td class="num">10</td><td><code>/details/forest</code></td><td>FOREST</td></tr>
+      <tr><td>low_shrub_cluster</td><td class="num">10</td><td><code>/details/forest</code></td><td>FOREST</td></tr>
+      <tr><td>dark_leaf_patch</td><td class="num">10</td><td><code>/details/forest</code></td><td>FOREST</td></tr>
+      <tr><td>dark_undergrowth</td><td class="num">10</td><td><code>/details/forest</code></td><td>FOREST</td></tr>
+      <tr><td>moss_clump</td><td class="num">10</td><td><code>/details/forest</code></td><td>FOREST</td></tr>
+      <tr><td>fallen_needles</td><td class="num">10</td><td><code>/details/forest</code></td><td>FOREST</td></tr>
+      <tr><td>cyan_ripple</td><td class="num">10</td><td><code>/details/river</code></td><td>RIVER</td></tr>
+      <tr><td>shimmer_glint</td><td class="num">10</td><td><code>/details/river</code></td><td>RIVER</td></tr>
+      <tr><td>current_mark</td><td class="num">10</td><td><code>/details/river</code></td><td>RIVER</td></tr>
+      <tr><td>foam_fleck</td><td class="num">10</td><td><code>/details/river</code></td><td>RIVER</td></tr>
+      <tr><td>depth_wisp</td><td class="num">10</td><td><code>/details/river</code></td><td>RIVER</td></tr>
+      <tr><td>sea_shimmer</td><td class="num">8</td><td><code>/details/sea</code></td><td>SEA</td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:13px">Muestras de decoración:</p>
+  <div class="gal">
+    <div class="thumb"><div class="imgbox"><img src="../public/details/grass/grass_01.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">grass_01</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/details/flower/flower_01.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">flower_01</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/details/rock/rock_01.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">rock_01</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/details/forest/tiny_pine_cluster_01.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">tiny_pine_cluster_01</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/details/river/cyan_ripple_01.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">cyan_ripple_01</div></div>
+    <div class="thumb"><div class="imgbox"><img src="../public/details/sea/sea_shimmer_01.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'?'}))"></div><div class="nm">sea_shimmer_01</div></div>
+  </div>
+
+  <h2>FX & UI</h2>
+  <div class="gal">
+    <div class="thumb dark"><div class="imgbox"><img src="../public/fx/dust-puff.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">fx/dust-puff</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/assets/win-flag.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">assets/win-flag</div></div>
+    <div class="thumb dark"><div class="imgbox"><img src="../public/assets/win-flag-preview.png" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'miss',textContent:'no preview'}))"></div><div class="nm">win-flag-preview</div></div>
+  </div>
+
+  <footer>Conteos verificados en <code>public/</code>. Catálogos: <code>details.json</code> (decoración) · <code>factions.json</code> (unidades). Arte fuente + convención de nombres: <code>art-source/INDEX.md</code>. Scatter y mezcla: ver <a href="textures.html">Texturas</a>.</footer>
+</div>
+</body>
+</html>

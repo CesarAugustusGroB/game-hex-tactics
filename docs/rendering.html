@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hex-tactics — Rendering</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .zstack { display: flex; flex-direction: column-reverse; gap: 6px; }
+  .zlayer { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--cyan);
+    border-radius: 10px; padding: 9px 12px; }
+  .zlayer .zi { font: 800 12px/1 var(--mono); color: var(--label); }
+  .zlayer .zn { font: 800 13px/1.2 var(--mono); color: var(--ink); }
+  .zlayer .zd { font-size: 12px; color: var(--muted); }
+  .zlayer.top { border-left-color: var(--amber); }
+  .flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font:700 13px/1 var(--mono); color:var(--muted); }
+  .flow .b { background: var(--panel); border:1px solid var(--border); border-radius:8px; padding:6px 10px; color:var(--ink); }
+  .flow .ar { color: var(--cyan); }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand"><span class="hx">⬢</span> HEX-TACTICS · DOCS</div>
+  <nav class="nav">
+    <a href="index.html">Overview</a>
+    <a href="wireframe.html">Wireframe</a>
+    <a href="systems.html">Sistemas</a>
+    <a href="assets.html">Assets</a>
+    <a href="rendering.html" class="active">Rendering</a>
+    <a href="textures.html">Texturas</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Rendering · PIXI.js v8</div>
+    <h1>Un <span class="accent">Application</span>, contenedores en world-space</h1>
+    <p class="lede">Se crea un único <code>PIXI.Application</code> en un <code>useEffect([])</code> de montaje. El contenedor
+    <code>worldRef</code> se panea/zoomea; sus hijos se dibujan en coordenadas de mundo. <code>highlightGfx</code> y
+    <code>previewGfx</code> se redibujan cada frame desde el ticker — no desde estado React.</p>
+  </header>
+
+  <h2>Z-order de contenedores <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— fondo → frente (orden en <code>PixiApp.ts</code>)</span></h2>
+  <div class="zstack">
+    <div class="zlayer top"><div class="zi">13</div><div><div class="zn">highlightGfx</div><div class="zd">hover/selección — redibujado por el ticker cada frame</div></div></div>
+    <div class="zlayer top"><div class="zi">12</div><div><div class="zn">previewGfx</div><div class="zd">preview de order-drag — ticker, no React</div></div></div>
+    <div class="zlayer"><div class="zi">11</div><div><div class="zn">projectilesGfx</div><div class="zd">flechas de skirmisher en vuelo</div></div></div>
+    <div class="zlayer"><div class="zi">10</div><div><div class="zn">combatFxGfx</div><div class="zd">FX de combate (rings, impactos)</div></div></div>
+    <div class="zlayer"><div class="zi">9</div><div><div class="zn">unitsGfx</div><div class="zd">unidades, barras de HP, badges, anillos de ataque</div></div></div>
+    <div class="zlayer"><div class="zi">8</div><div><div class="zn">movementDustGfx</div><div class="zd">polvo de movimiento (dust-puff)</div></div></div>
+    <div class="zlayer"><div class="zi">7</div><div><div class="zn">gridGfx</div><div class="zd">rejilla hex — capa propia (toggle GRID no reconstruye terreno)</div></div></div>
+    <div class="zlayer"><div class="zi">6</div><div><div class="zn">captureFlagSprite</div><div class="zd">la flor central a capturar</div></div></div>
+    <div class="zlayer"><div class="zi">5</div><div><div class="zn">captureZoneGfx</div><div class="zd">zona de captura del centro</div></div></div>
+    <div class="zlayer"><div class="zi">4</div><div><div class="zn">deployZoneGfx</div><div class="zd">zonas de despliegue roja/azul (28%)</div></div></div>
+    <div class="zlayer"><div class="zi">3</div><div><div class="zn">detailsGfx</div><div class="zd">scatter de decoración (3 capas)</div></div></div>
+    <div class="zlayer"><div class="zi">2</div><div><div class="zn">terrainOverlayRef</div><div class="zd">Pass 2 — TilingSprite + máscara hex por bioma</div></div></div>
+    <div class="zlayer"><div class="zi">1</div><div><div class="zn">terrainGfx</div><div class="zd">Pass 1 — tops de hex + muros de cliff sombreados</div></div></div>
+  </div>
+
+  <h2>Dos sistemas de coordenadas</h2>
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Axial hex <code>(q, r)</code></h3>
+      <p style="margin:0">La rejilla lógica (flat-top, <code>size = 40</code>). Convertir con <code>HexUtils.hexToPixel</code> / <code>pixelToHex</code>. La clave canónica de <code>Map</code> es <code>HexUtils.key({q,r})</code> — nunca stringificar a mano.</p>
+    </div>
+    <div class="panel">
+      <h3>PIXI world</h3>
+      <p style="margin:0">El contenedor <code>worldRef</code> se panea/zoomea. Para hacer lookups de hex desde pantalla: <code>world.toLocal(...)</code> primero (screen → world), luego <code>pixelToHex</code>.</p>
+    </div>
+  </div>
+
+  <h2>Pipeline de terreno (<code>drawTerrain.ts</code>) — dos pasadas</h2>
+  <div class="panel">
+    <h3>Pass 1 — <code>terrainGfx</code> (Graphics por hex)</h3>
+    <p style="margin:0 0 6px">Polígono superior (color plano o <code>Texture</code> para RIVER/SAND/SEA/DEEP_SEA) + muros laterales S/SE/SW sombreados. Los muros se dibujan <b>solo</b> para biomas no-texturizados (<code>SAND</code>, <code>ROCKY</code>). Los hex iteran en <code>height</code> ascendente, así que el terreno más alto se dibuja después (encima) de sus vecinos bajos.</p>
+    <h3 style="margin-top:16px">Pass 2 — <code>terrainOverlayRef</code> (TilingSprite + máscara)</h3>
+    <p style="margin:0">GRASSLAND / FOREST / HILL / MOUNTAIN / SNOW reciben una textura tileada en world-space recortada por máscara. La máscara base = unión de los tops del bioma <b>+ la cara de cliff visible</b> contra cada vecino más bajo (un quad de alto <code>(hexH − nH)</code> en el borde S/SE/SW). Resultado: la textura pinta de forma continua sobre top y pendiente, sin muro oscuro ni invasión del vecino.</p>
+  </div>
+
+  <h2>El "dive" estratégica ↔ táctica</h2>
+  <div class="flow" style="margin-bottom:10px">
+    <span class="b">click hex (isScanning)</span><span class="ar">→</span>
+    <span class="b">captura coords de noise</span><span class="ar">→</span>
+    <span class="b">resolution ×4.5</span><span class="ar">→</span>
+    <span class="b">viewMode = TACTICAL</span>
+  </div>
+  <p>El mismo <code>generateWorldData()</code> produce ambas vistas. Bucear captura las coordenadas en espacio-noise del hex
+  clicado para samplear <i>ese</i> parche, y multiplica la resolución (divisor menor = más detalle). "Return to strategic"
+  resetea <code>noiseOffset</code> y <code>resolution</code>.</p>
+
+  <h2>Gotchas de rendimiento (PIXI v8)</h2>
+  <p class="note warn"><b>Un <code>Filter</code> se crea una vez y se reutiliza.</b> Recrearlo por draw recompila un <code>GlProgram</code> y filtra (leak) el anterior — <code>Container.destroy()</code> no libera sus filtros en v8. Los dos filtros de agua se cachean de por vida en <code>ctx.waterFilters</code> (por tipo) y se reasignan a cada contenedor recién construido.</p>
+  <p class="note warn"><b><code>Color.multiply(number)</code> trata el número como hex int</b> vía bit-shifts (<code>0.7 | 0 === 0</code> → negro). Para sombrear, pasa siempre un array RGB normalizado <code>[s, s, s, 1]</code>.</p>
+  <p class="note"><b>Capas que viven en el app, no por-frame:</b> filtros y texturas horneadas se crean una vez; solo los display objects por-frame son descartables. La rejilla se redibuja en su propio <code>gridGfx</code> desde <code>useEffect([gridData, showGrid])</code> para que el toggle GRID no reconstruya todo el pipeline (que recompila shaders de agua).</p>
+
+  <h2>Estado espejado en refs</h2>
+  <p><code>isScanningRef</code> y <code>noiseOffsetRef</code> se sincronizan vía <code>useEffect</code> porque el handler <code>pointertap</code>
+  se registra una vez al montar y cerraría sobre estado obsoleto. <b>Regla:</b> todo estado nuevo leído dentro de handlers PIXI
+  de larga vida debe espejarse igual — no re-registrar handlers por render.</p>
+
+  <footer>Pipeline: <code>PixiApp.ts</code>, <code>render/drawTerrain.ts</code>, <code>render/drawUnits.ts</code>, <code>water-filter.ts</code>. Detalles del "por qué" en <code>LEARNINGS.md</code>.</footer>
+</div>
+</body>
+</html>

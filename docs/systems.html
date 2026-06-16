@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hex-tactics — Sistemas</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand"><span class="hx">⬢</span> HEX-TACTICS · DOCS</div>
+  <nav class="nav">
+    <a href="index.html">Overview</a>
+    <a href="wireframe.html">Wireframe</a>
+    <a href="systems.html" class="active">Sistemas</a>
+    <a href="assets.html">Assets</a>
+    <a href="rendering.html">Rendering</a>
+    <a href="textures.html">Texturas</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Sistemas · valores reales de <code>src/data/*.json</code></div>
+    <h1>Cómo <span class="accent">funciona</span> la batalla</h1>
+    <p class="lede">El simulador (<code>simulateTick</code>) es puro: recibe unidades + órdenes + config y devuelve el siguiente
+    estado. Sin React ni PIXI, lo que permite correrlo headless. Todo lo balanceable vive en JSON.</p>
+  </header>
+
+  <h2 id="loop">El tick (<code>500 ms</code>)</h2>
+  <div class="panel">
+    <ol style="margin:0;color:var(--muted);line-height:1.9">
+      <li><b>Regen de CP</b> — cada equipo gana ~<code>1.0</code> CP/tick (<code>0.1 × regenN 10</code>); el que tiene el centro sin disputa regena <code>+30%</code>.</li>
+      <li><b>IA</b> — cada equipo bot ejecuta su controller: emite/limpia órdenes para sus grupos.</li>
+      <li><b>simulateTick</b> — movimiento (cooldown por <code>nextMoveTick</code>), combate, atrición de terreno.</li>
+      <li><b>scoreTick</b> — VP por unidades que tocan la línea enemiga + hold del centro.</li>
+      <li><b>Victoria</b> — primero en llegar a <code>200</code> VP gana.</li>
+    </ol>
+  </div>
+  <p class="note" style="margin-top:12px"><b>Invariante crítica:</b> el contador de ticks es monótono. Se resetea SOLO al regenerar mundo o volver a estratégica — nunca al empezar batalla (los <code>nextMoveTick</code> son absolutos).</p>
+
+  <h2>Unidades <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>units.json</code></span></h2>
+  <div class="t-wrap"><table>
+    <thead><tr><th>Tipo</th><th class="num">Max HP</th><th class="num">March</th><th class="num">Charge spd</th><th class="num">Charge dmg</th><th class="num">Misil (rng/dmg/kite)</th></tr></thead>
+    <tbody>
+      <tr><td>🛡️ Infantry</td><td class="num">100</td><td class="num">1.5</td><td class="num">2.25</td><td class="num">26</td><td class="num">—</td></tr>
+      <tr><td>🐎 Cavalry</td><td class="num">60</td><td class="num">2</td><td class="num">3</td><td class="num">52</td><td class="num">—</td></tr>
+      <tr><td>🏹 Skirmisher</td><td class="num">40</td><td class="num">1.75</td><td class="num">2.5</td><td class="num">13</td><td class="num">3 / 6.5 / 2</td></tr>
+      <tr><td>⛵ Boat</td><td class="num">60</td><td class="num">2</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:13px">Velocidad fraccional (p.ej. <code>1.5</code>/tick) se resuelve con <code>stepsForTick(speed, tick)</code> para mantener el bloque rígido en axial entero. Roster inicial: <code>200</code> de cada tipo · cohorte = <code>4</code>.</p>
+
+  <h2>Modos de orden</h2>
+  <div class="grid g3">
+    <div class="panel"><h3>🚶 March</h3><p style="margin:0;font-size:14px">Bloque rígido en una de las 6 direcciones (<code>heading</code>), todos esperan al cooldown más lento.</p></div>
+    <div class="panel"><h3>⚔️ Charge</h3><p style="margin:0;font-size:14px">Carga de <code>3</code> ticks, impacto a rango <code>2</code>; daño de impacto por tipo.</p></div>
+    <div class="panel"><h3>🎯 Unleash</h3><p style="margin:0;font-size:14px">Per-unit codicioso; persigue objetivo. Hasta <code>3</code> engagers (<code>maxEngagers</code>).</p></div>
+    <div class="panel"><h3>🛡️ Hold</h3><p style="margin:0;font-size:14px">Quieto; acumula reducción de daño <code>+5%</code>/tick hasta <code>40%</code>; auto-idle tras <code>8</code> ticks.</p></div>
+    <div class="panel"><h3>↩️ Retreat</h3><p style="margin:0;font-size:14px">Repliegue ordenado a la zona (bloque rígido). Si está trabado, BANISH lo saca por reembolso.</p></div>
+    <div class="panel"><h3>💤 Idle</h3><p style="margin:0;font-size:14px">Sin orden activa; se queda en su sitio.</p></div>
+  </div>
+
+  <h2>Combate <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>combat.json</code></span></h2>
+  <div class="grid g2">
+    <div class="t-wrap"><table>
+      <thead><tr><th>Parámetro</th><th class="num">Valor</th></tr></thead>
+      <tbody>
+        <tr><td>Daño por tick</td><td class="num">26</td></tr>
+        <tr><td>Charge — duración</td><td class="num">3 ticks</td></tr>
+        <tr><td>Charge — rango impacto</td><td class="num">2 hex</td></tr>
+        <tr><td>Hold — reducción/tick</td><td class="num">5%</td></tr>
+        <tr><td>Hold — tope reducción</td><td class="num">40%</td></tr>
+        <tr><td>Hold — auto-idle</td><td class="num">8 ticks</td></tr>
+      </tbody>
+    </table></div>
+    <div class="t-wrap"><table>
+      <thead><tr><th>Parámetro</th><th class="num">Valor</th></tr></thead>
+      <tbody>
+        <tr><td>Support — reducción/aliado</td><td class="num">5%</td></tr>
+        <tr><td>Support — tope</td><td class="num">25%</td></tr>
+        <tr><td>Unleash — máx engagers</td><td class="num">3</td></tr>
+        <tr><td>Altura — bonus/unidad</td><td class="num">1%</td></tr>
+        <tr><td>Altura — tope bonus</td><td class="num">50%</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <h2>Command Points <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>command-points.json</code> + <code>CP_COSTS</code></span></h2>
+  <div class="grid g2">
+    <div class="panel">
+      <div class="kicker">Economía</div>
+      <ul class="tight" style="margin-top:8px">
+        <li><b>Cap</b> <code>200</code> · <b>Inicial</b> <code>200</code></li>
+        <li><b>Regen</b> ~<code>1.0</code> CP/tick (<code>0.1 step × regenN 10</code>)</li>
+        <li><b>Bonus centro</b> <code>+30%</code> regen si lo tienes sin disputa</li>
+      </ul>
+    </div>
+    <div class="t-wrap"><table>
+      <thead><tr><th>Intent</th><th class="num">Coste</th></tr></thead>
+      <tbody>
+        <tr><td>cycleHeading / cycleFormation</td><td class="num">1</td></tr>
+        <tr><td>march</td><td class="num">2</td></tr>
+        <tr><td>firstMarch <span class="chip">1ª vez ×2</span></td><td class="num">4</td></tr>
+        <tr><td>placeCohort</td><td class="num">2</td></tr>
+        <tr><td>orderDrag</td><td class="num">3</td></tr>
+        <tr><td>hold</td><td class="num">4</td></tr>
+        <tr><td>retreat / banish</td><td class="num">2 / 4</td></tr>
+        <tr><td>retreatEngaged / banishEngaged</td><td class="num">4 / 8</td></tr>
+        <tr><td>charge / unleash</td><td class="num">6 / 6</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <h2>Scoring / Victory Points <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>scoring.json</code></span></h2>
+  <div class="grid g4">
+    <div class="panel"><div class="kicker">Meta</div><h3 style="margin:4px 0">200 VP</h3><p style="margin:0;font-size:13px">primero en llegar gana</p></div>
+    <div class="panel"><div class="kicker">Raid línea</div><h3 style="margin:4px 0">+2 VP</h3><p style="margin:0;font-size:13px">por unidad que toca la línea enemiga</p></div>
+    <div class="panel"><div class="kicker">Hold centro</div><h3 style="margin:4px 0">+1 VP/tick</h3><p style="margin:0;font-size:13px">(2/seg) tenencia no disputada</p></div>
+    <div class="panel"><div class="kicker">Bonus regen</div><h3 style="margin:4px 0">+30%</h3><p style="margin:0;font-size:13px">CP por holdear el centro</p></div>
+  </div>
+
+  <h2 id="ai">Enemy AI <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>ai.json</code></span></h2>
+  <p>IA por reglas autoradas (<code>condición → acción</code>, primera que matchea gana) + una capa de percepción pura.
+  Cada equipo bot resuelve un <code>TeamAiProfile</code> que sobreescribe cada knob.</p>
+
+  <h3>Dificultades (estado actual)</h3>
+  <div class="t-wrap"><table>
+    <thead><tr><th>Tier</th><th class="num">reactionTicks</th><th class="num">cpBudgetFrac</th><th class="num">forceScale</th><th>capabilities</th><th>flags</th><th>doctrine</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip green">easy</span></td><td class="num">10</td><td class="num">1.0</td><td class="num">0.7</td><td>raid · defend</td><td>—</td><td>balanced</td></tr>
+      <tr><td><span class="chip cyan">normal</span></td><td class="num">10</td><td class="num">1.0</td><td class="num">0.7</td><td>defend</td><td>frontLines</td><td>balanced</td></tr>
+      <tr><td><span class="chip amber">hard</span></td><td class="num">10</td><td class="num">1.0</td><td class="num">1.2</td><td>raid</td><td>frontLines · horizontalFront</td><td>balanced</td></tr>
+      <tr><td><span class="chip red">test</span></td><td class="num">10</td><td class="num">1.0</td><td class="num">1.2</td><td>raid</td><td>frontLines · horizontalFront</td><td><b>aggressive</b></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note warn" style="margin-top:12px"><b>Contraintuitivo:</b> las <code>capabilities</code> son <i>handicaps</i>, no skill (campear el centro es dominante); <code>forceScale</code> satura ~<code>1.2</code> (roster completo); <code>reactionTicks</code> es no-transitivo (RPS). La dificultad se ajusta <b>midiendo</b> con <code>scripts/sim-ai-vs-ai.ts</code>, no a ojo.</p>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="panel">
+      <h3>Doctrinas <span style="font-size:12px;color:var(--label)">(front L→R · reserva)</span></h3>
+      <ul class="tight">
+        <li><b>balanced</b> — inf · cav · skr · <i>reserva</i> inf</li>
+        <li><b>aggressive</b> — cav · inf · skr · <i>reserva</i> cav</li>
+        <li><b>defensive</b> — skr · cav · inf · <i>reserva</i> skr</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Capabilities</h3>
+      <p style="font-size:13px;margin:0 0 6px">behaviours sobre el baseline (deploy → march → hold):</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <span class="chip">focusFire</span><span class="chip">charge</span><span class="chip">unleash</span>
+        <span class="chip">raid</span><span class="chip">defend</span><span class="chip">repel</span><span class="chip">earlyLaunch</span>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:22px">Umbrales (combat · counter · strategy)</h3>
+  <div class="grid g3">
+    <div class="t-wrap"><table>
+      <thead><tr><th>combat</th><th class="num">val</th></tr></thead>
+      <tbody>
+        <tr><td>chargeReach</td><td class="num">5</td></tr>
+        <tr><td>engageRange</td><td class="num">5</td></tr>
+        <tr><td>homelandRepelThreshold</td><td class="num">6</td></tr>
+        <tr><td>repelPerGroup</td><td class="num">6</td></tr>
+        <tr><td>focusRadius</td><td class="num">4</td></tr>
+      </tbody>
+    </table></div>
+    <div class="t-wrap"><table>
+      <thead><tr><th>counter</th><th class="num">val</th></tr></thead>
+      <tbody>
+        <tr><td>vpWeight</td><td class="num">0.6</td></tr>
+        <tr><td>pressureWeight</td><td class="num">0.4</td></tr>
+        <tr><td>breacherWeight</td><td class="num">0.34</td></tr>
+        <tr><td>raiderWeight</td><td class="num">0.17</td></tr>
+        <tr><td>enemyCenterWeight</td><td class="num">0.3</td></tr>
+        <tr><td>maxLaunchReduction</td><td class="num">0.75</td></tr>
+        <tr><td>raidWatchRadius</td><td class="num">2</td></tr>
+      </tbody>
+    </table></div>
+    <div class="t-wrap"><table>
+      <thead><tr><th>strategy</th><th class="num">val</th></tr></thead>
+      <tbody>
+        <tr><td>raidDeficitFrac</td><td class="num">0.1</td></tr>
+        <tr><td>raidGroups</td><td class="num">2</td></tr>
+        <tr><td>centerFocusVpFrac</td><td class="num">0.3</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <h2>Mods de terreno <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>terrain.json</code></span></h2>
+  <div class="t-wrap"><table>
+    <thead><tr><th>Bioma</th><th class="num">defenseMult</th><th class="num">moveCost</th><th class="num">attrition/tick</th><th class="num">visión</th><th class="num">altura</th></tr></thead>
+    <tbody>
+      <tr><td><span class="dot" style="background:#1a2a3a"></span> Deep Water</td><td class="num">0.85</td><td class="num">1</td><td class="num">0</td><td class="num">5</td><td class="num">2</td></tr>
+      <tr><td><span class="dot" style="background:#2a3a4a"></span> Shallows</td><td class="num">0.85</td><td class="num">1</td><td class="num">0</td><td class="num">5</td><td class="num">5</td></tr>
+      <tr><td><span class="dot" style="background:#bdaa8a"></span> Shoreline</td><td class="num">0.95</td><td class="num">1</td><td class="num">0</td><td class="num">3</td><td class="num">8</td></tr>
+      <tr><td><span class="dot" style="background:#5a7a4a"></span> Lowlands</td><td class="num">1.00</td><td class="num">0</td><td class="num">0</td><td class="num">4</td><td class="num">12</td></tr>
+      <tr><td><span class="dot" style="background:#3a5a3a"></span> Thicket</td><td class="num">1.30</td><td class="num">1</td><td class="num">0</td><td class="num">2</td><td class="num">18</td></tr>
+      <tr><td><span class="dot" style="background:#6b5d44"></span> Ridgeline</td><td class="num">1.25</td><td class="num">1</td><td class="num">0.05</td><td class="num">6</td><td class="num">35</td></tr>
+      <tr><td><span class="dot" style="background:#4a4a4a"></span> Plateau</td><td class="num">1.40</td><td class="num">2</td><td class="num">0.20</td><td class="num">5</td><td class="num">55</td></tr>
+      <tr><td><span class="dot" style="background:#6a6a72"></span> Summit</td><td class="num">1.50</td><td class="num">3</td><td class="num">0.30</td><td class="num">7</td><td class="num">85</td></tr>
+      <tr><td><span class="dot" style="background:#f0f0f0"></span> Glacier</td><td class="num">1.20</td><td class="num">4</td><td class="num">0.60</td><td class="num">5</td><td class="num">110</td></tr>
+      <tr><td><span class="dot" style="background:#3a8fb7"></span> Waterway</td><td class="num">0.80</td><td class="num">2</td><td class="num">0.25</td><td class="num">3</td><td class="num">10</td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:13px"><code>defenseMult</code> multiplica la defensa; <code>attritionPerTick</code> es daño pasivo por estar en ese terreno; alto y frío matan lento (Glacier <code>0.60</code>/tick). Ver paleta en <a href="textures.html">Texturas</a>.</p>
+
+  <footer>Valores: <code>units · combat · command-points · scoring · ai · terrain .json</code> (snapshot). El sim vive en <code>src/battle/</code>.</footer>
+</div>
+</body>
+</html>

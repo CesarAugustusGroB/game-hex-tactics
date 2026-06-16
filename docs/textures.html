@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hex-tactics — Texturas</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .ramp { display: flex; flex-direction: column; gap: 4px; }
+  .band { display: grid; grid-template-columns: 130px 1fr 56px; gap: 12px; align-items: center; }
+  .band .nm { font: 700 12px/1 var(--mono); color: var(--ink); }
+  .band .barbox { height: 22px; background: rgba(255,255,255,.04); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+  .band .barbox > span { display: block; height: 100%; }
+  .band .h { font: 700 12px/1 var(--mono); color: var(--muted); text-align: right; }
+  .swatch { height: 40px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); display:flex; align-items:flex-end; padding:5px 7px; }
+  .swatch .lab { font: 700 10px/1 var(--mono); color: rgba(0,0,0,.55); background: rgba(255,255,255,.5); padding: 2px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <div class="brand"><span class="hx">⬢</span> HEX-TACTICS · DOCS</div>
+  <nav class="nav">
+    <a href="index.html">Overview</a>
+    <a href="wireframe.html">Wireframe</a>
+    <a href="systems.html">Sistemas</a>
+    <a href="assets.html">Assets</a>
+    <a href="rendering.html">Rendering</a>
+    <a href="textures.html" class="active">Texturas</a>
+  </nav>
+</div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Texturas · biomas, overlays, agua, scatter</div>
+    <h1>Cómo se <span class="accent">pinta</span> el terreno</h1>
+    <p class="lede">Cada bioma tiene un color base, una altura (define el orden de dibujado y los cliffs), una textura tileada
+    de overlay y reglas de decoración esparcida. El agua usa un filtro GLSL animado.</p>
+  </header>
+
+  <h2>Paleta de biomas <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>terrain.json</code></span></h2>
+  <div class="grid g4" style="margin-bottom:18px">
+    <div class="swatch" style="background:#1a2a3a"><span class="lab">Deep Water</span></div>
+    <div class="swatch" style="background:#2a3a4a"><span class="lab">Shallows</span></div>
+    <div class="swatch" style="background:#bdaa8a"><span class="lab">Shoreline</span></div>
+    <div class="swatch" style="background:#5a7a4a"><span class="lab">Lowlands</span></div>
+    <div class="swatch" style="background:#3a5a3a"><span class="lab">Thicket</span></div>
+    <div class="swatch" style="background:#6b5d44"><span class="lab">Ridgeline</span></div>
+    <div class="swatch" style="background:#4a4a4a"><span class="lab" style="color:#fff;background:rgba(0,0,0,.4)">Plateau</span></div>
+    <div class="swatch" style="background:#6a6a72"><span class="lab" style="color:#fff;background:rgba(0,0,0,.4)">Summit</span></div>
+    <div class="swatch" style="background:#f0f0f0"><span class="lab">Glacier</span></div>
+    <div class="swatch" style="background:#3a8fb7"><span class="lab">Waterway</span></div>
+  </div>
+
+  <h2>Rampa de alturas <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— define orden de dibujado + cliffs</span></h2>
+  <div class="panel"><div class="ramp">
+    <div class="band"><span class="nm">Glacier</span><div class="barbox"><span style="width:100%;background:#f0f0f0"></span></div><span class="h">110</span></div>
+    <div class="band"><span class="nm">Summit</span><div class="barbox"><span style="width:77%;background:#6a6a72"></span></div><span class="h">85</span></div>
+    <div class="band"><span class="nm">Plateau</span><div class="barbox"><span style="width:50%;background:#4a4a4a"></span></div><span class="h">55</span></div>
+    <div class="band"><span class="nm">Ridgeline</span><div class="barbox"><span style="width:32%;background:#6b5d44"></span></div><span class="h">35</span></div>
+    <div class="band"><span class="nm">Thicket</span><div class="barbox"><span style="width:16%;background:#3a5a3a"></span></div><span class="h">18</span></div>
+    <div class="band"><span class="nm">Lowlands</span><div class="barbox"><span style="width:11%;background:#5a7a4a"></span></div><span class="h">12</span></div>
+    <div class="band"><span class="nm">Waterway</span><div class="barbox"><span style="width:9%;background:#3a8fb7"></span></div><span class="h">10</span></div>
+    <div class="band"><span class="nm">Shoreline</span><div class="barbox"><span style="width:7%;background:#bdaa8a"></span></div><span class="h">8</span></div>
+    <div class="band"><span class="nm">Shallows</span><div class="barbox"><span style="width:5%;background:#2a3a4a"></span></div><span class="h">5</span></div>
+    <div class="band"><span class="nm">Deep Water</span><div class="barbox"><span style="width:2%;background:#1a2a3a"></span></div><span class="h">2</span></div>
+  </div></div>
+  <p style="font-size:13px">Los hex se dibujan en altura ascendente, así que un Summit pinta su muro de cliff sobre el Lowlands vecino. La cara de cliff visible es un quad de alto <code>(hexH − vecinoH)</code> en los bordes S/SE/SW.</p>
+
+  <h2>Overlays tileados (Pass 2)</h2>
+  <p>Estos cinco biomas reciben una <code>TilingSprite</code> en world-space recortada a una máscara por bioma:</p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+    <span class="chip green">GRASSLAND</span><span class="chip">FOREST</span><span class="chip amber">HILL</span><span class="chip">MOUNTAIN</span><span class="chip">SNOW</span>
+  </div>
+  <p style="font-size:13px">Cada uno mezcla varias capas de textura: base + <code>*-macro-noise</code> + <code>*-micro-noise</code> + <code>*-patch-{dry,dense}</code>
+  (ver <a href="assets.html">Assets → terreno</a>). RIVER/SEA/DEEP_SEA en cambio van por el filtro de agua.</p>
+
+  <h2>Filtro de agua (GLSL animado) <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>water-filter.ts</code></span></h2>
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Dos variantes cacheadas</h3>
+      <ul class="tight">
+        <li><b>deepSea</b> — agua profunda</li>
+        <li><b>coastal</b> — costa / shallows</li>
+      </ul>
+      <p style="margin:8px 0 0;font-size:13px">Ambos viven de por vida en <code>ctx.waterFilters</code>; el ticker camina ese array y actualiza <code>uTime</code> cada frame para animar el oleaje. <b>Nunca</b> se recrea por draw (recompilaría el <code>GlProgram</code>).</p>
+    </div>
+    <div class="panel">
+      <h3>Capas de decoración de agua</h3>
+      <p style="margin:0;font-size:13px">Sobre el filtro, RIVER esparce <code>cyan_ripple</code>, <code>current_mark</code>, <code>shimmer_glint</code>, <code>depth_wisp</code>, <code>foam_fleck</code>; SEA esparce <code>sea_shimmer</code> (ver tabla de scatter abajo).</p>
+    </div>
+  </div>
+
+  <h2>Reglas de scatter de decoración <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— <code>details.json → rules</code></span></h2>
+  <div class="t-wrap"><table>
+    <thead><tr><th>Bioma</th><th>capa</th><th class="num">density</th><th class="num">max/hex</th><th class="num">scale</th><th class="num">alpha</th><th>pool (peso)</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="3"><span class="dot" style="background:#5a7a4a"></span> GRASSLAND</td><td>embedded</td><td class="num">0.55</td><td class="num">2</td><td class="num">0.04–0.07</td><td class="num">1.0</td><td>grass×5 · flower×1</td></tr>
+      <tr><td>small</td><td class="num">0.18</td><td class="num">1</td><td class="num">0.07–0.11</td><td class="num">1.0</td><td>grass×6 · flower×2 · rock×1</td></tr>
+      <tr><td>landmark</td><td class="num">0.03</td><td class="num">1</td><td class="num">0.10–0.15</td><td class="num">1.0</td><td>rock×1</td></tr>
+      <tr><td><span class="dot" style="background:#6b5d44"></span> HILL</td><td>small</td><td class="num">0.07</td><td class="num">1</td><td class="num">0.035–0.075</td><td class="num">0.22–0.45</td><td>grass×50 · rock×18 · flower×2</td></tr>
+      <tr><td><span class="dot" style="background:#3a5a3a"></span> FOREST</td><td>small</td><td class="num">0.22</td><td class="num">1</td><td class="num">0.07–0.16</td><td class="num">0.40–0.70</td><td>pine×55 · shrub×20 · moss×8 · leaf×8 · undergrowth×5 · needles×4</td></tr>
+      <tr><td><span class="dot" style="background:#3a8fb7"></span> RIVER</td><td>small</td><td class="num">0.12</td><td class="num">1</td><td class="num">0.06–0.14</td><td class="num">0.45–0.85</td><td>ripple×34 · current×26 · shimmer×18 · wisp×14 · foam×8</td></tr>
+      <tr><td><span class="dot" style="background:#2a3a4a"></span> SEA</td><td>small</td><td class="num">0.025</td><td class="num">1</td><td class="num">0.07–0.12</td><td class="num">0.18–0.36</td><td>sea_shimmer×1</td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:13px"><code>density</code> = probabilidad por hex · <code>scale</code>/<code>alpha</code> se samplean del rango · el <code>spritePool</code> es una elección ponderada (<code>firstN</code> limita a las primeras N variantes de la categoría). GRASSLAND usa chunks de <code>6</code> (<code>grassChunkSize</code>).</p>
+
+  <footer>Fuentes: <code>terrain.json</code> (paleta/alturas/mods), <code>details.json</code> (scatter), <code>water-filter.ts</code> (GLSL), <code>render/drawTerrain.ts</code> + <code>render/drawDetails.ts</code>.</footer>
+</div>
+</body>
+</html>
